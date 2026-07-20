@@ -23,12 +23,13 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design. Tracked on kbRelay b
 ## Run
 
 ```bash
-pnpm install
-uv sync --project apps/tts
-uv run --project apps/tts python -m piper.download_voices en_US-lessac-medium --data-dir voice/piper
+make setup        # one-time: pnpm install, TTS deps, Piper voice model
+make dev          # server (:3789) + web (:5173) + TTS sidecar (:3790)   [terminal 1]
+make kiosk        # fullscreen LCARS display                             [terminal 2]
+make computer     # the Claude session that IS the Computer              [terminal 3]
 
-pnpm dev          # server (:3789) + web (:5173) + TTS sidecar (:3790)
-pnpm kiosk        # opens the webapp fullscreen in Chrome kiosk mode
+make demo         # tour the display without Claude (panels, speech, chimes)
+make health       # is everything up?
 ```
 
 The TTS sidecar is optional at runtime — if it's down, spoken lines degrade to
