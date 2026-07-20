@@ -214,3 +214,118 @@ body {
   letter-spacing: 0.12em;
   opacity: 0.9;
 }
+
+/* ---------- Status panel (idle board) ---------- */
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+}
+.status-clock {
+  font-size: clamp(90px, 14vw, 200px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+  line-height: 0.9;
+}
+.status-date {
+  font-size: clamp(24px, 3vw, 42px);
+  color: var(--lcars-lavender);
+}
+.status-stardate {
+  font-size: clamp(18px, 2vw, 28px);
+  color: var(--lcars-blue);
+  letter-spacing: 0.18em;
+}
+.status-lines {
+  margin-top: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.status-line {
+  font-size: 20px;
+  color: var(--lcars-gold);
+}
+
+/* ---------- Text panel ---------- */
+
+.text-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 20px;
+  max-width: 70ch;
+}
+.text-panel-title {
+  font-size: clamp(30px, 4vw, 56px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.text-panel-body {
+  font-size: clamp(20px, 2.4vw, 34px);
+  color: var(--lcars-gold);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+
+/* ---------- Alert panel ---------- */
+
+.alert-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 24px;
+}
+.alert-title {
+  font-size: clamp(60px, 9vw, 140px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.alert-message {
+  font-size: clamp(20px, 2.4vw, 34px);
+  color: var(--lcars-peach);
+}
+.alert-red .alert-title {
+  color: #ff3333;
+  animation: red-alert-pulse 1.1s ease-in-out infinite;
+}
+.alert-yellow .alert-title {
+  color: var(--lcars-cream);
+  animation: red-alert-pulse 1.6s ease-in-out infinite;
+}
+@keyframes red-alert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---------- Voice caption + link status ---------- */
+
+.voice-caption {
+  position: fixed;
+  bottom: 84px;
+  left: calc(var(--sidebar-w) + 40px);
+  right: 40px;
+  text-align: center;
+  font-size: 26px;
+  color: var(--lcars-peach);
+  text-transform: none;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 18px rgba(255, 153, 0, 0.35);
+}
+
+.offline-badge {
+  position: fixed;
+  top: 34px;
+  right: 40px;
+  font-size: 15px;
+  color: var(--lcars-red);
+  animation: standby-blink 1.2s steps(1) infinite;
+}

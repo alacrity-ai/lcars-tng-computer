@@ -1,12 +1,15 @@
 import { LcarsFrame } from "./components/LcarsFrame";
-import { BootPanel } from "./panels/BootPanel";
+import { Panel } from "./panels/registry";
+import { useSocket } from "./useSocket";
 
-// Phase 0: static shell. Phase 1 replaces the hardcoded panel with the
-// WebSocket-driven panel registry.
 export function App() {
+  const { screen, voice, connected } = useSocket();
+
   return (
     <LcarsFrame title="LCARS 40274">
-      <BootPanel />
+      <Panel view={screen.view} props={screen.props} />
+      {voice && <div className="voice-caption">{voice.text}</div>}
+      {!connected && <div className="offline-badge">Link offline</div>}
     </LcarsFrame>
   );
 }

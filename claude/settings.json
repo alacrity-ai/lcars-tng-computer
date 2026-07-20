@@ -1,5 +1,13 @@
 {
   "permissions": {
-    "allow": []
-  }
+    "allow": [
+      "mcp__console__display",
+      "mcp__console__speak",
+      "mcp__console__chime",
+      "mcp__console__screen_state",
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+  "enableAllProjectMcpServers": true
 }

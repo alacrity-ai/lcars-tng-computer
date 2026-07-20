@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MCP server exposing the Computer's console: display / speak / chime / screen_state (built in Phase 1)",
+  "description": "MCP server exposing the Computer's console: display / speak / chime / screen_state",
   "scripts": {
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit"
   },
   "dependencies": {
-    "@tng/shared": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@tng/shared": "workspace:*",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
 }
