@@ -1,12 +1,11 @@
 import type { ChimeName } from "@tng/shared";
 
-// Earcon files live in public/sounds. Only acknowledge exists so far;
-// the rest fall back to it until Phase 2 adds the full set.
+// Earcon files live in public/sounds; anything missing falls back to acknowledge.
 const SOUNDS: Record<ChimeName, string> = {
-  acknowledge: "/sounds/acknowledge.mp3",
-  complete: "/sounds/complete.mp3",
-  error: "/sounds/error.mp3",
-  "red-alert": "/sounds/red-alert.mp3",
+  acknowledge: "/sounds/acknowledge.mp3", // real TNG beep
+  complete: "/sounds/complete.wav", // generated — see scripts/gen-earcons.mjs
+  error: "/sounds/error.wav",
+  "red-alert": "/sounds/red-alert.wav",
 };
 
 const FALLBACK = SOUNDS.acknowledge;

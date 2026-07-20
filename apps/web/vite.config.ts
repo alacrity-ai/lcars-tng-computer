@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://127.0.0.1:3789",
+      "/audio": "http://127.0.0.1:3789",
       "/ws": { target: "ws://127.0.0.1:3789", ws: true },
     },
   },
