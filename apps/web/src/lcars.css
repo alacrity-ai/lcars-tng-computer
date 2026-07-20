@@ -157,6 +157,26 @@ body {
   flex-direction: column;
 }
 
+/* Fast businesslike sweep-in when the active panel changes */
+.panel-wipe {
+  height: 100%;
+  animation: panel-wipe-in 0.22s ease-out;
+}
+@keyframes panel-wipe-in {
+  from { opacity: 0; transform: translateX(-28px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Rare single-block activity blink (opacity only) */
+.lcars-sidebar .block.flicker {
+  animation: block-flicker 0.95s linear;
+}
+@keyframes block-flicker {
+  0%, 100% { opacity: 1; }
+  20%, 60% { opacity: 0.55; }
+  40%, 80% { opacity: 1; }
+}
+
 /* ---------- Boot panel ---------- */
 
 .boot-panel {
@@ -249,6 +269,36 @@ body {
   font-size: 20px;
   color: var(--lcars-gold);
 }
+.status-colon {
+  animation: colon-blink 1s steps(1) infinite;
+}
+@keyframes colon-blink {
+  50% { opacity: 0.15; }
+}
+
+/* ---------- Data cascade (Okudagram) ---------- */
+
+.data-cascade {
+  margin-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+}
+.cascade-row {
+  display: flex;
+  gap: 26px;
+}
+.cascade-cell {
+  min-width: 4ch;
+  text-align: right;
+}
+.cascade-gold { color: var(--lcars-gold); }
+.cascade-peach { color: var(--lcars-peach); }
+.cascade-lavender { color: var(--lcars-lavender); }
+.cascade-blue { color: var(--lcars-blue); }
 
 /* ---------- Text panel ---------- */
 
@@ -320,6 +370,61 @@ body {
   text-transform: none;
   letter-spacing: 0.04em;
   text-shadow: 0 0 18px rgba(255, 153, 0, 0.35);
+}
+
+/* Animated bar cluster shown while speech audio is playing */
+.voice-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+  margin-right: 16px;
+  vertical-align: middle;
+}
+.voice-bars i {
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--lcars-gold);
+  transform-origin: bottom;
+  animation: voice-bar 0.9s ease-in-out infinite;
+}
+.voice-bars i:nth-child(2) { animation-delay: 0.14s; }
+.voice-bars i:nth-child(3) { animation-delay: 0.28s; }
+.voice-bars i:nth-child(4) { animation-delay: 0.42s; }
+.voice-bars i:nth-child(5) { animation-delay: 0.56s; }
+@keyframes voice-bar {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+
+/* ---------- Text bloom on display type ---------- */
+
+.lcars-header .title,
+.boot-wordmark,
+.status-clock,
+.text-panel-title,
+.alert-title {
+  text-shadow: 0 0 22px rgba(255, 204, 153, 0.28);
+}
+
+/* ---------- Reduced motion: ambient animation off, content intact ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-lines .line {
+    animation: none;
+    opacity: 1;
+  }
+  .boot-standby,
+  .offline-badge,
+  .status-colon,
+  .alert-red .alert-title,
+  .alert-yellow .alert-title,
+  .voice-bars i,
+  .lcars-sidebar .block.flicker,
+  .panel-wipe {
+    animation: none;
+  }
 }
 
 .offline-badge {

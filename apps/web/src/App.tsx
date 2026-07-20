@@ -7,8 +7,18 @@ export function App() {
 
   return (
     <LcarsFrame title="LCARS 40274">
-      <Panel view={screen.view} props={screen.props} />
-      {voice && <div className="voice-caption">{voice.text}</div>}
+      {/* keyed by view so switching panels re-runs the wipe-in */}
+      <div key={screen.view} className="panel-wipe">
+        <Panel view={screen.view} props={screen.props} />
+      </div>
+      {voice && (
+        <div className="voice-caption">
+          <span className="voice-bars" aria-hidden>
+            <i /><i /><i /><i /><i />
+          </span>
+          {voice.text}
+        </div>
+      )}
       {!connected && <div className="offline-badge">Link offline</div>}
     </LcarsFrame>
   );
