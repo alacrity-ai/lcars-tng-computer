@@ -31,7 +31,7 @@ kiosk:
 	bash scripts/kiosk.sh
 
 computer:
-	cd claude && claude
+	cd claude && claude --dangerously-skip-permissions
 
 health:
 	@printf "server:  " && (curl -sf --max-time 2 http://127.0.0.1:3789/health || echo "DOWN") && echo

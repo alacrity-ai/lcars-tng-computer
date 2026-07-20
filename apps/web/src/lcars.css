@@ -258,7 +258,8 @@ body {
   justify-content: center;
   height: 100%;
   gap: 20px;
-  max-width: 70ch;
+  width: 100%;
+  padding-right: 24px;
 }
 .text-panel-title {
   font-size: clamp(30px, 4vw, 56px);
