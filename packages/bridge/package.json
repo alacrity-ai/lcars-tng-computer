@@ -1,0 +1,15 @@
+{
+  "name": "@tng/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Channel MCP server: voice transcripts from the ear daemon → running Claude session (built in Phase 3)",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.6.0"
+  }
+}

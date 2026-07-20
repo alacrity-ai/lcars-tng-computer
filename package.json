@@ -1,0 +1,13 @@
+{
+  "name": "tng-computer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal Star Trek TNG ship's computer — Claude Code brain, LCARS webapp terminal",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "kiosk": "bash scripts/kiosk.sh"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

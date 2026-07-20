@@ -1,0 +1,11 @@
+[project]
+name = "tng-ear"
+version = "0.1.0"
+description = "TNG Computer ear daemon: wake word -> VAD -> STT -> bridge (built in Phase 3)"
+requires-python = ">=3.11"
+dependencies = []
+
+# Phase 3 adds: openwakeword, silero-vad, faster-whisper, sounddevice, httpx
+
+[dependency-groups]
+dev = []

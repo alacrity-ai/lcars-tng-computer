@@ -1,0 +1,33 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+.venv/
+__pycache__/
+*.egg-info/
+
+# secrets & local config
+.env
+.env.*
+!.env.example
+*.token
+spotify-tokens.json
+
+# voice assets — never commit reference clips, cloned voices, or model weights
+# (earcons/sound effects under apps/web/public are fine to commit)
+voice/reference/*
+voice/training/*
+!voice/reference/.gitkeep
+!voice/training/.gitkeep
+!voice/training/NOTES.md
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Windows download sidecars
+*Zone.Identifier
+
+# misc
+.DS_Store
+*.log

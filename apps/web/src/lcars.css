@@ -1,0 +1,216 @@
+/* LCARS — Library Computer Access/Retrieval System
+   Classic TNG palette + geometry. Everything is uppercase Antonio on black. */
+
+:root {
+  --lcars-gold: #ff9900;
+  --lcars-lavender: #cc99cc;
+  --lcars-blue: #9999cc;
+  --lcars-red: #cc6666;
+  --lcars-peach: #ffcc99;
+  --lcars-cream: #ffcc66;
+  --lcars-bg: #000000;
+  --lcars-text: #ff9900;
+  --sidebar-w: 190px;
+  --bar-h: 26px;
+  --gutter: 8px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--lcars-bg);
+  overflow: hidden;
+  cursor: none; /* it's a wall terminal, not a desktop app */
+}
+
+body {
+  font-family: "Antonio", "Arial Narrow", sans-serif;
+  color: var(--lcars-text);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+/* ---------- Frame: sidebar + elbow + header + content ---------- */
+
+.lcars-frame {
+  display: grid;
+  height: 100vh;
+  padding: var(--gutter);
+  gap: var(--gutter);
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: 90px 1fr 60px;
+  grid-template-areas:
+    "elbow-top header"
+    "sidebar content"
+    "elbow-bottom footer";
+}
+
+/* Top elbow: solid block with a scooped inner corner cut out of it */
+.lcars-elbow-top {
+  grid-area: elbow-top;
+  background: var(--lcars-gold);
+  border-top-left-radius: 70px;
+  position: relative;
+}
+.lcars-elbow-top::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 60px;
+  height: var(--bar-h);
+  background: var(--lcars-bg);
+  border-top-left-radius: 26px;
+}
+
+.lcars-elbow-bottom {
+  grid-area: elbow-bottom;
+  background: var(--lcars-blue);
+  border-bottom-left-radius: 70px;
+  position: relative;
+}
+.lcars-elbow-bottom::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 60px;
+  height: var(--bar-h);
+  background: var(--lcars-bg);
+  border-bottom-left-radius: 26px;
+}
+
+.lcars-header {
+  grid-area: header;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--gutter);
+}
+.lcars-header .bar {
+  height: var(--bar-h);
+  border-radius: calc(var(--bar-h) / 2);
+}
+.lcars-header .title {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--lcars-peach);
+  line-height: 0.9;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+.lcars-footer {
+  grid-area: footer;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+}
+.lcars-footer .bar {
+  height: var(--bar-h);
+  border-radius: calc(var(--bar-h) / 2);
+}
+
+/* Sidebar: stacked pill blocks with decorative codes */
+.lcars-sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+.lcars-sidebar .block {
+  flex: 1;
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 6px 12px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--lcars-bg);
+}
+.lcars-sidebar .block.tall {
+  flex: 2.2;
+}
+
+.bg-gold { background: var(--lcars-gold); }
+.bg-lavender { background: var(--lcars-lavender); }
+.bg-blue { background: var(--lcars-blue); }
+.bg-red { background: var(--lcars-red); }
+.bg-peach { background: var(--lcars-peach); }
+.bg-cream { background: var(--lcars-cream); }
+
+/* ---------- Content area ---------- */
+
+.lcars-content {
+  grid-area: content;
+  padding: 24px 12px 24px 28px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Boot panel ---------- */
+
+.boot-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 28px;
+}
+.boot-wordmark {
+  font-size: clamp(48px, 8vw, 110px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+  line-height: 0.95;
+}
+.boot-sub {
+  font-size: clamp(18px, 2.2vw, 30px);
+  color: var(--lcars-lavender);
+  letter-spacing: 0.22em;
+}
+.boot-lines {
+  margin-top: 12px;
+  font-size: 19px;
+  color: var(--lcars-blue);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.boot-lines .line {
+  opacity: 0;
+  animation: boot-line-in 0.3s ease-out forwards;
+}
+.boot-lines .line .ok {
+  color: var(--lcars-gold);
+  margin-left: 12px;
+}
+@keyframes boot-line-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.boot-standby {
+  margin-top: 18px;
+  font-size: 22px;
+  color: var(--lcars-gold);
+  animation: standby-blink 1.6s steps(1) infinite;
+}
+@keyframes standby-blink {
+  50% { opacity: 0.25; }
+}
+
+/* decorative LCARS numeric codes */
+.lcars-code {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  opacity: 0.9;
+}
