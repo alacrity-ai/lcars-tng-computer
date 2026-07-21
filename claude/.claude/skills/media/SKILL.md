@@ -77,6 +77,10 @@ one-line spoken confirmation is enough.
 
 - "Pause" / "resume" / "continue" while a video is up → the `media` tool
   (`play` is resume).
+- "Faster" / "slower" / "double speed" / "normal speed" → `media` action
+  `speed` with `rate` (0.25–2, 1 = normal; "increase" → 1.5 unless asked
+  for more). The rate resets when a new video or panel is displayed —
+  re-send it after a re-display (e.g. a seek via `startSeconds`).
 - "Stop" / "that's enough" / "be quiet" → `media stop`. Stop also halts any
   in-progress **speech** immediately — it is the silence command even when no
   video is playing.

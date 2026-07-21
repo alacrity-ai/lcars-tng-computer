@@ -369,12 +369,15 @@ export interface ChimeMessage {
   name: ChimeName;
 }
 
-/** Playback control: youtube panel ("computer, pause") and speech ("stop"). */
-export type MediaAction = "pause" | "play" | "stop";
+/** Playback control: youtube panel ("computer, pause") and speech ("stop").
+    "speed" sets the video playback rate (rate required, YouTube's 0.25–2). */
+export type MediaAction = "pause" | "play" | "stop" | "speed";
 
 export interface MediaMessage {
   type: "media";
   action: MediaAction;
+  /** speed only: playback rate multiplier. */
+  rate?: number;
 }
 
 /** Voice nudges for the live map panel ("zoom in", "go west", "go to
@@ -488,6 +491,8 @@ export interface ChimeRequest {
 
 export interface MediaRequest {
   action: MediaAction;
+  /** speed only: playback rate multiplier (YouTube honors 0.25–2). */
+  rate?: number;
 }
 
 export interface MapControlRequest {

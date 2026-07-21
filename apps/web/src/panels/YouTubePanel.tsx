@@ -16,10 +16,18 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
 
   useEffect(() => {
     function onMedia(ev: Event) {
-      const action = (ev as CustomEvent<MediaAction>).detail;
-      const func = action === "pause" ? "pauseVideo" : "playVideo";
+      const { action, rate } = (ev as CustomEvent<{ action: MediaAction; rate?: number }>)
+        .detail;
+      // "stop" pauses rather than resumes (it used to fall through to
+      // playVideo); stopVideo would unload the player entirely.
+      const command: { func: string; args: unknown[] } =
+        action === "play"
+          ? { func: "playVideo", args: [] }
+          : action === "speed"
+            ? { func: "setPlaybackRate", args: [rate ?? 1] }
+            : { func: "pauseVideo", args: [] };
       frameRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event: "command", func, args: [] }),
+        JSON.stringify({ event: "command", ...command }),
         "https://www.youtube.com",
       );
     }

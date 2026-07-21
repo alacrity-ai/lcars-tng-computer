@@ -150,12 +150,16 @@ server.registerTool(
     description:
       "Control playback: pause or play (resume) the youtube panel, or stop — which also " +
       "halts any in-progress speech immediately. Use 'stop' when the user says 'stop', " +
-      "'that's enough', 'be quiet', etc. while the Computer is reading or media is playing.",
+      "'that's enough', 'be quiet', etc. while the Computer is reading or media is playing. " +
+      "'speed' sets the video playback rate (rate required, 0.25–2; 1 = normal — 'faster' → " +
+      "1.5, 'double speed' → 2, 'normal speed' → 1). The rate resets whenever a new video " +
+      "or panel is displayed.",
     inputSchema: {
-      action: z.enum(["pause", "play", "stop"]),
+      action: z.enum(["pause", "play", "stop", "speed"]),
+      rate: z.number().min(0.25).max(2).optional(),
     },
   },
-  async ({ action }) => textResult(await call("/api/console/media", { action })),
+  async ({ action, rate }) => textResult(await call("/api/console/media", { action, rate })),
 );
 
 server.registerTool(

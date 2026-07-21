@@ -117,7 +117,9 @@ export function useSocket() {
           // "stop" also halts any in-flight speech; pause/play stay panel-scoped.
           if (msg.action === "stop") stopSpeechRef.current?.();
           // Loose coupling: whichever panel is playing media listens for this.
-          window.dispatchEvent(new CustomEvent("tng-media", { detail: msg.action }));
+          window.dispatchEvent(
+            new CustomEvent("tng-media", { detail: { action: msg.action, rate: msg.rate } }),
+          );
         } else if (msg.type === "map_control") {
           // Same loose coupling: the live MapPanel animates in place.
           window.dispatchEvent(

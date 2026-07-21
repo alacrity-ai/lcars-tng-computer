@@ -214,9 +214,18 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   });
 
   app.post<{ Body: MediaRequest }>("/api/console/media", async (req, reply) => {
-    const { action } = req.body ?? {};
-    if (action !== "pause" && action !== "play" && action !== "stop") {
-      return reply.code(400).send({ error: "action must be pause, play, or stop" });
+    const { action, rate } = req.body ?? {};
+    if (action !== "pause" && action !== "play" && action !== "stop" && action !== "speed") {
+      return reply.code(400).send({ error: "action must be pause, play, stop, or speed" });
+    }
+    if (action === "speed") {
+      // YouTube's supported range; anything else the player silently ignores,
+      // which would read as the command not working.
+      if (typeof rate !== "number" || rate < 0.25 || rate > 2) {
+        return reply.code(400).send({ error: "speed requires rate between 0.25 and 2" });
+      }
+      hub.broadcast({ type: "media", action, rate });
+      return { ok: true, action, rate };
     }
     if (action === "stop") {
       cancelActiveReading();
