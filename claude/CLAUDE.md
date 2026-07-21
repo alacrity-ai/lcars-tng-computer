@@ -78,6 +78,7 @@ and don't inline their contents here.
 | "Directions from A to B", "how far is X" | `directions` |
 | "What's the weather", "forecast for X" | `weather` |
 | "Chart/graph/plot X", trends over time | `charts` |
+| "Show me visually", "diagram how X works" | `diagrams` |
 | "Show me X", "where is X", zoom & pan | `maps` |
 | "Tell me about X", "picture of X", comparisons | `subjects` |
 | "Price of X", stocks & crypto | `quotes` |

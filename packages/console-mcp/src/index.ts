@@ -44,7 +44,10 @@ server.registerTool(
       "map {lat, lng, zoom?, title?, markers?: [{lat, lng, label?}]} — LCARS-tinted world map; " +
       "zoom 0=world…18=street; add a labeled marker for point places, none for regions, " +
       "image {url, title?, caption?, body?, source?} — framed image; with body it becomes a " +
-      "library record (blurb beside image). For wiki subjects prefer show_profile instead. " +
+      "library record (blurb beside image). For wiki subjects prefer show_profile instead, " +
+      "diagram {title?, svg, caption?} — compose complete inline SVG (viewBox required, the " +
+      "wall scales it) for visual explanations the chart panel can't express: recursion " +
+      "trees, flow diagrams, geometry, architectures. " +
       "Props are view-specific.",
     // Derived from the webapp's installed panels — never offer a view the wall
     // would render as a "not yet installed" stub.

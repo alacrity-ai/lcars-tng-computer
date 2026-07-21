@@ -13,6 +13,7 @@ import { ChartPanel } from "./ChartPanel";
 import { MapPanel } from "./MapPanel";
 import { ImagePanel } from "./ImagePanel";
 import { QuotePanel } from "./QuotePanel";
+import { DiagramPanel } from "./DiagramPanel";
 
 function BlankPanel() {
   return null;
@@ -40,6 +41,7 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   map: MapPanel,
   image: ImagePanel,
   quote: QuotePanel,
+  diagram: DiagramPanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

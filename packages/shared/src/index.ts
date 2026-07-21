@@ -34,6 +34,7 @@ export const PANEL_VIEWS = [
   "map",
   "image",
   "quote",
+  "diagram",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -287,6 +288,18 @@ export interface NowPlayingPanelProps {
 }
 
 /** Panels not yet built take free-form props. */
+/** Catch-all visual explainer: the model composes SVG markup directly —
+    recursion trees, flow diagrams, geometry, protocol walkthroughs — anything
+    the structured chart panel can't express. */
+export interface DiagramPanelProps {
+  title?: string;
+  /** Complete inline <svg> markup. MUST carry a viewBox (the wall scales it
+      to fit); scripts and event handlers are stripped before render. */
+  svg: string;
+  /** One-line explanation shown under the diagram. */
+  caption?: string;
+}
+
 export type PanelProps = Record<string, unknown>;
 
 /** Per-character speech timing for karaoke highlighting. */
