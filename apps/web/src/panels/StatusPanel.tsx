@@ -12,7 +12,7 @@ function stardate(d: Date): string {
   return ((year - 1987) * 1000 + frac * 1000).toFixed(2);
 }
 
-export function StatusPanel({ lines }: StatusPanelProps) {
+export function StatusPanel({ lines, working }: StatusPanelProps) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -38,9 +38,16 @@ export function StatusPanel({ lines }: StatusPanelProps) {
       </div>
       <div className="status-stardate">Stardate {stardate(now)}</div>
       <div className="status-lines">
-        {(lines ?? ["All systems nominal", "Awaiting instruction"]).map((l) => (
-          <div key={l} className="status-line">{l}</div>
-        ))}
+        {working ? (
+          <>
+            <div className="status-line status-line-working">Processing request</div>
+            <div className="status-line">Stand by</div>
+          </>
+        ) : (
+          (lines ?? ["All systems nominal", "Awaiting instruction"]).map((l) => (
+            <div key={l} className="status-line">{l}</div>
+          ))
+        )}
       </div>
       <DataCascade columns={6} rows={4} />
     </div>

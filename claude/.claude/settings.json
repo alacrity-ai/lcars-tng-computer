@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__console__display",
+      "mcp__console__speak",
+      "mcp__console__chime",
+      "mcp__console__screen_state",
+      "mcp__console__open_url",
+      "mcp__console__media",
+      "mcp__console__read_article",
+      "mcp__console__map_control",
+      "mcp__console__show_profile",
+      "mcp__console__show_image",
+      "mcp__console__show_quote",
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:3789/api/console/working -H 'content-type: application/json' -d '{\"active\":true}' >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:3789/api/console/working -H 'content-type: application/json' -d '{\"active\":false}' >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

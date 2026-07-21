@@ -5,12 +5,13 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 PIPER_VOICE ?= en_US-lessac-medium
 
-.PHONY: help setup dev kiosk computer health demo earcons clean
+.PHONY: help setup dev down kiosk computer health demo earcons clean
 
 help:
 	@echo "TNG Computer"
 	@echo "  make setup     - install everything (pnpm, tts deps, piper voice model)"
 	@echo "  make dev       - run the stack: server :3789, web :5173, tts :3790 (foreground)"
+	@echo "  make down      - stop everything (server, web, tts, dev orchestrator)"
 	@echo "  make kiosk     - open the LCARS display fullscreen (run 'make dev' first)"
 	@echo "  make computer  - launch the Claude session that IS the Computer"
 	@echo "  make health    - check server / tts / display status"
@@ -26,6 +27,14 @@ setup:
 
 dev:
 	pnpm dev
+
+# Kill the orchestrator first so it can't respawn/react, then anything on the ports.
+down:
+	@-pkill -f "scripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator: not running"
+	@-fuser -k -TERM 3789/tcp 2>/dev/null && echo "server  (:3789): stopped" || echo "server  (:3789): not running"
+	@-fuser -k -TERM 5173/tcp 2>/dev/null && echo "web     (:5173): stopped" || echo "web     (:5173): not running"
+	@-fuser -k -TERM 3790/tcp 2>/dev/null && echo "tts     (:3790): stopped" || echo "tts     (:3790): not running"
+	@echo "✔ stack down"
 
 kiosk:
 	bash scripts/kiosk.sh
