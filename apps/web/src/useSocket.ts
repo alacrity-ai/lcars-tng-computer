@@ -273,12 +273,21 @@ export function useSocket() {
     window.addEventListener("tng-video-error", onVideoError);
 
     // Natural video end relays to the server, which advances the play queue.
+    // Unlike the other relays this one retries through a reconnect window:
+    // it fires exactly once per video, so dropping it strands the queue.
     const onVideoEnded = (e: Event) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       const { videoId } = ((e as CustomEvent).detail ?? {}) as { videoId?: string };
       if (!videoId) return;
-      ws.send(JSON.stringify({ type: "video_ended", videoId }));
+      let attempts = 0;
+      const trySend = () => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "video_ended", videoId }));
+        } else if (attempts++ < 15) {
+          setTimeout(trySend, 1000);
+        }
+      };
+      trySend();
     };
     window.addEventListener("tng-video-ended", onVideoEnded);
 

@@ -29,19 +29,41 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
 
   // Subscribe to the player's event stream so embed failures (101/150 =
   // embedding disabled, 100 = not found) are reported instead of leaving a
-  // dead "Video unavailable" frame — the server swaps in the next result.
+  // dead "Video unavailable" frame — the server swaps in the next result —
+  // and so natural end advances the play queue.
   useEffect(() => {
     const subscribe = () =>
       frameRef.current?.contentWindow?.postMessage(
         JSON.stringify({ event: "listening", id: videoId }),
         "https://www.youtube.com",
       );
-    // The player needs a beat to boot before it honors "listening".
-    const timer = setInterval(subscribe, 700);
-    const stopAfter = setTimeout(() => clearInterval(timer), 5_000);
+    // The player honors "listening" only once booted, and playback works fine
+    // without the subscription — so a failed handshake is silent and costs us
+    // end/error events. Retry until the player's first message proves the
+    // stream is live (a slow embed boot outlasts any fixed window).
+    let acked = false;
+    let timer: number | undefined;
+    const startHandshake = () => {
+      acked = false;
+      if (timer !== undefined) clearInterval(timer);
+      timer = window.setInterval(() => {
+        if (acked) {
+          clearInterval(timer);
+          timer = undefined;
+        } else {
+          subscribe();
+        }
+      }, 700);
+    };
+    startHandshake();
 
     let reported = false;
     let endedReported = false;
+    const reportEnded = () => {
+      if (endedReported) return;
+      endedReported = true;
+      window.dispatchEvent(new CustomEvent("tng-video-ended", { detail: { videoId } }));
+    };
     const onMessage = (ev: MessageEvent) => {
       if (ev.origin !== "https://www.youtube.com") return;
       let data: { event?: string; info?: unknown };
@@ -50,6 +72,7 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
       } catch {
         return;
       }
+      acked = true;
       if (data?.event === "onError" && !reported) {
         reported = true;
         window.dispatchEvent(
@@ -58,17 +81,27 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
           }),
         );
       }
-      // Natural end (onStateChange → 0 = ENDED): the server advances the
-      // play queue. Once per mount — replays after a seek don't re-fire.
-      if (data?.event === "onStateChange" && Number(data.info) === 0 && !endedReported) {
-        endedReported = true;
-        window.dispatchEvent(new CustomEvent("tng-video-ended", { detail: { videoId } }));
+      // Natural end: the server advances the play queue. Once per mount —
+      // replays after a seek don't re-fire. Detected two ways, because the
+      // discrete ENDED state change is a single message that can be missed:
+      // the periodic infoDelivery stream also carries playerState.
+      if (data?.event === "onStateChange" && Number(data.info) === 0) reportEnded();
+      if (
+        data?.event === "infoDelivery" &&
+        (data.info as { playerState?: number } | undefined)?.playerState === 0
+      ) {
+        reportEnded();
       }
     };
     window.addEventListener("message", onMessage);
+    // Re-handshake whenever the iframe (re)loads — a reload resets the
+    // player's listener list even though our effect never re-ran.
+    const frame = frameRef.current;
+    const onLoad = () => startHandshake();
+    frame?.addEventListener("load", onLoad);
     return () => {
-      clearInterval(timer);
-      clearTimeout(stopAfter);
+      if (timer !== undefined) clearInterval(timer);
+      frame?.removeEventListener("load", onLoad);
       window.removeEventListener("message", onMessage);
     };
   }, [videoId]);
