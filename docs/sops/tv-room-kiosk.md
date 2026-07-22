@@ -15,9 +15,14 @@ Windows forwards the port. In an **elevated** PowerShell on the office PC:
 powershell -ExecutionPolicy Bypass -File scripts\expose-lan.ps1
 ```
 
-It adds a portproxy (`0.0.0.0:5173 → 127.0.0.1:5173`, riding WSL2's localhost
-forwarding so it survives WSL restarts and IP changes), opens the firewall
-(Private profile), and prints the URL(s) to use on the TV. Undo with `-Remove`.
+It adds a portproxy (`0.0.0.0:5173 → [::1]:5173`, v4tov6 — WSL2's localhost
+relay binds only the IPv6 loopback, and targeting `::1` survives WSL restarts
+and IP changes), opens the firewall (Private profile), and prints the URL(s)
+to use on the TV. Undo with `-Remove`.
+
+> **Do not** use a v4tov4 proxy to `127.0.0.1`: the `0.0.0.0` listener covers
+> IPv4 loopback, so it forwards to itself in an infinite loop —
+> `ERR_EMPTY_RESPONSE` on clients and a storm of churning loopback sockets.
 
 > **Alternative:** WSL2 *mirrored networking* (`.wslconfig` →
 > `networkingMode=mirrored`, Win11 22H2+) makes WSL share the host's LAN
