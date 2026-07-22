@@ -1,9 +1,9 @@
 {
   "name": "@tng/bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Bridge MCP server: blocking await_message event loop + local message queue (office PTT now, Tricorder cloud link in TNGC-14)",
+  "description": "Bridge MCP server: blocking await_message event loop + local message queue + outbound WSS link to the Tricorder cloud queue",
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@tng/contract": "workspace:*",
+    "ws": "^8.18.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

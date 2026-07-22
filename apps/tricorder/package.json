@@ -1,0 +1,22 @@
+{
+  "name": "@tng/tricorder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tricorder cloud API: Hono Worker + per-tenant Durable Object queue + D1 identity, at tricorder.lalalimited.com",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tng/contract": "workspace:*",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250705.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  }
+}

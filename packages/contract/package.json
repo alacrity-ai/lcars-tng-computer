@@ -1,0 +1,17 @@
+{
+  "name": "@tng/contract",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The tiny versioned message contract between the Tricorder cloud queue and the bridge — the ONLY coupling across that boundary",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

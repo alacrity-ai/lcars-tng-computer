@@ -52,8 +52,13 @@ lan:
 	@echo "windows IPv4 candidates (use one of these on the TV):" && \
 		{ ipconfig.exe 2>/dev/null | tr -d '\r' | grep -i 'IPv4' | sed 's/^ */  /' || echo "  (couldn't query — run ipconfig on Windows)"; }
 
+# Injects the Tricorder link creds from agentsecrets; if unavailable the
+# bridge logs "local-only mode" and office PTT still works.
 computer:
-	cd claude && claude --dangerously-skip-permissions
+	cd claude && \
+	TNG_TRICORDER_URL="$${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}" \
+	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
+	claude --dangerously-skip-permissions
 
 health:
 	@printf "server:  " && (curl -sf --max-time 2 http://127.0.0.1:3789/health || echo "DOWN") && echo

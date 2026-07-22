@@ -16,9 +16,11 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the design and
 | `apps/server` | Node API: WebSocket hub, TTS front |
 | `apps/tts` | Python TTS sidecar: `/synth` text→WAV (Piper; Qwen3-TTS slot shelved with TNGC-4) |
 | `apps/ear` | *(dead — v1 wake-word daemon; removal tracked in TNGC-17)* |
+| `apps/tricorder` | Cloudflare Worker + per-tenant DO queue + D1 at tricorder.lalalimited.com |
 | `packages/shared` | Typed WebSocket protocol + panel props shared across TS packages |
+| `packages/contract` | The tiny versioned cloud↔bridge message contract |
 | `packages/console-mcp` | MCP server Claude uses: `display` / `speak` / `chime` / `screen_state` |
-| `packages/bridge` | Message-queue MCP server (rework to blocking `await_message` in TNGC-13) |
+| `packages/bridge` | Bridge MCP server: blocking `await_message` loop + outbound WSS to Tricorder |
 | `claude/` | The Computer's identity: `CLAUDE.md`, skills, MCP registrations, settings |
 | `voice/` | Piper voice models + legacy training artifacts |
 

@@ -1,0 +1,18 @@
+{
+  "name": "tricorder",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-01",
+  "routes": [{ "pattern": "tricorder.lalalimited.com", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tricorder",
+      "database_id": "85a923ef-9f5d-4bc1-b9e0-fc5514512201"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "TENANT_HUB", "class_name": "TenantHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TenantHub"] }],
+  "observability": { "enabled": true }
+}

@@ -16,3 +16,4 @@ read while editing the repo.
 | **Add a widget (overlay badge: timers, alarms…)** | [adding-widgets.md](adding-widgets.md) | Widgets are panel-independent overlay state. Server owns lifecycle, full-state sync via hub, wall renders dumb. |
 | **Implement karaoke mode (reading with highlighting)** | [karaoke-mode-implementation.md](karaoke-mode-implementation.md) | Phased approach: phase 1 is ready (UI done), phase 2 adds TTS timing, phase 3 handles multi-page sync. |
 | **Put the wall on the TV / fix the TV kiosk** | [tv-room-kiosk.md](tv-room-kiosk.md) | Only :5173 is exposed (same-origin proxy). One-time `scripts\expose-lan.ps1` on Windows; TV Chrome + F11 + one ENGAGE tap. |
+| **Deploy / debug the Tricorder cloud, mint device tokens** | [../../apps/tricorder/README.md](../../apps/tricorder/README.md) | wrangler deploy w/ agentsecrets creds; queue lives in the TenantHub DO; tokens hashed in D1; `wrangler tail` shows stale-drops. |
