@@ -536,6 +536,22 @@ body {
   border-radius: 8px;
   background: #000;
 }
+/* "Computer, full screen" — cover the whole wall, LCARS chrome and all.
+   Below widgets (1050) and voice captions (1100) so both stay visible. */
+.youtube-panel-full {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 0;
+  gap: 0;
+  background: #000;
+}
+.youtube-panel-full .youtube-title {
+  display: none;
+}
+.youtube-panel-full .youtube-frame {
+  border-radius: 0;
+}
 
 /* ---------- Results panel ---------- */
 
@@ -1100,6 +1116,69 @@ body {
   border-top-color: var(--lcars-gold);
 }
 
+/* ---------- Night sky panel ---------- */
+
+.sky-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 14px;
+  padding-right: 24px;
+}
+.sky-title {
+  font-size: clamp(28px, 3.5vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.sky-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 2px solid var(--lcars-gold);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000308;
+}
+.sky-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* Simulated-clock + mode chips, bottom-left inside the frame. */
+.sky-hud {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sky-hud-clock {
+  background: rgba(0, 0, 0, 0.75);
+  border: 2px solid var(--lcars-gold);
+  border-radius: 12px;
+  color: var(--lcars-peach);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 12px;
+}
+.sky-hud-chip {
+  background: var(--lcars-gold);
+  border-radius: 12px;
+  color: #000;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  animation: sky-chip-pulse 2s ease-in-out infinite;
+}
+@keyframes sky-chip-pulse {
+  50% { opacity: 0.75; }
+}
+
 /* ---------- Article panel (reader mode) ---------- */
 
 .article-panel {
@@ -1155,6 +1234,126 @@ body {
   border-radius: 1px;
 }
 
+/* ---------- Quiz panel ---------- */
+
+.quiz-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 20px;
+  padding-right: 24px;
+}
+.quiz-head {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.quiz-subject {
+  font-size: clamp(28px, 3.5vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.quiz-sub {
+  font-size: 17px;
+  color: var(--lcars-lavender);
+  letter-spacing: 0.14em;
+}
+.quiz-score {
+  margin-left: auto;
+  border-radius: 4px;
+  padding: 4px 14px;
+  background: var(--lcars-blue);
+  color: var(--lcars-bg);
+  font-weight: 700;
+  font-size: 19px;
+  white-space: nowrap;
+}
+.quiz-question {
+  font-size: clamp(24px, 2.8vw, 40px);
+  color: var(--lcars-gold);
+  line-height: 1.3;
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+.quiz-choices {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  min-height: 0;
+}
+.quiz-choice {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px 8px 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: opacity 0.25s ease-out, border-color 0.25s ease-out;
+}
+.quiz-letter {
+  border-radius: 4px;
+  min-width: 52px;
+  padding: 4px 0;
+  text-align: center;
+  font-weight: 700;
+  font-size: 24px;
+  color: var(--lcars-bg);
+  flex-shrink: 0;
+}
+.quiz-choice-text {
+  font-size: clamp(19px, 2.2vw, 30px);
+  color: var(--lcars-cream);
+  text-transform: none;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+  min-width: 0;
+}
+/* Reveal-phase tag: "YOUR ANSWER — CORRECT" / "CORRECT ANSWER" / "YOUR ANSWER" */
+.quiz-tag {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.quiz-choice.is-correct {
+  border-color: var(--lcars-gold);
+  background: rgba(255, 153, 0, 0.12);
+}
+.quiz-choice.is-correct .quiz-tag {
+  color: var(--lcars-gold);
+}
+.quiz-choice.is-wrong {
+  border-color: var(--lcars-red);
+  background: rgba(204, 102, 102, 0.12);
+}
+.quiz-choice.is-wrong .quiz-tag,
+.quiz-choice.is-wrong .quiz-choice-text {
+  color: var(--lcars-red);
+}
+.quiz-choice.is-dim {
+  opacity: 0.35;
+}
+.quiz-explain {
+  border-left: 6px solid var(--lcars-lavender);
+  border-radius: 4px;
+  padding: 12px 18px;
+  font-size: clamp(17px, 1.8vw, 24px);
+  color: var(--lcars-lavender);
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+.quiz-hint {
+  font-size: 15px;
+  color: var(--lcars-blue);
+  letter-spacing: 0.18em;
+}
+
 /* ---------- Voice caption + link status ---------- */
 
 /* Positioning shell only — the framed pill is .voice-caption-inner, so the
@@ -1170,6 +1369,8 @@ body {
   pointer-events: none;
   text-transform: none;
   letter-spacing: 0.04em;
+  /* Leaflet panes/controls run z-index 400–1000; subtitles must beat them */
+  z-index: 1100;
 }
 .voice-caption-inner {
   display: flex;
@@ -1311,6 +1512,609 @@ body {
   color: var(--lcars-red);
 }
 
+/* Code panel — monospace source with syntax colors and a line-number gutter.
+   Escapes the LCARS uppercase transform: code is case-sensitive. */
+.code-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 14px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.code-panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.code-panel-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.code-panel-lang {
+  font-size: 18px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lcars-bg);
+  background: var(--lcars-blue);
+  border-radius: 12px;
+  padding: 3px 16px;
+}
+/* Side-by-side panes (e.g. one algorithm in two languages). Each pane
+   fits its type independently; the frame's blue rule doubles as divider. */
+.code-panel-panes {
+  display: flex;
+  gap: 36px;
+  min-height: 0;
+}
+.code-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.code-pane-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.code-pane-header .code-panel-lang:only-child {
+  margin-left: auto;
+}
+.code-pane-title {
+  font-size: clamp(20px, 2.2vw, 32px);
+  font-weight: 700;
+  color: var(--lcars-cream);
+}
+.code-panel-frame {
+  min-height: 0;
+  overflow: hidden;
+  border-left: 5px solid var(--lcars-blue);
+  padding-left: 20px;
+}
+/* Invariant: code is never cropped. --code-fit shrinks type until it fits;
+   if even MIN_FIT overflows, scroll takes over. */
+.code-panel-scroll {
+  overflow: auto;
+}
+.code-panel-pre {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+  font-size: calc(clamp(18px, 2vw, 30px) * var(--code-fit, 1));
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: pre;
+}
+.code-line {
+  display: flex;
+}
+.code-gutter {
+  flex: none;
+  width: 3ch;
+  margin-right: 2ch;
+  text-align: right;
+  color: var(--lcars-lavender);
+  opacity: 0.55;
+  user-select: none;
+}
+.code-line-text {
+  color: #d8d8e8;
+}
+.code-tok-kw {
+  color: var(--lcars-gold);
+  font-weight: 600;
+}
+.code-tok-str {
+  color: var(--lcars-peach);
+}
+.code-tok-com {
+  color: var(--lcars-lavender);
+  font-style: italic;
+}
+.code-tok-num {
+  color: var(--lcars-blue);
+}
+.code-tok-fn {
+  color: var(--lcars-cream);
+}
+.code-tok-plain {
+  color: #d8d8e8;
+}
+.code-panel-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.code-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
+/* Table panel — structured rows and columns. Cells never wrap; like the code
+   panel, --table-fit shrinks type until the table fits, then scroll. */
+.table-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 18px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.table-panel-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.table-panel-frame {
+  min-height: 0;
+  overflow: hidden;
+}
+.table-panel-scroll {
+  overflow: auto;
+}
+.table-panel-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: calc(clamp(20px, 2.2vw, 34px) * var(--table-fit, 1));
+}
+.table-panel-table th {
+  text-align: left;
+  white-space: nowrap;
+  color: var(--lcars-bg);
+  background: var(--lcars-gold);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 8px 24px;
+}
+.table-panel-table th:first-child {
+  border-radius: 16px 0 0 16px;
+}
+.table-panel-table th:last-child {
+  border-radius: 0 16px 16px 0;
+}
+.table-panel-table td {
+  white-space: nowrap;
+  color: var(--lcars-cream);
+  padding: 12px 24px;
+  border-bottom: 1px solid rgba(153, 153, 255, 0.25);
+}
+.table-panel-table tbody tr:nth-child(even) td {
+  background: rgba(153, 153, 255, 0.06);
+}
+.table-panel-table tr.row-highlight td {
+  color: var(--lcars-gold);
+  background: rgba(255, 204, 102, 0.1);
+  font-weight: 700;
+}
+.cell-right {
+  text-align: right;
+}
+.table-panel-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.table-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
+/* Steps panel — ordered procedure. Overview mode is a numbered list; focus
+   mode (currentStep set) splits into a progress rail + the current step
+   rendered large enough to read from across a kitchen. */
+.steps-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 18px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.steps-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+}
+.steps-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.steps-subtitle {
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  color: var(--lcars-lavender);
+}
+.steps-body {
+  min-height: 0;
+  display: flex;
+  gap: 44px;
+}
+.steps-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+.steps-body-focus .steps-rail {
+  flex: 0 0 36%;
+}
+.steps-rail-item {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  font-size: clamp(22px, 2.3vw, 34px);
+  color: var(--lcars-cream);
+  min-width: 0;
+}
+.steps-body-focus .steps-rail-item {
+  font-size: clamp(18px, 1.8vw, 26px);
+}
+.steps-rail-num {
+  flex: none;
+  min-width: 2.1em;
+  text-align: center;
+  font-size: 0.72em;
+  font-weight: 700;
+  color: var(--lcars-bg);
+  background: var(--lcars-blue);
+  border-radius: 999px;
+  padding: 2px 0;
+}
+.steps-rail-item.done {
+  opacity: 0.45;
+}
+.steps-rail-item.done .steps-rail-num {
+  background: var(--lcars-lavender);
+}
+.steps-rail-item.current {
+  color: var(--lcars-gold);
+  font-weight: 700;
+}
+.steps-rail-item.current .steps-rail-num {
+  background: var(--lcars-gold);
+}
+.steps-body-focus .steps-rail-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.steps-focus {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  border-left: 5px solid var(--lcars-gold);
+  padding-left: 30px;
+}
+.steps-focus-count {
+  font-size: 18px;
+  letter-spacing: 0.2em;
+  color: var(--lcars-lavender);
+}
+.steps-focus-text {
+  font-size: clamp(32px, 3.6vw, 54px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--lcars-cream);
+}
+.steps-focus-detail {
+  font-size: clamp(20px, 2vw, 28px);
+  line-height: 1.4;
+  color: var(--lcars-peach);
+}
+.steps-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.steps-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
+/* Timeline panel — horizontal era band, cards alternating above/below a
+   gold-dotted axis. Evenly spaced by design (readability over proportion). */
+.timeline-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.timeline-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.timeline-band {
+  display: grid;
+  grid-template-rows: 1fr 56px 1fr;
+  column-gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+.timeline-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 4px solid var(--lcars-blue);
+  padding-left: 14px;
+  overflow: hidden;
+}
+.timeline-card.above {
+  align-self: end;
+  margin-bottom: 8px;
+}
+.timeline-card.below {
+  align-self: start;
+  margin-top: 8px;
+}
+.timeline-card.accent-gold {
+  border-color: var(--lcars-gold);
+}
+.timeline-card.accent-gold .timeline-when {
+  color: var(--lcars-gold);
+}
+.timeline-card.accent-lavender {
+  border-color: var(--lcars-lavender);
+}
+.timeline-card.accent-lavender .timeline-when {
+  color: var(--lcars-lavender);
+}
+.timeline-card.accent-blue {
+  border-color: var(--lcars-blue);
+}
+.timeline-card.accent-blue .timeline-when {
+  color: var(--lcars-blue);
+}
+.timeline-card.accent-peach {
+  border-color: var(--lcars-peach);
+}
+.timeline-card.accent-peach .timeline-when {
+  color: var(--lcars-peach);
+}
+.timeline-when {
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.timeline-event-title {
+  font-size: clamp(18px, 1.8vw, 26px);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--lcars-cream);
+}
+.timeline-detail {
+  font-size: clamp(14px, 1.3vw, 19px);
+  line-height: 1.3;
+  color: rgba(245, 246, 250, 0.75);
+}
+.timeline-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.timeline-node::before,
+.timeline-node::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  height: 5px;
+  transform: translateY(-50%);
+  background: var(--lcars-blue);
+}
+.timeline-node::before {
+  left: -20px;
+  right: 50%;
+}
+.timeline-node::after {
+  left: 50%;
+  right: -20px;
+}
+.timeline-node.first::before,
+.timeline-node.last::after {
+  display: none;
+}
+.timeline-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--lcars-bg);
+  border: 5px solid var(--lcars-gold);
+  z-index: 1;
+}
+.timeline-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.timeline-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
+/* Scoreboard panel — one game renders as a hero card, several as a grid.
+   The live chip pulses; decided winners go gold. */
+.score-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 18px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.score-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 24px;
+  min-height: 0;
+  align-content: center;
+  overflow: hidden;
+}
+.score-grid.single {
+  grid-template-columns: minmax(0, 760px);
+  justify-content: center;
+}
+.score-card {
+  border: 3px solid var(--lcars-blue);
+  border-radius: 18px;
+  padding: 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.score-card.hero {
+  border-width: 4px;
+  padding: 36px 52px;
+  gap: 20px;
+}
+.score-status {
+  align-self: flex-end;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--lcars-bg);
+  background: var(--lcars-lavender);
+  border-radius: 10px;
+  padding: 2px 14px;
+}
+.score-card.hero .score-status {
+  font-size: 20px;
+}
+.score-status.live {
+  background: var(--lcars-red);
+  color: var(--lcars-cream);
+  animation: score-pulse 1.6s ease-in-out infinite;
+}
+@keyframes score-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.score-team {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  font-size: clamp(24px, 2.4vw, 36px);
+  color: var(--lcars-cream);
+}
+.score-card.hero .score-team {
+  font-size: clamp(36px, 4vw, 60px);
+}
+.score-team-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.score-team-record {
+  font-size: 0.5em;
+  letter-spacing: 0.08em;
+  color: var(--lcars-lavender);
+  margin-left: 0.8em;
+}
+.score-team-score {
+  font-weight: 700;
+  color: var(--lcars-peach);
+  font-variant-numeric: tabular-nums;
+}
+.score-team.winner,
+.score-team.winner .score-team-score {
+  color: var(--lcars-gold);
+  font-weight: 700;
+}
+.score-note {
+  font-size: 18px;
+  color: var(--lcars-lavender);
+}
+.score-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.score-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
+/* Math panel — KaTeX-rendered lines. Escapes the LCARS uppercase transform:
+   mathematics is case-sensitive. Notes sit right of each line. */
+.math-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  gap: 20px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.math-title {
+  font-size: clamp(28px, 3.4vw, 48px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+}
+.math-lines {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+  overflow: hidden;
+}
+.math-line {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+.math-tex {
+  font-size: clamp(26px, 2.8vw, 44px);
+  color: var(--lcars-cream);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.math-tex .katex-display {
+  margin: 0;
+}
+.math-note {
+  margin-left: auto;
+  max-width: 40%;
+  text-align: right;
+  font-size: clamp(16px, 1.6vw, 22px);
+  color: var(--lcars-lavender);
+}
+.math-caption {
+  font-size: 19px;
+  color: var(--lcars-peach);
+}
+.math-panel-empty {
+  font-size: 22px;
+  color: var(--lcars-red);
+}
+
 .offline-badge {
   position: fixed;
   top: 34px;
@@ -1330,7 +2134,8 @@ body {
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  z-index: 40;
+  /* above Leaflet panes/controls (400–1000), below voice captions (1100) */
+  z-index: 1050;
 }
 .widget-badge {
   display: flex;

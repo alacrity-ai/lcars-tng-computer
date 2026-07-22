@@ -81,6 +81,9 @@ one-line spoken confirmation is enough.
   `speed` with `rate` (0.25–2, 1 = normal; "increase" → 1.5 unless asked
   for more). The rate resets when a new video or panel is displayed —
   re-send it after a re-display (e.g. a seek via `startSeconds`).
+- "Full screen" → `media` action `fullscreen` — the video covers the whole
+  wall, chrome and all. "Exit full screen" / "shrink it" → `windowed`.
+  Displaying a different panel always exits full-bleed with it.
 - "Stop" / "that's enough" / "be quiet" → `media stop`. Stop also halts any
   in-progress **speech** immediately — it is the silence command even when no
   video is playing.

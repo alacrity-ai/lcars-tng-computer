@@ -11,9 +11,17 @@ import { ArticlePanel } from "./ArticlePanel";
 import { NewsPanel } from "./NewsPanel";
 import { ChartPanel } from "./ChartPanel";
 import { MapPanel } from "./MapPanel";
+import { NightSkyPanel } from "./NightSkyPanel";
 import { ImagePanel } from "./ImagePanel";
 import { QuotePanel } from "./QuotePanel";
 import { DiagramPanel } from "./DiagramPanel";
+import { QuizPanel } from "./QuizPanel";
+import { CodePanel } from "./CodePanel";
+import { TablePanel } from "./TablePanel";
+import { StepsPanel } from "./StepsPanel";
+import { TimelinePanel } from "./TimelinePanel";
+import { ScoreboardPanel } from "./ScoreboardPanel";
+import { MathPanel } from "./MathPanel";
 
 function BlankPanel() {
   return null;
@@ -39,9 +47,17 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   news: NewsPanel,
   chart: ChartPanel,
   map: MapPanel,
+  "night-sky": NightSkyPanel,
   image: ImagePanel,
   quote: QuotePanel,
   diagram: DiagramPanel,
+  quiz: QuizPanel,
+  code: CodePanel,
+  table: TablePanel,
+  steps: StepsPanel,
+  timeline: TimelinePanel,
+  scoreboard: ScoreboardPanel,
+  math: MathPanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

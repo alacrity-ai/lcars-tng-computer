@@ -32,9 +32,17 @@ export const PANEL_VIEWS = [
   "news",
   "chart",
   "map",
+  "night-sky",
   "image",
   "quote",
   "diagram",
+  "quiz",
+  "code",
+  "table",
+  "steps",
+  "timeline",
+  "scoreboard",
+  "math",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -44,6 +52,35 @@ export interface TextPanelProps {
   body: string; // markdown-ish plain text; webapp renders line breaks
   /** Character index to highlight during karaoke mode (0-based). */
   highlightIndex?: number;
+}
+
+/** Source code, rendered monospace with syntax highlighting and line
+    numbers — use instead of `text` whenever the body is code. */
+export interface CodePane {
+  /** Pane headline: "Python", "TypeScript". */
+  title?: string;
+  /** The source, verbatim; newlines and indentation are preserved. */
+  code: string;
+  /** Highlighting hint: "python", "javascript", "typescript", "bash",
+      "json", "c", "java", "go", "rust", "sql"… Unknown or absent values
+      fall back to a generic C-like highlighter. */
+  language?: string;
+  /** One-line note under this pane's code. */
+  caption?: string;
+}
+
+export interface CodePanelProps {
+  /** Headline: "Fibonacci — Python vs TypeScript". */
+  title?: string;
+  /** Single-block source; either this or panes is required. */
+  code?: string;
+  /** Highlighting hint for code (see CodePane.language). */
+  language?: string;
+  /** One-line note under the code. */
+  caption?: string;
+  /** Two or three sources rendered side-by-side (e.g. the same algorithm
+      in different languages). Takes precedence over code/language. */
+  panes?: CodePane[];
 }
 
 export interface AlertPanelProps {
@@ -226,6 +263,36 @@ export interface MapPanelProps {
 }
 
 /**
+ * Live planetarium: the wall computes and renders the sky itself (bundled
+ * star catalog + astronomy-engine ephemerides), so props describe a VIEW,
+ * not content — sky_control steers it in place like map_control steers the
+ * map. Time flows in real time once displayed; sky_control can jump, step,
+ * or time-lapse it.
+ */
+export interface NightSkyPanelProps {
+  /** Observer location. */
+  lat: number;
+  lng: number;
+  /** Headline above the sky: "Tonight's Sky". */
+  title?: string;
+  /** ISO timestamp to show the sky at; omit for now. */
+  time?: string;
+  /** View direction, degrees: azimuth 0=N 90=E 180=S 270=W. Default 180. */
+  azimuth?: number;
+  /** View altitude above horizon, degrees. Default 90 (zenith) which with the
+      default fov renders the classic whole-sky dome. */
+  altitude?: number;
+  /** Vertical field of view, degrees, 10–180. Default 180 (all-sky). */
+  fov?: number;
+  /** Constellation figures + names (default true). */
+  constellations?: boolean;
+  /** Star/planet name labels (default true). */
+  labels?: boolean;
+  /** Sun, Moon, and naked-eye planets (default true). */
+  planets?: boolean;
+}
+
+/**
  * Split article paragraphs into wall-sized pages. Lives in shared because the
  * server reports "page N of M" from the same math the webapp renders with —
  * if these disagreed, the spoken page count would lie.
@@ -297,6 +364,137 @@ export interface DiagramPanelProps {
       to fit); scripts and event handlers are stripped before render. */
   svg: string;
   /** One-line explanation shown under the diagram. */
+  caption?: string;
+}
+
+/**
+ * One multiple-choice question of a running quiz. The panel is stateless: the
+ * Computer re-displays it to move between the two phases — question (no
+ * correctIndex) and reveal (correctIndex present; selectedIndex marks what
+ * the user picked, omitted when they passed).
+ */
+export interface QuizPanelProps {
+  /** Quiz topic shown in the header: "Thermodynamics". */
+  subject: string;
+  /** 1-based number of the current question. */
+  questionNumber: number;
+  question: string;
+  /** 2–5 answer options; the panel letters them A, B, C… itself. */
+  choices: string[];
+  /** Running tally BEFORE this question resolves: correct / answered. */
+  score?: { correct: number; answered: number };
+  /** 0-based choice the user picked; omit if they passed. */
+  selectedIndex?: number;
+  /** 0-based right answer. Presence switches the panel to the reveal phase. */
+  correctIndex?: number;
+  /** Why the right answer is right; shown when the user missed it. */
+  explanation?: string;
+}
+
+/** Structured rows and columns — comparisons, standings, specs. Use instead
+    of `text` whenever the answer is naturally tabular. */
+export interface TablePanelProps {
+  /** Headline: "iPhone 17 vs Pixel 11". */
+  title?: string;
+  /** Column headers, in order. First column is usually the row label. */
+  columns: string[];
+  /** Row cells as display strings, one array per row, aligned to columns.
+      Pre-format numbers ("$1,299", "42%") — the panel renders verbatim. */
+  rows: string[][];
+  /** 0-based indexes of numeric columns to right-align. */
+  alignRight?: number[];
+  /** 0-based rows to highlight (the recommendation, the user's team). */
+  highlightRows?: number[];
+  /** Attribution or takeaway line under the table. */
+  caption?: string;
+}
+
+export interface StepItem {
+  /** Short imperative instruction: "Whisk the eggs and sugar". */
+  text: string;
+  /** Elaboration shown large only while this step is current. */
+  detail?: string;
+}
+
+/**
+ * Ordered procedure — recipes, repairs, first aid. Stateless like the quiz
+ * panel: without currentStep it renders a numbered overview; with it, the
+ * named step dominates the screen and the rest become a progress rail. The
+ * Computer re-displays with currentStep±1 to move ("next step").
+ */
+export interface StepsPanelProps {
+  /** Headline: "Pancakes". */
+  title?: string;
+  /** Context line: "Serves 4 · 25 minutes". */
+  subtitle?: string;
+  steps: StepItem[];
+  /** 0-based step in progress; omit for the overview. */
+  currentStep?: number;
+  caption?: string;
+}
+
+export interface TimelineEvent {
+  /** Display date/era, also the axis label: "1969", "Mar 1865". */
+  when: string;
+  title: string;
+  /** One short sentence; keep it tight — cards are small. */
+  detail?: string;
+}
+
+/** Horizontal era band — history, biographies, plans. Events render evenly
+    spaced in array order (readability over proportional spacing); 4–8 fit. */
+export interface TimelinePanelProps {
+  title?: string;
+  /** Chronological order. */
+  events: TimelineEvent[];
+  caption?: string;
+}
+
+export interface ScoreboardTeam {
+  /** "Boston Celtics" (or short "Celtics"). */
+  name: string;
+  /** "BOS" — the score block prefers this when present. */
+  abbrev?: string;
+  /** Omit for games not yet started. */
+  score?: number;
+  /** Season record: "42-18". */
+  record?: string;
+}
+
+export interface ScoreboardGame {
+  away: ScoreboardTeam;
+  home: ScoreboardTeam;
+  /** "FINAL", "FINAL/OT", "Q3 4:12", "HALF", "TOP 7", "7:30 PM". */
+  status: string;
+  /** Game in progress — the status chip pulses. */
+  live?: boolean;
+  /** One-line note: "Tatum 34 PTS", "at TD Garden". */
+  note?: string;
+}
+
+/** Game scores — one game renders as a hero card, several as a grid. The
+    panel bolds the winner of any decided game itself. */
+export interface ScoreboardPanelProps {
+  /** League/context line: "NBA", "NFL Week 7". */
+  title?: string;
+  games: ScoreboardGame[];
+  /** Attribution: "ESPN, moments ago". */
+  caption?: string;
+}
+
+export interface MathLine {
+  /** LaTeX (KaTeX dialect), e.g. "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}". */
+  latex: string;
+  /** Short annotation beside the line: "subtract 7 from both sides". */
+  note?: string;
+}
+
+/** Rendered mathematics — a single formula or a worked derivation, one line
+    per MathLine, notes explaining each move. */
+export interface MathPanelProps {
+  /** "The Quadratic Formula". */
+  title?: string;
+  lines: MathLine[];
   caption?: string;
 }
 
@@ -383,8 +581,11 @@ export interface ChimeMessage {
 }
 
 /** Playback control: youtube panel ("computer, pause") and speech ("stop").
-    "speed" sets the video playback rate (rate required, YouTube's 0.25–2). */
-export type MediaAction = "pause" | "play" | "stop" | "speed";
+    "speed" sets the video playback rate (rate required, YouTube's 0.25–2).
+    "fullscreen" expands the youtube panel to cover the entire wall (CSS
+    full-bleed, not the browser Fullscreen API — that needs a user gesture);
+    "windowed" restores the framed panel. */
+export type MediaAction = "pause" | "play" | "stop" | "speed" | "fullscreen" | "windowed";
 
 export interface MediaMessage {
   type: "media";
@@ -418,6 +619,56 @@ export interface MapControlMessage {
   title?: string;
 }
 
+/** Voice nudges for the live night-sky panel. Beyond the map's spatial verbs
+    (zoom/pan/goto), the sky adds a TIME axis — jump to a moment, step by
+    hours, run a time-lapse — plus object go-to/tracking and layer toggles.
+    All animate the live panel in place; no re-display. */
+export type SkyControlAction =
+  | "zoom_in"
+  | "zoom_out"
+  | "left"
+  | "right"
+  | "up"
+  | "down"
+  | "goto"
+  | "set_time"
+  | "advance_time"
+  | "timelapse"
+  | "track"
+  | "toggle";
+
+export type SkyLayer = "constellations" | "labels" | "planets";
+
+export interface SkyControlMessage {
+  type: "sky_control";
+  action: SkyControlAction;
+  /** Zoom: steps (default 1). Pan: half-viewport steps (default 1). */
+  amount?: number;
+  /** goto/track: object name — planet, Sun, Moon, bright star, or
+      constellation ("Mars", "Vega", "Orion"). track with no target stops. */
+  target?: string;
+  /** goto: explicit equatorial coordinates, degrees (alternative to target). */
+  ra?: number;
+  dec?: number;
+  /** goto: explicit view direction, degrees ("look east" → az 90, alt 25). */
+  az?: number;
+  alt?: number;
+  /** goto: also change field of view (10–180). */
+  fov?: number;
+  /** goto: replaces the panel headline. */
+  title?: string;
+  /** set_time: ISO timestamp; omit to return to the present. */
+  time?: string;
+  /** advance_time: signed hours ("tomorrow night" → +24). */
+  hours?: number;
+  /** timelapse: simulated seconds per real second (600 ≈ 10 min/s); 0 stops. */
+  rate?: number;
+  /** toggle: which layer. */
+  layer?: SkyLayer;
+  /** toggle: explicit state; omit to flip. */
+  on?: boolean;
+}
+
 /** Instant "request heard" indicator, fired by a Claude Code hook the moment
     the user submits a prompt — before any model thinking. The wall shows a
     non-destructive PROCESSING badge and clears it on real activity. */
@@ -439,6 +690,7 @@ export type ServerMessage =
   | ChimeMessage
   | MediaMessage
   | MapControlMessage
+  | SkyControlMessage
   | WorkingMessage
   | WidgetsMessage;
 
@@ -496,6 +748,22 @@ export interface SpeakRequest {
   /** false = suppress the on-screen caption overlay (default true). Use when
       reading text that is already visible on the display. */
   caption?: boolean;
+  /** ISO 639-1 language of the text (default "en"). Selects a native TTS
+      voice; a voice not yet downloaded falls back to the English voice for
+      that utterance while fetching in the background. */
+  lang?: string;
+  /** Mixed-language utterance: overrides text/lang when present. Segments are
+      stitched into ONE utterance, each spoken by its language's voice — use
+      for a foreign word or phrase inside an English sentence. The caption
+      shows the concatenated segment texts. */
+  segments?: SpeakSegment[];
+}
+
+/** One run of same-language text inside a mixed-language speak call. */
+export interface SpeakSegment {
+  text: string;
+  /** ISO 639-1 (default "en"). */
+  lang?: string;
 }
 
 export interface ChimeRequest {
@@ -516,6 +784,8 @@ export interface MapControlRequest {
   zoom?: number;
   title?: string;
 }
+
+export type SkyControlRequest = Omit<SkyControlMessage, "type">;
 
 /** Fired by harness hooks (UserPromptSubmit / Stop), not by the model. */
 export interface WorkingRequest {
@@ -563,6 +833,44 @@ export interface SetTimerResponse {
 /** clear_timer: no id clears every timer/alarm widget. */
 export interface ClearTimerRequest {
   id?: string;
+}
+
+// ---------- Panel history ----------
+// Replay history: the server records every content panel it broadcasts so a
+// past screen can be brought back verbatim (redisplay) without the session
+// regenerating it. Deliberately NOT a cache — whether "show that again"
+// should hit history is a question of intent, and intent lives in the
+// session; the server only records and replays.
+
+export interface PanelHistoryEntry {
+  id: string;
+  /** Epoch ms when shown (refreshed if the same screen is re-shown). */
+  ts: number;
+  view: PanelView;
+  /** One-line human handle derived from props ("Ohm's Law", "video abc123"). */
+  summary: string;
+}
+
+/** display_history: list recorded panels, newest first. Summaries only —
+    full props stay server-side and never re-enter the session's context. */
+export interface DisplayHistoryRequest {
+  limit?: number;
+}
+
+export interface DisplayHistoryResponse {
+  ok: true;
+  entries: PanelHistoryEntry[];
+}
+
+/** redisplay: replay a recorded panel verbatim by history id. */
+export interface RedisplayRequest {
+  id: string;
+}
+
+export interface RedisplayResponse {
+  ok: true;
+  view: PanelView;
+  summary: string;
 }
 
 // ---------- YouTube queue ----------

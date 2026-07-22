@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MediaAction, YouTubePanelProps } from "@tng/shared";
+import { videoFullscreen } from "../videoFullscreen";
 
 /**
  * Official YouTube embed — the one "real web" surface that beats reader mode,
@@ -13,11 +14,19 @@ import type { MediaAction, YouTubePanelProps } from "@tng/shared";
  */
 export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: YouTubePanelProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
+  // CSS full-bleed, not the browser Fullscreen API — requestFullscreen()
+  // needs a user gesture, and the wall has no pointing device. Seeded from
+  // module scope so a remount mid-queue keeps the wall full screen.
+  const [fullscreen, setFullscreen] = useState(videoFullscreen.value);
 
   useEffect(() => {
     function onMedia(ev: Event) {
       const { action, rate } = (ev as CustomEvent<{ action: MediaAction; rate?: number }>)
         .detail;
+      if (action === "fullscreen" || action === "windowed") {
+        setFullscreen(action === "fullscreen");
+        return;
+      }
       // "stop" pauses rather than resumes (it used to fall through to
       // playVideo); stopVideo would unload the player entirely.
       const command: { func: string; args: unknown[] } =
@@ -119,7 +128,7 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
   if (startSeconds && startSeconds > 0) params.set("start", String(Math.floor(startSeconds)));
 
   return (
-    <div className="youtube-panel">
+    <div className={fullscreen ? "youtube-panel youtube-panel-full" : "youtube-panel"}>
       {title && <div className="youtube-title">{title}</div>}
       <iframe
         ref={frameRef}

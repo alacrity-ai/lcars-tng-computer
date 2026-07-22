@@ -43,11 +43,36 @@ server.registerTool(
       "series[0], " +
       "map {lat, lng, zoom?, title?, markers?: [{lat, lng, label?}]} — LCARS-tinted world map; " +
       "zoom 0=world…18=street; add a labeled marker for point places, none for regions, " +
+      "night-sky {lat, lng, title?, time?, azimuth?, altitude?, fov?, constellations?, labels?, " +
+      "planets?} — live planetarium computed on the wall (stars, constellations, Moon phase, " +
+      "planets) for the observer at lat/lng; defaults to the whole-sky dome at the present " +
+      "moment; steer it afterwards with sky_control, never by re-displaying, " +
       "image {url, title?, caption?, body?, source?} — framed image; with body it becomes a " +
       "library record (blurb beside image). For wiki subjects prefer show_profile instead, " +
       "diagram {title?, svg, caption?} — compose complete inline SVG (viewBox required, the " +
       "wall scales it) for visual explanations the chart panel can't express: recursion " +
-      "trees, flow diagrams, geometry, architectures. " +
+      "trees, flow diagrams, geometry, architectures, " +
+      "quiz {subject, questionNumber, question, choices: [string], score?: {correct, answered}, " +
+      "selectedIndex?, correctIndex?, explanation?} — one multiple-choice question; redisplay " +
+      "with correctIndex (+ selectedIndex) to reveal the answer (explanation shown when missed), " +
+      "code {title?, code?, language?, caption?, panes?: [{title?, code, language?, caption?}]} — " +
+      "monospace source with syntax highlighting and line numbers; use instead of text whenever " +
+      "the body is code (language: python, javascript, bash, sql… defaults to a generic C-like " +
+      "highlighter). panes renders 2–3 sources side-by-side (same algorithm in different " +
+      "languages); pass either code or panes, " +
+      "table {title?, columns: [string], rows: [[string]], alignRight?: [colIdx], " +
+      "highlightRows?: [rowIdx], caption?} — structured rows/columns (comparisons, standings, " +
+      "specs); pre-format numbers, right-align numeric columns, " +
+      "steps {title?, subtitle?, steps: [{text, detail?}], currentStep?, caption?} — ordered " +
+      "procedure (recipes, repairs); omit currentStep for an overview, set it (0-based) to blow " +
+      "up that step large; re-display with currentStep±1 on 'next step', " +
+      "timeline {title?, events: [{when, title, detail?}], caption?} — horizontal era band, " +
+      "4–8 chronological events (history, biographies), " +
+      "scoreboard {title?, games: [{away: {name, abbrev?, score?, record?}, home: {…}, status, " +
+      "live?, note?}], caption?} — game scores; one game = hero card, several = grid; winner " +
+      "bolds itself, live pulses the status chip, " +
+      "math {title?, lines: [{latex, note?}], caption?} — KaTeX-rendered formulas or a worked " +
+      "derivation, one line per step with notes explaining each move. " +
       "Props are view-specific.",
     // Derived from the webapp's installed panels — never offer a view the wall
     // would render as a "not yet installed" stub.
@@ -156,9 +181,10 @@ server.registerTool(
       "'that's enough', 'be quiet', etc. while the Computer is reading or media is playing. " +
       "'speed' sets the video playback rate (rate required, 0.25–2; 1 = normal — 'faster' → " +
       "1.5, 'double speed' → 2, 'normal speed' → 1). The rate resets whenever a new video " +
-      "or panel is displayed.",
+      "or panel is displayed. 'fullscreen' expands the video to fill the entire wall; " +
+      "'windowed' returns it to the framed panel.",
     inputSchema: {
-      action: z.enum(["pause", "play", "stop", "speed"]),
+      action: z.enum(["pause", "play", "stop", "speed", "fullscreen", "windowed"]),
       rate: z.number().min(0.25).max(2).optional(),
     },
   },
@@ -251,21 +277,73 @@ server.registerTool(
 );
 
 server.registerTool(
+  "sky_control",
+  {
+    description:
+      "Steer the night-sky panel currently on screen — smooth in-place animation, no redraw. " +
+      "SPACE: 'zoom in/out' → zoom_in/zoom_out (amount = steps); pan left|right|up|down " +
+      "(amount = half-view steps); 'show me Mars' / 'go to Orion' → goto with target " +
+      "(planet, Sun, Moon, bright star, or constellation name — resolved on the wall), or " +
+      "explicit ra/dec, or az/alt for a compass direction ('look east' → az: 90, alt: 25); " +
+      "fov changes the field of view (10–180, 180 = whole-sky dome); title retitles. " +
+      "TIME: set_time {time: ISO} jumps to a moment (omit time = return to the present); " +
+      "advance_time {hours} steps (+24 = tomorrow night); timelapse {rate} runs simulated " +
+      "seconds per real second (600 ≈ 10 min/s watches stars wheel; rate: 0 stops). " +
+      "track {target} keeps an object centered while time runs (track with no target stops). " +
+      "toggle {layer: constellations|labels|planets, on?} shows/hides a layer. " +
+      "Fails with 409 if no night sky is displayed — then display view:night-sky first.",
+    inputSchema: {
+      action: z.enum([
+        "zoom_in", "zoom_out", "left", "right", "up", "down",
+        "goto", "set_time", "advance_time", "timelapse", "track", "toggle",
+      ]),
+      amount: z.number().positive().optional(),
+      target: z.string().optional(),
+      ra: z.number().min(0).max(360).optional(),
+      dec: z.number().min(-90).max(90).optional(),
+      az: z.number().min(0).max(360).optional(),
+      alt: z.number().min(-20).max(90).optional(),
+      fov: z.number().min(10).max(180).optional(),
+      title: z.string().optional(),
+      time: z.string().optional(),
+      hours: z.number().optional(),
+      rate: z.number().min(0).optional(),
+      layer: z.enum(["constellations", "labels", "planets"]).optional(),
+      on: z.boolean().optional(),
+    },
+  },
+  async (args) => textResult(await call("/api/console/sky-control", args)),
+);
+
+server.registerTool(
   "speak",
   {
     description:
       "Speak text aloud through the display's speakers in the Computer's voice. " +
       "Returns when playback completes. Keep utterances short and in-character. " +
       "Set caption: false when reading text that is already visible on the display " +
-      "(e.g. an article) so the spoken words are not overlaid on top of the panel.",
+      "(e.g. an article) so the spoken words are not overlaid on top of the panel. " +
+      "Speaking any language other than English? Set lang (ISO 639-1, e.g. 'fr') so a " +
+      "native voice model pronounces it. The first utterance in a new language may fall " +
+      "back to the English voice while its model downloads in the background. " +
+      "MIXED-language lines (a foreign word inside an English sentence) → pass segments " +
+      "instead of text: [{text: 'What does ', lang: 'en'}, {text: 'شكراً', lang: 'ar'}, " +
+      "{text: ' mean?', lang: 'en'}] — one stitched utterance, each segment in its " +
+      "language's native voice. Include leading/trailing spaces in the segment texts; " +
+      "their concatenation is the caption.",
     inputSchema: {
-      text: z.string().min(1),
+      text: z.string().min(1).optional(),
       waitForPlayback: z.boolean().optional(),
       caption: z.boolean().optional(),
+      lang: z.string().optional(),
+      segments: z
+        .array(z.object({ text: z.string().min(1), lang: z.string().optional() }))
+        .min(1)
+        .optional(),
     },
   },
-  async ({ text, waitForPlayback, caption }) =>
-    textResult(await call("/api/console/speak", { text, waitForPlayback, caption })),
+  async ({ text, waitForPlayback, caption, lang, segments }) =>
+    textResult(await call("/api/console/speak", { text, waitForPlayback, caption, lang, segments })),
 );
 
 server.registerTool(
@@ -311,6 +389,38 @@ server.registerTool(
     },
   },
   async ({ id }) => textResult(await call("/api/console/timer-clear", { id })),
+);
+
+server.registerTool(
+  "display_history",
+  {
+    description:
+      "List panels previously shown on the wall, newest first — the replay history " +
+      "(last 50 content panels; status/blank not recorded). Entries are {id, ts, view, " +
+      "summary}; full props stay server-side. Use when the user asks for something AGAIN " +
+      "('show that diagram again', 'play that video again', 'go back to the article'): " +
+      "find the matching entry, then redisplay its id — instant, nothing regenerated. " +
+      "'New/another/different X' means generate fresh — don't consult history. No " +
+      "matching entry → silently make the content normally.",
+    inputSchema: {
+      limit: z.number().int().min(1).max(50).optional(),
+    },
+  },
+  async ({ limit }) => textResult(await call("/api/console/display-history", { limit })),
+);
+
+server.registerTool(
+  "redisplay",
+  {
+    description:
+      "Replay a panel from display_history verbatim by id: the stored view and props " +
+      "broadcast as-is in one round trip. A replayed youtube panel restarts its video " +
+      "from the beginning. Confirm briefly ('On screen.').",
+    inputSchema: {
+      id: z.string(),
+    },
+  },
+  async ({ id }) => textResult(await call("/api/console/redisplay", { id })),
 );
 
 server.registerTool(

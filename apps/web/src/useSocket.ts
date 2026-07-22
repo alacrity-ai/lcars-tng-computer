@@ -7,6 +7,7 @@ import type {
   Widget,
 } from "@tng/shared";
 import { playChime } from "./audio";
+import { videoFullscreen } from "./videoFullscreen";
 
 export interface ScreenState {
   view: PanelView;
@@ -106,6 +107,10 @@ export function useSocket() {
             stopSpeechRef.current?.();
             readingAloud = false;
           }
+          // Full-bleed video is a youtube-panel mode, not a wall mode: any
+          // other panel taking the screen exits it. Queue advances re-display
+          // youtube, so they sail through with the flag intact.
+          if (msg.view !== "youtube") videoFullscreen.value = false;
           screenRef.current = { view: msg.view, props: msg.props };
           setScreen({ view: msg.view, props: msg.props });
           send({ type: "screen_state", view: msg.view, props: msg.props });
@@ -116,6 +121,10 @@ export function useSocket() {
         } else if (msg.type === "media") {
           // "stop" also halts any in-flight speech; pause/play stay panel-scoped.
           if (msg.action === "stop") stopSpeechRef.current?.();
+          // Record full-bleed transitions before the event fires so a panel
+          // mounting later (queue advance, error swap) adopts the right mode.
+          if (msg.action === "fullscreen") videoFullscreen.value = true;
+          if (msg.action === "windowed") videoFullscreen.value = false;
           // Loose coupling: whichever panel is playing media listens for this.
           window.dispatchEvent(
             new CustomEvent("tng-media", { detail: { action: msg.action, rate: msg.rate } }),
@@ -134,6 +143,10 @@ export function useSocket() {
               },
             }),
           );
+        } else if (msg.type === "sky_control") {
+          // Same loose coupling: the live NightSkyPanel steers itself.
+          const { type: _type, ...detail } = msg;
+          window.dispatchEvent(new CustomEvent("tng-sky-control", { detail }));
         } else if (msg.type === "speak") {
           const { utteranceId, text, audioUrl, caption = true, timing, highlightBase = 0 } = msg;
           // A new utterance supersedes any still-playing one.
@@ -260,6 +273,18 @@ export function useSocket() {
     };
     window.addEventListener("tng-map-view", onMapView);
 
+    // The night-sky panel announces its settled view the same way (including
+    // simulated time), so "zoom in" after a time-lapse composes correctly.
+    const onSkyView = (e: Event) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (screenRef.current.view !== "night-sky") return;
+      const props = { ...screenRef.current.props, ...((e as CustomEvent).detail ?? {}) };
+      screenRef.current = { view: "night-sky", props };
+      ws.send(JSON.stringify({ type: "screen_state", view: "night-sky", props }));
+    };
+    window.addEventListener("tng-sky-view", onSkyView);
+
     // YouTube player errors relay to the server, which auto-advances to the
     // next viable search result.
     const onVideoError = (e: Event) => {
@@ -296,6 +321,7 @@ export function useSocket() {
     return () => {
       disposed = true;
       window.removeEventListener("tng-map-view", onMapView);
+      window.removeEventListener("tng-sky-view", onSkyView);
       window.removeEventListener("tng-video-error", onVideoError);
       window.removeEventListener("tng-video-ended", onVideoEnded);
       wsRef.current?.close();

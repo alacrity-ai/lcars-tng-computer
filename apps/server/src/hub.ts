@@ -14,8 +14,17 @@ const IDLE_REVERT_MS = 2 * 60_000;
  * (transitions on its own), and long-dwell content — a video playing or an
  * article mid-read must not snap back to the clock underneath the user.
  * (results is deliberately NOT exempt: if no result was picked in two
- * minutes, the search is over.) */
-const IDLE_EXEMPT_VIEWS: PanelView[] = ["status", "alert", "blank", "boot", "youtube", "article"];
+ * minutes, the search is over.) A quiz waits on the user's answer for as
+ * long as they care to think — it must never snap away mid-question. */
+const IDLE_EXEMPT_VIEWS: PanelView[] = [
+  "status",
+  "alert",
+  "blank",
+  "boot",
+  "youtube",
+  "article",
+  "quiz",
+];
 
 /**
  * Tracks connected display clients and the current screen state.
@@ -34,6 +43,13 @@ export class DisplayHub {
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private videoErrorHandler: ((videoId: string, code?: number) => void) | undefined;
   private videoEndedHandler: ((videoId: string) => void) | undefined;
+  private displayObserver: ((view: PanelView, props: PanelProps) => void) | undefined;
+
+  /** Called on every display broadcast — the panel history records through
+      this tap (see PanelHistory), keeping the hub free of history concerns. */
+  setDisplayObserver(handler: (view: PanelView, props: PanelProps) => void) {
+    this.displayObserver = handler;
+  }
 
   /** Called when a display reports its video player errored (see
       VideoErrorMessage) — the youtube routes use this to auto-advance. */
@@ -103,6 +119,7 @@ export class DisplayHub {
       this.view = msg.view;
       this.props = msg.props;
       this.armIdleRevert();
+      this.displayObserver?.(msg.view, msg.props);
     } else if (msg.type === "widgets") {
       this.widgets = msg.widgets;
     }

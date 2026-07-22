@@ -3,10 +3,16 @@ import { randomUUID } from "node:crypto";
 import type {
   ChimeRequest,
   ClearTimerRequest,
+  DisplayHistoryRequest,
+  DisplayHistoryResponse,
   DisplayRequest,
+  RedisplayRequest,
+  RedisplayResponse,
   MapControlAction,
   MapControlRequest,
   MediaRequest,
+  SkyControlAction,
+  SkyControlRequest,
   ReadArticleRequest,
   ReadArticleResponse,
   ScreenStateResponse,
@@ -19,8 +25,9 @@ import { paginateArticle } from "@tng/shared";
 import type { DisplayHub } from "../hub.js";
 import { cancelActiveReading, startReading } from "../reading.js";
 import { getArticle, parseArticleUrl } from "./article.js";
-import { getAudio, hasSynthCached, splitFastStart, synthesize, ttsHealth } from "../tts.js";
+import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
+import { PanelHistory } from "../history.js";
 import { getQueue } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
@@ -102,6 +109,25 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       hub.broadcast({ type: "speak", utteranceId: randomUUID(), text, caption: true });
     }
   });
+  const history = new PanelHistory();
+  hub.setDisplayObserver((view, props) => history.record(view, props));
+
+  app.post<{ Body: DisplayHistoryRequest }>("/api/console/display-history", async (req) => {
+    const body: DisplayHistoryResponse = { ok: true, entries: history.list(req.body?.limit) };
+    return body;
+  });
+
+  app.post<{ Body: RedisplayRequest }>("/api/console/redisplay", async (req, reply) => {
+    const { id } = req.body ?? {};
+    if (!id) return reply.code(400).send({ error: "id is required" });
+    const entry = history.get(id);
+    if (!entry) return reply.code(404).send({ error: `no history entry ${id}` });
+    cancelActiveReading();
+    hub.broadcast({ type: "display", view: entry.view, props: entry.props });
+    const body: RedisplayResponse = { ok: true, view: entry.view, summary: entry.summary };
+    return body;
+  });
+
   app.post<{ Body: DisplayRequest }>("/api/console/display", async (req, reply) => {
     const { view, props } = req.body ?? {};
     if (!view) return reply.code(400).send({ error: "view is required" });
@@ -164,6 +190,43 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     return { ok: true, action };
   });
 
+  const SKY_ACTIONS: SkyControlAction[] = [
+    "zoom_in", "zoom_out", "left", "right", "up", "down",
+    "goto", "set_time", "advance_time", "timelapse", "track", "toggle",
+  ];
+  app.post<{ Body: SkyControlRequest }>("/api/console/sky-control", async (req, reply) => {
+    const body = req.body ?? ({} as SkyControlRequest);
+    const { action } = body;
+    if (!action || !SKY_ACTIONS.includes(action)) {
+      return reply.code(400).send({ error: `action must be one of ${SKY_ACTIONS.join(", ")}` });
+    }
+    if (action === "goto") {
+      const hasTarget = typeof body.target === "string" && body.target.trim();
+      const hasRaDec = typeof body.ra === "number" && typeof body.dec === "number";
+      const hasAzAlt = typeof body.az === "number" || typeof body.alt === "number";
+      if (!hasTarget && !hasRaDec && !hasAzAlt && typeof body.fov !== "number") {
+        return reply.code(400).send({ error: "goto needs target, ra+dec, az/alt, or fov" });
+      }
+    }
+    if (action === "set_time" && body.time !== undefined && !Number.isFinite(Date.parse(body.time))) {
+      return reply.code(400).send({ error: "time must be an ISO timestamp (omit for now)" });
+    }
+    if (action === "advance_time" && !Number.isFinite(body.hours)) {
+      return reply.code(400).send({ error: "advance_time needs numeric hours (negative = back)" });
+    }
+    if (action === "timelapse" && (typeof body.rate !== "number" || body.rate < 0)) {
+      return reply.code(400).send({ error: "timelapse needs rate >= 0 (0 stops)" });
+    }
+    if (action === "toggle" && !["constellations", "labels", "planets"].includes(body.layer ?? "")) {
+      return reply.code(400).send({ error: "toggle needs layer: constellations | labels | planets" });
+    }
+    if (hub.state.view !== "night-sky") {
+      return reply.code(409).send({ error: "no night sky is on screen" });
+    }
+    hub.broadcast({ type: "sky_control", ...body });
+    return { ok: true, action };
+  });
+
   app.post<{ Body: SetTimerRequest }>("/api/console/timer", async (req, reply) => {
     const { kind, seconds, time, label, announce } = req.body ?? {};
     if (kind !== "timer" && kind !== "alarm") {
@@ -215,8 +278,9 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
 
   app.post<{ Body: MediaRequest }>("/api/console/media", async (req, reply) => {
     const { action, rate } = req.body ?? {};
-    if (action !== "pause" && action !== "play" && action !== "stop" && action !== "speed") {
-      return reply.code(400).send({ error: "action must be pause, play, stop, or speed" });
+    const actions = ["pause", "play", "stop", "speed", "fullscreen", "windowed"];
+    if (!actions.includes(action)) {
+      return reply.code(400).send({ error: `action must be one of: ${actions.join(", ")}` });
     }
     if (action === "speed") {
       // YouTube's supported range; anything else the player silently ignores,
@@ -236,7 +300,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   });
 
   app.post<{ Body: SpeakRequest }>("/api/console/speak", async (req, reply) => {
-    const { text, waitForPlayback = true, caption = true } = req.body ?? {};
+    const { text: rawText, waitForPlayback = true, caption = true, lang = "en" } = req.body ?? {};
+    // Mixed-language segments synthesize as ONE utterance; everywhere else
+    // (caption, karaoke timing, screen-overlap probe) sees the joined text.
+    const segments = req.body?.segments?.filter((s) => s.text);
+    const text = segments?.length ? segments.map((s) => s.text).join("") : rawText;
     if (!text) return reply.code(400).send({ error: "text is required" });
 
     // The Computer speaking supersedes an in-flight reading session — never
@@ -265,10 +333,12 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     // synthesizes in well under a second and plays while the tail
     // synthesizes concurrently — long answers start sounding immediately.
     const parts =
-      text.length >= CHUNK_MIN_CHARS && !hasSynthCached(text)
+      !segments?.length && text.length >= CHUNK_MIN_CHARS && !hasSynthCached(text, lang)
         ? (splitFastStart(text) ?? [text])
         : [text];
-    const synths = parts.map((p) => synthesize(p));
+    const synths = segments?.length
+      ? [synthesizeSegments(segments)]
+      : parts.map((p) => synthesize(p, lang));
 
     const first = await synths[0];
     if (!first) {
