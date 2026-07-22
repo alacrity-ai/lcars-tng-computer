@@ -78,10 +78,20 @@
   #ptt.send { background: var(--gold); color: var(--ink); border-color: #fff; }
   #ptt[disabled] { border-color: #444; color: #666; background: #0a0a0a; }
   .ptt-holder { position: relative; }
+  #ptt { transition: background .15s, color .15s, border-color .15s; }
+  /* Cancel sits well clear of the SEND circle (diagonally out, top-right) and
+     slides out from behind it LCARS-style: quick, with a slight overshoot. */
   #ptt-cancel {
-    position: absolute; top: -4px; right: -4px; width: 48px; height: 48px;
-    border-radius: 50%; border: 2px solid #000; background: var(--red); color: var(--ink);
-    font: inherit; font-size: 22px; font-weight: 700; cursor: pointer;
+    position: absolute; top: -22px; right: -46px; width: 62px; height: 62px;
+    border-radius: 50%; border: 3px solid var(--ink); background: var(--red); color: var(--ink);
+    font: inherit; font-size: 26px; font-weight: 700; cursor: pointer;
+    opacity: 0; pointer-events: none;
+    transform: translate(-52px, 52px) scale(.4);
+    transition: transform .28s cubic-bezier(.2, 1.5, .4, 1), opacity .18s ease-out;
+  }
+  #ptt-cancel.show {
+    opacity: 1; pointer-events: auto;
+    transform: translate(0, 0) scale(1);
   }
   #live { min-height: 44px; margin-top: 14px; color: #fff; font-size: 16px; text-align: center; padding: 0 8px; }
   #toast { min-height: 22px; font-size: 14px; text-align: center; color: var(--blue); }
@@ -141,7 +151,7 @@
     <div class="ptt-wrap">
       <div class="ptt-holder">
         <button id="ptt">Hold<br>to talk</button>
-        <button id="ptt-cancel" hidden>&#10005;</button>
+        <button id="ptt-cancel">&#10005;</button>
       </div>
       <div id="live"></div>
       <div id="toast"></div>
@@ -373,7 +383,7 @@ function enterPending(text) {
   ptt.classList.remove("listening");
   ptt.classList.add("send");
   ptt.innerHTML = "Send";
-  $("ptt-cancel").hidden = false;
+  $("ptt-cancel").classList.add("show");
   $("live").textContent = text;
 }
 
@@ -381,7 +391,7 @@ function resetIdle() {
   pendingText = "";
   ptt.classList.remove("listening", "send");
   ptt.innerHTML = "Hold<br>to talk";
-  $("ptt-cancel").hidden = true;
+  $("ptt-cancel").classList.remove("show");
   $("live").textContent = "";
 }
 
