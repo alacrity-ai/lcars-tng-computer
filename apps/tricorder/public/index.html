@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Tricorder</title>
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Tricorder">
+<style>
+  :root {
+    --gold: #FF9900; --lav: #CC99CC; --blue: #9999CC; --red: #CC6666;
+    --bg: #000; --ink: #000;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--gold);
+    font-family: Antonio, "Avenir Next Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+    letter-spacing: .04em;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    user-select: none; -webkit-user-select: none;
+  }
+  #app { max-width: 480px; margin: 0 auto; padding: 12px 16px 24px; min-height: 100%; display: flex; flex-direction: column; }
+
+  /* LCARS header bar */
+  .lcars-bar { display: flex; align-items: stretch; gap: 6px; height: 44px; margin-bottom: 18px; }
+  .lcars-cap { background: var(--gold); width: 56px; border-radius: 22px 0 0 22px; }
+  .lcars-title { flex: 1; display: flex; align-items: center; justify-content: flex-end;
+    background: var(--gold); color: var(--ink); padding: 0 14px; font-size: 22px; font-weight: 700; }
+  .lcars-seg { width: 34px; background: var(--lav); }
+  .lcars-seg2 { width: 18px; background: var(--blue); border-radius: 0 22px 22px 0; }
+
+  .view { display: none; flex: 1; flex-direction: column; }
+  .view.active { display: flex; }
+
+  label { display: block; color: var(--blue); font-size: 13px; margin: 12px 0 4px; text-transform: uppercase; }
+  input, select {
+    width: 100%; background: #111; border: 1px solid #333; border-radius: 8px;
+    color: #fff; font: inherit; font-size: 17px; padding: 12px 14px; outline: none;
+    user-select: text; -webkit-user-select: text;
+  }
+  input:focus { border-color: var(--gold); }
+
+  .btn {
+    display: block; width: 100%; border: 0; border-radius: 22px; padding: 13px;
+    font: inherit; font-size: 17px; font-weight: 700; text-transform: uppercase;
+    background: var(--gold); color: var(--ink); margin-top: 16px; cursor: pointer;
+  }
+  .btn:active { filter: brightness(1.2); }
+  .btn.small { width: auto; display: inline-block; padding: 7px 16px; font-size: 13px; margin: 4px 6px 0 0; border-radius: 14px; }
+  .btn.lav { background: var(--lav); } .btn.blue { background: var(--blue); } .btn.red { background: var(--red); }
+  .btn[disabled] { opacity: .4; }
+
+  .err { color: var(--red); min-height: 20px; font-size: 15px; margin-top: 12px; }
+
+  /* status strip */
+  .strip { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .who { color: var(--lav); font-size: 15px; text-transform: uppercase; }
+  .pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 12px; color: var(--ink); background: #555; text-transform: uppercase; }
+  .pill.on  { background: var(--gold); }
+  .pill.off { background: var(--red); }
+
+  /* push to talk */
+  .ptt-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; }
+  #ptt {
+    width: 190px; height: 190px; border-radius: 50%; border: 6px solid var(--gold);
+    background: #180f00; color: var(--gold); font: inherit; font-size: 19px; font-weight: 700;
+    text-transform: uppercase; cursor: pointer;
+    touch-action: none; -webkit-touch-callout: none;
+  }
+  #ptt.listening { background: var(--gold); color: var(--ink); box-shadow: 0 0 40px rgba(255,153,0,.55); }
+  #ptt[disabled] { border-color: #444; color: #666; background: #0a0a0a; }
+  #live { min-height: 44px; margin-top: 14px; color: #fff; font-size: 16px; text-align: center; padding: 0 8px; }
+  #toast { min-height: 22px; font-size: 14px; text-align: center; color: var(--blue); }
+  #toast.bad { color: var(--red); }
+
+  .typerow { display: flex; gap: 8px; margin-top: 6px; }
+  .typerow input { flex: 1; }
+  .typerow .btn { width: auto; margin: 0; padding: 12px 20px; }
+
+  .foot { display: flex; justify-content: space-between; margin-top: 22px; }
+  .link { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; text-transform: uppercase; cursor: pointer; padding: 6px 0; }
+
+  /* admin */
+  .card { border: 1px solid #2a2a2a; border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
+  .card h3 { margin: 0; font-size: 17px; color: var(--gold); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; }
+  .card h3 .role { color: var(--lav); font-size: 12px; }
+  .sess { font-size: 13px; color: #bbb; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .sess button { background: none; border: 1px solid var(--red); color: var(--red); border-radius: 10px; font: inherit; font-size: 11px; padding: 2px 10px; cursor: pointer; }
+  .muted { color: #777; font-size: 13px; margin-top: 6px; }
+  .dis { opacity: .5; }
+
+  /* modal */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 24px; }
+  #modal.open { display: flex; }
+  .modal-box { background: #120b00; border: 2px solid var(--gold); border-radius: 16px; padding: 24px; text-align: center; max-width: 340px; }
+  .modal-box .pw { font-size: 30px; color: #fff; margin: 16px 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
+  .modal-box .note { color: var(--blue); font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="lcars-bar">
+    <div class="lcars-cap"></div>
+    <div class="lcars-title">TRICORDER</div>
+    <div class="lcars-seg"></div>
+    <div class="lcars-seg2"></div>
+  </div>
+
+  <!-- LOGIN -->
+  <div class="view" id="view-login">
+    <label>Handle</label>
+    <input id="in-handle" autocapitalize="none" autocomplete="username" spellcheck="false">
+    <label>Password</label>
+    <input id="in-password" type="password" autocomplete="current-password">
+    <label>This device</label>
+    <input id="in-device" maxlength="40">
+    <button class="btn" id="btn-login">Log in</button>
+    <div class="err" id="login-err"></div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="view" id="view-main">
+    <div class="strip">
+      <div class="who" id="who"></div>
+      <div class="pill" id="pill">…</div>
+    </div>
+    <div class="ptt-wrap">
+      <button id="ptt">Hold<br>to talk</button>
+      <div id="live"></div>
+      <div id="toast"></div>
+    </div>
+    <label>Or type a command</label>
+    <div class="typerow">
+      <input id="in-type" placeholder="Computer, …" autocapitalize="sentences">
+      <button class="btn" id="btn-send">Send</button>
+    </div>
+    <div class="foot">
+      <button class="link" id="btn-admin" hidden>Admin console</button>
+      <button class="link" id="btn-logout">Log out</button>
+    </div>
+  </div>
+
+  <!-- ADMIN -->
+  <div class="view" id="view-admin">
+    <button class="link" id="btn-back" style="text-align:left">&#9664; Back</button>
+    <button class="btn lav" id="btn-rotate">Rotate guest password</button>
+    <div id="admin-users"></div>
+    <div class="card">
+      <h3>New user</h3>
+      <label>Handle</label><input id="nu-handle" autocapitalize="none" spellcheck="false">
+      <label>Name</label><input id="nu-name">
+      <label>Role</label>
+      <select id="nu-role"><option value="member">member</option><option value="guest">guest</option><option value="admin">admin</option></select>
+      <label>Password</label><input id="nu-password" type="password" autocomplete="new-password">
+      <button class="btn blue" id="btn-create">Create user</button>
+    </div>
+    <div class="err" id="admin-err"></div>
+  </div>
+</div>
+
+<div id="modal">
+  <div class="modal-box">
+    <div style="color:var(--gold);text-transform:uppercase;font-weight:700">New guest password</div>
+    <div class="pw" id="modal-pw"></div>
+    <div class="note">Shown once — all previous guest sessions are revoked.</div>
+    <button class="btn" id="btn-modal-close">Done</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const store = {
+  get token() { return localStorage.getItem("tricorder.token"); },
+  set token(v) { v ? localStorage.setItem("tricorder.token", v) : localStorage.removeItem("tricorder.token"); },
+  get user() { try { return JSON.parse(localStorage.getItem("tricorder.user")); } catch { return null; } },
+  set user(v) { v ? localStorage.setItem("tricorder.user", JSON.stringify(v)) : localStorage.removeItem("tricorder.user"); },
+};
+
+let me = null; // {user:{handle,name,role}, deviceLabel}
+
+function show(view) {
+  for (const v of document.querySelectorAll(".view")) v.classList.remove("active");
+  $("view-" + view).classList.add("active");
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      ...(opts.body ? { "content-type": "application/json" } : {}),
+      ...(store.token ? { authorization: "Bearer " + store.token } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401 && path !== "/api/login") { logout(); throw new Error("session expired — log in again"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("request failed (" + res.status + ")"));
+  return data;
+}
+
+function logout() {
+  store.token = null; store.user = null; me = null;
+  stopPolling();
+  show("login");
+}
+
+// ---- login ------------------------------------------------------------------
+function guessDevice() {
+  const ua = navigator.userAgent;
+  const kind = /iPad/.test(ua) ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android"
+    : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "PC" : "Device";
+  return kind;
+}
+
+$("btn-login").onclick = async () => {
+  $("login-err").textContent = "";
+  try {
+    const data = await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({
+        handle: $("in-handle").value.trim(),
+        password: $("in-password").value,
+        deviceLabel: $("in-device").value.trim() || guessDevice(),
+      }),
+    });
+    store.token = data.token;
+    store.user = data.user;
+    $("in-password").value = "";
+    enterMain({ user: data.user, deviceLabel: data.deviceLabel });
+  } catch (e) {
+    $("login-err").textContent = e.message;
+  }
+};
+$("in-password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-login").click(); });
+
+// ---- main -------------------------------------------------------------------
+function enterMain(identity) {
+  me = identity;
+  $("who").textContent = identity.user.handle + " @ " + identity.deviceLabel;
+  $("btn-admin").hidden = identity.user.role !== "admin";
+  show("main");
+  startPolling();
+}
+
+let pollTimer = null;
+async function pollStatus() {
+  try {
+    const s = await api("/api/status");
+    setPill(s.online);
+  } catch { /* 401 already handled; network blips keep last state */ }
+}
+function setPill(online) {
+  const pill = $("pill");
+  pill.textContent = online ? "Computer online" : "Computer offline";
+  pill.className = "pill " + (online ? "on" : "off");
+}
+function startPolling() { stopPolling(); pollStatus(); pollTimer = setInterval(pollStatus, 15000); }
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && me) pollStatus(); });
+
+function toast(text, bad) {
+  const t = $("toast");
+  t.textContent = text;
+  t.className = bad ? "bad" : "";
+  setTimeout(() => { if (t.textContent === text) t.textContent = ""; }, 4000);
+}
+
+async function send(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  try {
+    const r = await api("/api/message", { method: "POST", body: JSON.stringify({ transcript: text }) });
+    setPill(r.online);
+    if (r.online) toast("Transmitted");
+    else toast("Computer offline — command not delivered", true);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$("btn-send").onclick = () => { send($("in-type").value); $("in-type").value = ""; };
+$("in-type").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-send").click(); });
+$("btn-logout").onclick = async () => { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} logout(); };
+$("btn-admin").onclick = () => { renderAdmin(); show("admin"); };
+
+// ---- push to talk -------------------------------------------------------------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const ptt = $("ptt");
+let rec = null, held = false, finalText = "", interimText = "";
+
+if (!SR) {
+  ptt.disabled = true;
+  ptt.innerHTML = "Voice<br>unavailable";
+  $("live").textContent = "No speech recognition in this browser — type below.";
+}
+
+function beginPTT() {
+  if (!SR || held) return;
+  held = true;
+  finalText = ""; interimText = "";
+  ptt.classList.add("listening");
+  ptt.innerHTML = "Listening";
+  rec = new SR();
+  rec.lang = navigator.language || "en-US";
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.onresult = (e) => {
+    interimText = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) finalText += r[0].transcript;
+      else interimText += r[0].transcript;
+    }
+    $("live").textContent = (finalText + " " + interimText).trim();
+  };
+  rec.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      held = false;
+      endVisuals();
+      $("live").textContent = "Microphone permission denied — type below.";
+    }
+  };
+  // iOS ends recognition on its own schedule; while the button is held, re-arm.
+  rec.onend = () => {
+    if (held) { try { rec.start(); } catch {} return; }
+    const text = (finalText + " " + interimText).trim();
+    $("live").textContent = "";
+    if (text) send(text);
+  };
+  try { rec.start(); } catch {}
+}
+
+function endVisuals() {
+  ptt.classList.remove("listening");
+  ptt.innerHTML = "Hold<br>to talk";
+}
+
+function endPTT() {
+  if (!held) return;
+  held = false;
+  endVisuals();
+  if (rec) { try { rec.stop(); } catch {} }
+}
+
+ptt.addEventListener("pointerdown", (e) => { e.preventDefault(); ptt.setPointerCapture(e.pointerId); beginPTT(); });
+ptt.addEventListener("pointerup", endPTT);
+ptt.addEventListener("pointercancel", endPTT);
+ptt.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// ---- admin --------------------------------------------------------------------
+function fmtAgo(ts) {
+  if (!ts) return "never";
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  return h < 48 ? h + "h ago" : Math.round(h / 24) + "d ago";
+}
+
+async function renderAdmin() {
+  $("admin-err").textContent = "";
+  let data;
+  try { data = await api("/api/admin/overview"); }
+  catch (e) { $("admin-err").textContent = e.message; return; }
+  const wrap = $("admin-users");
+  wrap.innerHTML = "";
+  for (const u of data.users) {
+    const card = document.createElement("div");
+    card.className = "card" + (u.disabled ? " dis" : "");
+    const h = document.createElement("h3");
+    h.innerHTML = "<span>" + u.handle + (u.disabled ? " (disabled)" : "") + "</span><span class='role'>" + u.role +
+      (u.hasPassword ? "" : " · no password") + "</span>";
+    card.appendChild(h);
+    for (const s of u.sessions) {
+      const row = document.createElement("div");
+      row.className = "sess";
+      const exp = s.expiresAt ? " · expires " + fmtAgo(2 * Date.now() - s.expiresAt).replace(" ago", "") : "";
+      row.innerHTML = "<span>" + s.deviceLabel + " · seen " + fmtAgo(s.lastSeenAt || s.createdAt) + exp + "</span>";
+      const btn = document.createElement("button");
+      btn.textContent = "revoke";
+      btn.onclick = async () => { await api("/api/admin/sessions/" + s.id, { method: "DELETE" }); renderAdmin(); };
+      row.appendChild(btn);
+      card.appendChild(row);
+    }
+    if (!u.sessions.length) {
+      const none = document.createElement("div");
+      none.className = "muted";
+      none.textContent = "no active sessions";
+      card.appendChild(none);
+    }
+    const actions = document.createElement("div");
+    const pwBtn = document.createElement("button");
+    pwBtn.className = "btn small blue";
+    pwBtn.textContent = "Set password";
+    pwBtn.onclick = async () => {
+      const pw = prompt("New password for " + u.handle + " (revokes all their sessions):");
+      if (!pw) return;
+      try { await api("/api/admin/users/" + u.id + "/password", { method: "POST", body: JSON.stringify({ password: pw }) }); renderAdmin(); }
+      catch (e) { $("admin-err").textContent = e.message; }
+    };
+    actions.appendChild(pwBtn);
+    if (u.handle !== me.user.handle) {
+      const dBtn = document.createElement("button");
+      dBtn.className = "btn small " + (u.disabled ? "lav" : "red");
+      dBtn.textContent = u.disabled ? "Enable" : "Disable";
+      dBtn.onclick = async () => {
+        try { await api("/api/admin/users/" + u.id + "/disabled", { method: "POST", body: JSON.stringify({ disabled: !u.disabled }) }); renderAdmin(); }
+        catch (e) { $("admin-err").textContent = e.message; }
+      };
+      actions.appendChild(dBtn);
+    }
+    card.appendChild(actions);
+    wrap.appendChild(card);
+  }
+}
+
+$("btn-back").onclick = () => show("main");
+$("btn-rotate").onclick = async () => {
+  if (!confirm("Rotate the guest password? All guest sessions are revoked immediately.")) return;
+  try {
+    const r = await api("/api/admin/rotate-guest", { method: "POST", body: "{}" });
+    $("modal-pw").textContent = r.password;
+    $("modal").classList.add("open");
+    renderAdmin();
+  } catch (e) { $("admin-err").textContent = e.message; }
+};
+$("btn-create").onclick = async () => {
+  $("admin-err").textContent = "";
+  try {
+    await api("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        handle: $("nu-handle").value, name: $("nu-name").value,
+        role: $("nu-role").value, password: $("nu-password").value,
+      }),
+    });
+    $("nu-handle").value = $("nu-name").value = $("nu-password").value = "";
+    renderAdmin();
+  } catch (e) { $("admin-err").textContent = e.message; }
+};
+$("btn-modal-close").onclick = () => $("modal").classList.remove("open");
+
+// ---- boot ---------------------------------------------------------------------
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+$("in-device").value = guessDevice();
+(async () => {
+  if (!store.token) { show("login"); return; }
+  try {
+    const identity = await api("/api/me");
+    enterMain(identity);
+  } catch {
+    show("login");
+  }
+})();
+</script>
+</body>
+</html>

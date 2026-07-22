@@ -1,25 +1,44 @@
-# Tricorder cloud (TNGC-14)
+# Tricorder cloud (TNGC-14/15)
 
-The public API at **tricorder.lalalimited.com**: Cloudflare Worker (Hono) +
-one **TenantHub** Durable Object per tenant + D1 identity. Phones POST
-transcripts in; the home bridge holds an **outbound** WebSocket and receives
-them — nothing on the internet ever connects into the house.
+The public face at **tricorder.lalalimited.com**: Cloudflare Worker (Hono) +
+one **TenantHub** Durable Object per tenant + D1 identity, serving the
+**Tricorder PWA** (`./public` — login, hold-to-talk, type mode, admin
+console). Phones POST transcripts in; the home bridge holds an **outbound**
+WebSocket and receives them — nothing on the internet ever connects into the
+house.
 
 - Contract (the only cloud↔home coupling): `packages/contract`
 - Queue semantics: persist in DO storage → push → bridge acks at
   hand-to-session → replay unacked on reconnect → **60s TTL at replay**
   (voice is ephemeral; stale drops are logged, visible in `wrangler tail`).
-- Identity: `tenants` / `users` / `devices` in D1, tokens stored as SHA-256
-  hashes. Tenant `home`, users `leif` `mom` `joe` `guest`.
+- Identity (TNGC-15): **users, not devices**. `tenants` / `users` /
+  `sessions` in D1. Users carry a PBKDF2 password hash and a role
+  (`admin` | `member` | `guest`); a session is a login on a device *label*
+  ("leif @ iPhone") — the same user holds any number concurrently. Session
+  tokens and the service token are stored as SHA-256 hashes.
+  Tenant `home`, users `leif` (admin) `ariel` (member) `guest` (guest).
 
 ## Endpoints
 
 | | Auth | What |
 |---|---|---|
+| `GET /` (+ assets) | none | the PWA |
 | `GET /health` | none | liveness + contract version |
 | `GET /link` | tenant service token (Bearer or `?token=`) | WSS upgrade for the bridge |
-| `POST /api/message` `{transcript}` | device token | enqueue an utterance (attributed from the device row) |
-| `GET /api/status` | device token | `{online, queued}` — is the Computer connected |
+| `POST /api/login` `{handle, password, deviceLabel}` | public | → session token. 5 bad tries → 5-min cooldown; guest sessions expire after 24h, member/admin are long-lived |
+| `POST /api/logout` | session | revoke own session |
+| `GET /api/me` | session | who am I on this device |
+| `POST /api/message` `{transcript}` | session | enqueue an utterance (attribution = session's user + device label) |
+| `GET /api/status` | session | `{online, queued}` — is the Computer connected |
+| `GET /api/admin/overview` | admin session | users + their active sessions |
+| `POST /api/admin/users` `{handle,name,role,password}` | admin | create user |
+| `POST /api/admin/users/:id/password` `{password}` | admin | set password + **revoke all that user's sessions atomically** |
+| `POST /api/admin/users/:id/disabled` `{disabled}` | admin | disable (revokes sessions) / re-enable; self-disable blocked |
+| `DELETE /api/admin/sessions/:id` | admin | revoke one session |
+| `POST /api/admin/rotate-guest` | admin | fresh word-pair guest password (returned **once**) + all guest sessions revoked |
+
+Day-to-day user/password management lives in the PWA's admin console
+(visible to admin sessions only); the endpoints above are what it calls.
 
 ## Deploy
 
@@ -34,30 +53,36 @@ CLOUDFLARE_ACCOUNT_ID=$(agentsecrets get cloudflare_account_id) \
 #   ... pnpm exec wrangler tail tricorder
 ```
 
-Secrets in agentsecrets: `tricorder_service_token` (bridge link),
-`tricorder_device_token_leif` (device "Leif's Phone"). The bridge gets its
-env from `make computer`.
+Secrets in agentsecrets: `tricorder_service_token` (bridge link — the bridge
+gets its env from `make computer`), `tricorder_password_leif` /
+`tricorder_password_ariel` / `tricorder_password_guest` (PWA logins; the
+guest copy goes stale whenever the console rotates it, that's fine — rotate
+the agentsecrets entry only if you need it current).
 
-## Mint a new device
+## Reset a password from the CLI (bootstrap / lockout recovery)
+
+Normally: admin console → Set password. If the admin is locked out:
 
 ```bash
-TOK=$(node -e 'process.stdout.write("trd_"+require("crypto").randomBytes(32).toString("hex"))')
-printf %s "$TOK" | agentsecrets set tricorder_device_token_<who> --scope alacrity \
-  --description "Tricorder device token — <Device Name> (user <handle>)"
-HASH=$(printf %s "$TOK" | node -e 'const c=require("crypto");let d="";process.stdin.on("data",x=>d+=x).on("end",()=>process.stdout.write(c.createHash("sha256").update(d).digest("hex")))')
+cd apps/tricorder
+HASH=$(PW=$(agentsecrets get tricorder_password_leif) node -e '
+const c=require("crypto");const s=c.randomBytes(16);
+const h=c.pbkdf2Sync(process.env.PW,s,100000,32,"sha256");
+process.stdout.write(`pbkdf2$100000$${s.toString("hex")}$${h.toString("hex")}`)')
 CLOUDFLARE_API_TOKEN=$(agentsecrets get cloudflare_api_token) \
 CLOUDFLARE_ACCOUNT_ID=$(agentsecrets get cloudflare_account_id) \
   pnpm exec wrangler d1 execute tricorder --remote --command \
-  "INSERT INTO devices VALUES ('d_<slug>','home','u_<handle>','<Device Name>','$HASH',$(date +%s%3N),NULL);"
+  "UPDATE users SET password_hash='$HASH', failed_attempts=0, locked_until=NULL WHERE handle='leif'; DELETE FROM sessions WHERE user_id='u_leif';"
 ```
 
 ## Local dev / E2E
 
 ```bash
 pnpm exec wrangler d1 migrations apply tricorder --local
-pnpm exec wrangler dev --port 8788 --var MESSAGE_TTL_MS:3000
+pnpm exec wrangler dev --port 8790
 ```
 
-Seed the local D1 with test hashes, then run the E2E driver (see the TNGC-14
-card for the reference script): it covers link auth, enqueue→await→ack,
-online/offline, replay, TTL drop, and 401s against both local and prod.
+Seed the local D1 with a tenant + users carrying test password hashes, then
+drive it with curl: the TNGC-15 card's handoff references the 35-check
+battery (cooldown, guest TTL + forced expiry, rotate-guest lockout, atomic
+revocation on password change, admin gating, offline visibility).

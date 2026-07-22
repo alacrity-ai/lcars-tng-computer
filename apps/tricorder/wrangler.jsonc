@@ -2,6 +2,9 @@
   "name": "tricorder",
   "main": "src/worker.ts",
   "compatibility_date": "2026-07-01",
+  // The PWA. Assets are matched before the Worker runs; /api/*, /link and
+  // /health have no files, so they always reach Hono.
+  "assets": { "directory": "./public" },
   "routes": [{ "pattern": "tricorder.lalalimited.com", "custom_domain": true }],
   "d1_databases": [
     {

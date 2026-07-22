@@ -27,7 +27,7 @@ No architecture change may separate the brain from the repo and the dev server.
    phone / iPad (any network)                      office GPU box (LAN)
 ┌─────────────────────────────┐          ┌────────────────────────────────────┐
 │ TRICORDER PWA               │          │ CLAUDE CODE SESSION (the brain)    │
-│ device login + PIN          │          │  persona + skills + MCP tools      │
+│ user login + password       │          │  persona + skills + MCP tools      │
 │ hold-to-talk → native STT   │          │   ▲ channel event per message      │
 └──────────────┬──────────────┘          │   │ {user, device, transcript}     │
                │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
@@ -86,14 +86,19 @@ development at all times.
 
 ### 3.2 The Voice Input — Tricorder (`apps/tricorder`, Cloudflare)
 
-A PWA any household member logs into as a device ("Leif's Phone", "Mom's Phone",
-"Shared Guest iPad") with a PIN → long-lived device token. Hold-to-talk drives the
-platform's own speech recognition; release posts the transcript. A plain text input
-(with the keyboard's mic key) is the zero-API-risk fallback. The app shows Computer
+A PWA each household member logs into as a **user** — leif (admin), ariel (member),
+guest — with a password, from any device; a "device" is only a session label
+("leif @ iPhone"), and one user can hold many concurrent sessions. Guest sessions
+expire after ~24h, and changing a password revokes every session that user holds,
+so a one-tap **rotate-guest** in the admin console (admin role only: create/disable
+users, reset passwords, revoke sessions) puts the house keys back in the drawer
+after a party. Two first-class input modes, both always visible: **hold-to-talk**
+driving the platform's own speech recognition (release posts the transcript), and a
+**type mode** for loud rooms and speech-mangled names. The app shows Computer
 online/offline from the DO's socket state.
 
 Backend: Hono Worker + **per-tenant Durable Object** + D1 (`tenants`, `users`,
-`devices`, `messages`, later `saved_items`). The DO is the meeting point: phones post
+`sessions`, later `saved_items`). The DO is the meeting point: phones post
 into the queue; the bridge holds an outbound WSS from home and receives pushes.
 
 **Queue contract:** persist every transcript → push down the socket → bridge acks on

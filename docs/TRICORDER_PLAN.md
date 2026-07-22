@@ -31,7 +31,7 @@ Decisions locked 2026-07-22:
    phone / iPad (any network)                      office GPU box (LAN)
 ┌─────────────────────────────┐          ┌────────────────────────────────────┐
 │ TRICORDER PWA               │          │ CLAUDE CODE SESSION (the brain)    │
-│ device login + PIN          │          │  persona + skills + MCP tools      │
+│ user login + password       │          │  persona + skills + MCP tools      │
 │ hold-to-talk → native STT   │          │   ▲ channel event per message      │
 └──────────────┬──────────────┘          │   │ {user, device, transcript}     │
                │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
@@ -66,8 +66,8 @@ Key properties:
   arrive as `{user, device, transcript, ts}` — one input path, fully attributed. The
   terminal is for development only.
 - **Attribution is the identity model.** Users belong to the tenant (household);
-  devices belong to users; "save this to **my** tricorder" resolves from the `user` on
-  the triggering message, not from who owns the session.
+  a device is only a session label on a logged-in user; "save this to **my** tricorder"
+  resolves from the `user` on the triggering message, not from who owns the session.
 - **Two hands, then three.** `console.*` drives the shared wall; `tricorder.*`
   (Phase 5) drives the private per-user data plane. Tricorder and the wall never talk
   to each other — the brain mediates everything.
@@ -97,7 +97,7 @@ proven with zero infrastructure in Phase 2 (and its v1 failed honestly there, he
 | **2 — Event loop v1** | TNGC-13 | *(superseded by TNGC-18)* blocking `await_message` + re-arm discipline | Worked in demo; wedged in soak |
 | **2b — Event loop v2** | TNGC-18 | channels push delivery; remove re-arm/Stop-hook machinery; `--dangerously-load-development-channels server:bridge` | say.sh → channel event → wall; terminal free; zero timeout cycles |
 | **3 — Tricorder backend** | TNGC-14 | `apps/tricorder`: Worker + per-tenant DO + D1; device auth; ack/replay/TTL; bridge outbound WSS; deploy to tricorder.lalalimited.com | Off-LAN curl → wall responds; replay/TTL verified by killing the bridge |
-| **4 — Tricorder PWA v1** | TNGC-15 | Device login + PIN; hold-to-talk via native speech; text fallback; online/offline indicator; installable | Guest picks up TV-room iPad: "tell me about bees" → wall answers |
+| **4 — Tricorder PWA v1** | TNGC-15 | User login (password; leif/ariel/guest, roles); hold-to-talk via native speech + first-class type mode; admin console (create/disable users, rotate-guest); online/offline indicator; installable | Guest picks up TV-room iPad: "tell me about bees" → wall answers |
 | **5 — Personal data plane** | TNGC-16 | `saved_items` schema; `tricorder.*` MCP toolset on the brain; speaker-resolved "save to my tricorder"; PWA list+search; shared-entities design note | Mom saves the bees article; it appears on Mom's phone only |
 | **6 — Appliance hardening** | TNGC-17 | Delete `apps/ear` + await-loop leftovers; supervisor/autostart; nightly session rotation; reconnect torture tests; SOPs | Pull the plug mid-interaction; everything returns unattended |
 
