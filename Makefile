@@ -43,7 +43,7 @@ kiosk:
 # TV-room kiosk: full SOP in docs/sops/tv-room-kiosk.md
 lan:
 	@echo "TV kiosk: Chrome on the TV PC -> http://<office-windows-IP>:5173, then F11 + tap ENGAGE"
-	@echo "One-time Windows step (admin PowerShell): scripts\\expose-lan.ps1"
+	@echo "One-time Windows step (admin PowerShell): scripts/expose-lan.ps1"
 	@printf "vite LAN bind:  " && { ss -tln 2>/dev/null | grep -E '(\*|0\.0\.0\.0):5173 ' >/dev/null \
 		&& echo "0.0.0.0:5173 OK" \
 		|| { ss -tln 2>/dev/null | grep -q ':5173 ' \
