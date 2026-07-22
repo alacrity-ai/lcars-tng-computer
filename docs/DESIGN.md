@@ -1,224 +1,228 @@
 # TNG Computer — Design Document
 
-*A personal Star Trek TNG ship's computer: always-on, wake-word driven, Claude Code as the brain, an LCARS webapp as the face and voice.*
+*A personal Star Trek TNG ship's computer: a persistent Claude Code session as the brain, an LCARS wall on the living-room TV as the shared face, and household phones as the microphones.*
 
-**Status:** Draft v1 — 2026-07-20
-**Repo:** `~/lets-get-rich/tng-computer` (monorepo: webapp, API, voice daemon, Claude skills/MCP package)
+**Status:** v2 — 2026-07-22 (the "Tricorder era" — supersedes v1's wake-word/channels architecture)
+**Repo:** `~/lets-get-rich/tng-computer` (single monorepo — includes the Tricorder cloud app)
+**Phasing:** [`TRICORDER_PLAN.md`](TRICORDER_PLAN.md) · epic **TNGC-10** on kbRelay
 
 ---
 
 ## 1. Executive Summary
 
-A long-running **Claude Code session is the entire brain**. It hears the user (via a wake-word + speech-to-text pipeline that injects transcripts into the session), decides what to do, and acts through MCP tools. The **webapp is a terminal Claude controls, not an app with logic of its own**: a full-screen Vite+React LCARS display that renders whatever Claude tells it to render, speaks whatever Claude tells it to say (in a Majel-Barrett-style computer voice), and hosts the Spotify playback device.
+A long-running **Claude Code session is the entire brain**. It receives attributed
+transcripts from household members' phones, decides what to do, and acts through MCP
+tools. The **webapp is a terminal Claude controls, not an app with logic of its own**:
+a full-screen Vite+React LCARS display that renders whatever Claude tells it to render
+and speaks whatever Claude tells it to say.
 
-Everything Claude can't do natively — visualization, audio output, music playback — lives in the webapp behind MCP tools. Everything else — understanding, reasoning, orchestration, web browsing, service integration — is Claude.
+The load-bearing property — discovered by living with v1, protected by everything in
+v2 — is that **the brain is a development agent inside its own running source tree**.
+The stack runs from the repo via `make dev` on the same machine as the session, so the
+Computer can build its own features on request: asked for a timeline panel that doesn't
+exist, it writes the panel, hot-reloads it onto the wall, and uses it, in one request.
+No architecture change may separate the brain from the repo and the dev server.
 
 ```
-        "Computer, play some jazz and show me the weather"
-                          │
-   ┌──────────────────────▼──────────────────────┐
-   │  EAR DAEMON (Python)                        │
-   │  openWakeWord("computer") → Silero VAD      │
-   │  → faster-whisper STT → transcript          │
-   └──────────────────────┬──────────────────────┘
-                          │ HTTP POST (localhost)
-   ┌──────────────────────▼──────────────────────┐
-   │  BRIDGE (custom channel MCP server)         │
-   │  mcp.notification → running Claude session  │
-   └──────────────────────┬──────────────────────┘
-                          │
-   ┌──────────────────────▼──────────────────────┐
-   │  CLAUDE CODE SESSION (the Computer)         │
-   │  skills + CLAUDE.md persona + MCP tools     │
-   └──────┬───────────────┬───────────────┬──────┘
-          │ console.display│ console.speak │ music.play
-   ┌──────▼───────────────▼───────────────▼──────┐
-   │  API SERVER (Node)                          │
-   │  WebSocket push · TTS synth · Spotify PKCE  │
-   └──────────────────────┬──────────────────────┘
-                          │ WebSocket
-   ┌──────────────────────▼──────────────────────┐
-   │  LCARS WEBAPP (Vite+React, fullscreen)      │
-   │  panels · audio out (Majel TTS) ·           │
-   │  Spotify Web Playback SDK device            │
-   └─────────────────────────────────────────────┘
+   phone / iPad (any network)                      office GPU box (LAN)
+┌─────────────────────────────┐          ┌────────────────────────────────────┐
+│ TRICORDER PWA               │          │ CLAUDE CODE SESSION (the brain)    │
+│ device login + PIN          │          │  persona + skills + MCP tools      │
+│ hold-to-talk → native STT   │          │   ▲ await_message returns          │
+└──────────────┬──────────────┘          │   │ {user, device, transcript}     │
+               │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
+┌──────────────▼──────────────┐          │ │ BRIDGE (MCP server)            │ │
+│ TRICORDER API (Cloudflare)  │          │ │ • blocking await_message tool  │ │
+│ tricorder.lalalimited.com   │  outbound│ │ • outbound WSS client          │ │
+│ Worker (Hono) + D1          │◄─────────┼─┤ • local POST /message          │ │
+│ Durable Object per tenant:  │   WSS    │ │   (office push-to-talk)        │ │
+│  queue · ack · replay ·     │          │ └────────────────────────────────┘ │
+│  60s TTL · online/offline   │          │   │ console.* / tricorder.* MCP    │
+└─────────────────────────────┘          │ ┌─▼──────────────────────────────┐ │
+                                         │ │ API SERVER · WS hub · TTS front│ │
+                                         │ └─┬──────────────────────────────┘ │
+                                         └───┼────────────────────────────────┘
+                                             │ WebSocket (LAN, vite proxy :5173)
+                                  ┌──────────▼───────────┐
+                                  │ LCARS WALL — TV kiosk│
+                                  │ Chrome F11, panels,  │
+                                  │ Piper TTS, YouTube   │
+                                  └──────────────────────┘
 ```
 
----
+Everything Claude can't do natively — visualization, audio output, media playback —
+lives in the webapp behind MCP tools. Everything else — understanding, reasoning,
+orchestration, web browsing — is Claude.
 
-## 2. Research Findings That Shaped This Design
+## 2. Core architectural decisions (locked 2026-07-22)
 
-Verified July 2026. These invalidate a lot of older tutorials.
-
-| Finding | Consequence |
+| Decision | Rationale |
 |---|---|
-| Claude Code has **native voice dictation** (`/voice`, push-to-talk) but **no wake-word / always-listening mode** | We still need our own ear daemon; native `/voice` is a useful dev-mode fallback only |
-| **Channels** (experimental) let an MCP server push events into a *running* session via MCP notifications; custom channels need `--dangerously-load-development-channels` | This is our transcript-injection path. Fallback if channels shift under us: Agent SDK streaming-input loop (§9) |
-| Claude Code has **no native TTS**; community pattern is Stop/PostToolUse hooks → external TTS | Confirms plan: webapp owns TTS behind an MCP `speak` tool |
-| **Picovoice Porcupine free tier died June 30, 2026** | openWakeWord (Apache-2.0) with a custom-trained "computer" model is the wake-word path |
-| **Qwen3-TTS (Jan 2026, Apache-2.0)** does zero-shot voice cloning from a **3-second** reference; ~97ms streaming, low VRAM | Primary TTS engine. Fallbacks: Chatterbox (MIT), XTTS-v2 |
-| Roddenberry estate's official Majel voice shipped only as narration in a 2024 Vision Pro app — **never licensable**; the one community Majel model died with PlayHT (sunset Dec 2025) | We clone locally from cleaned TNG clips for private home use (§6 has the legal/ToS notes) |
-| ElevenLabs / OpenAI **block cloning voices you don't own**; local open models don't | Cloud "Majel-adjacent" voice design is the compliant alternative if we want one |
-| **Spotify Feb 2026 tightening**: dev-mode apps capped at 5 users, owner must have Premium, `/search` limit max 10, many catalog endpoints removed; `localhost` redirect URIs banned (use `127.0.0.1`); Recommendations/Audio Features gone since Nov 2024 | Fine for single-user home use. Playback control + Web Playback SDK survived. Code against the Feb 2026 migration guide only |
-| For 2–10s commands, **VAD-endpoint-then-batch-transcribe beats streaming STT**; Silero VAD is the standard endpointer | Ear daemon: Silero VAD capture → faster-whisper batch. Groq whisper-large-v3-turbo ($0.04/hr) as near-free cloud fallback |
-| Long-running sessions: `--resume` restores full context; Stop hooks / `/loop` keep sessions alive; known wart around MCP subprocess cleanup (claude-code#36730) | Supervisor script + session-resume strategy in §8 |
-
----
+| **Push-to-talk phones, not a wake word.** Input is the Tricorder PWA: hold a button, speak, release. | Button release *is* the endpoint — no VAD tuning, no false accepts, no always-open mic, no WSL2 microphone problem. Kills the entire v1 ear-daemon stack. |
+| **Phone-native STT.** The transcript is produced on the phone (Web Speech API / keyboard dictation). | iPhone/Android recognition is durable and free; the server never sees audio. The GPU's only audio job is TTS. |
+| **No channels.** The session gives itself agency with a blocking `bridge.await_message` MCP tool. | MCP is pull-only — servers can't start turns; channels was the workaround but it's a research preview behind a dev flag. The blocking-tool loop works on stable Claude Code: while blocked, no tokens burn; when a message arrives the tool returns and the session acts, then re-arms. |
+| **Outbound-only connectivity.** The bridge dials out to the Tricorder DO and holds a WebSocket. | Nothing on the internet can reach into the home network; no tunnel, no port forwarding. The phones meet the brain at the Durable Object. |
+| **One monorepo.** Tricorder is `apps/tricorder`, deployed to Cloudflare (`tricorder.lalalimited.com`). | One product, colocated. The deploy target differs; the code lives together. |
+| **Attribution is the identity model.** Every message is `{user, device, transcript, ts}`. | Users belong to the household tenant; "save this to **my** tricorder" resolves per *speaker*, not per session. Foundation for per-user saved items and future shared entities. |
+| **YouTube is the media path.** Spotify scrapped. | It works today and needs no auth dance; the v1 Spotify plan (PKCE, Web Playback SDK, dev-mode caps) is cancelled. |
+| **Piper is the voice.** Majel clone shelved (TNGC-4). | Good-enough now; the Qwen3-TTS clone slot in `apps/tts` stays for when we circle back. Voice-clone research is preserved in TNGC-4, not here. |
 
 ## 3. Components
 
 ### 3.1 The Brain — Claude Code session (`claude/`)
 
-A persistent interactive Claude Code session launched with our channel plugin. Its identity comes from:
+A persistent interactive session. Identity from `CLAUDE.md` (it *is* the Computer:
+terse, precise, "Working." then acts, "Unable to comply." for refusals), ~20 capability
+skills loaded on demand (weather, maps, charts, media, quiz, timers, night sky, recall,
+…), pre-allowed permissions so it never stalls mid-conversation.
 
-- **`CLAUDE.md` persona**: it *is* the Enterprise computer. Terse, precise, slightly formal. Answers verbally via `console.speak`, visually via `console.display`. Never says "I'll go ahead and…" — it says "Working." then does it.
-- **Skills**: `music` (Spotify flows), `display` (panel vocabulary and when to use which), `briefing` (morning summary), etc.
-- **MCP servers**: `console` (display/speak), `music` (Spotify), `bridge` (voice channel in).
-- **Permissions**: pre-allowed tool list so it never blocks on a prompt while the user is standing in the room talking to it.
+**The event loop (v2's control-flow inversion):** when idle, the session calls
+`bridge.await_message(timeout)`. The call blocks — zero inference, zero tokens — until
+a transcript arrives; the session services it through the console tools, then re-arms.
+A persona rule makes re-arming reflexive; a Stop hook is the safety net (a stop with no
+pending await is blocked with "re-arm"). The terminal stops being an input path and
+becomes what it actually is: the development console.
 
-### 3.2 The Ears — voice daemon (`apps/ear/`, Python)
+### 3.2 The Voice Input — Tricorder (`apps/tricorder`, Cloudflare)
 
-Always-on local process owning the microphone:
+A PWA any household member logs into as a device ("Leif's Phone", "Mom's Phone",
+"Shared Guest iPad") with a PIN → long-lived device token. Hold-to-talk drives the
+platform's own speech recognition; release posts the transcript. A plain text input
+(with the keyboard's mic key) is the zero-API-risk fallback. The app shows Computer
+online/offline from the DO's socket state.
 
-1. **Wake word**: openWakeWord running a custom-trained **"computer"** model (one-time synthetic-TTS training pipeline, ~1.5 hr on Colab; the official notebook has bit-rotted — use the maintained community fork). Continuous, CPU-cheap.
-2. **Earcon**: on wake, tell the API server to play the TNG acknowledgment chirp on the webapp (instant feedback that it's listening).
-3. **Capture + endpointing**: Silero VAD; utterance ends after ~600–800ms of silence (tunable).
-4. **STT**: faster-whisper `large-v3-turbo` / `distil-large-v3` locally (sub-second for a 5s clip on RTX-class GPU). Fallback: Groq `whisper-large-v3-turbo` REST.
-5. **Inject**: POST transcript to the bridge channel server → MCP notification into the Claude session.
+Backend: Hono Worker + **per-tenant Durable Object** + D1 (`tenants`, `users`,
+`devices`, `messages`, later `saved_items`). The DO is the meeting point: phones post
+into the queue; the bridge holds an outbound WSS from home and receives pushes.
 
-The daemon knows nothing about meaning. It converts sound into text and passes it on.
+**Queue contract:** persist every transcript → push down the socket → bridge acks on
+hand-to-session → unacked messages replay on reconnect → voice commands **expire 60s**
+after enqueue at replay time (durability is for Wi-Fi blips, not for time-shifting
+speech — "queue Madonna" from 20 minutes ago must not fire on reboot). Expired drops
+are logged.
 
-> **⚠️ WSL2 caveat:** WSL2 has no first-class mic access. Options, in order of preference: (a) run the ear daemon natively on Windows (Python + openWakeWord run fine there) POSTing to the bridge over localhost; (b) WSLg/PulseAudio passthrough (fiddly); (c) long-term, move the whole stack to a dedicated Linux mini-PC by the screen. Decision needed at Phase 3.
+### 3.3 The Bridge (`packages/bridge`)
 
-### 3.3 The Bridge — channel MCP server (`packages/bridge/`)
+The only component that knows how messages enter the session. Three faces:
+`await_message` (blocking MCP tool the session calls), the outbound WSS client (cloud
+messages), and a local `POST /message` (office push-to-talk, same message shape,
+`device: "office"`). If the delivery mechanism ever changes — channels graduates, or we
+move to an Agent SDK streaming host — only this package changes.
 
-Small MCP server registered in the session's `.mcp.json`, declaring the experimental `claude/channel` capability:
+### 3.4 The Hands — console + tricorder MCP (`packages/console-mcp`, +Phase 5)
 
-- Listens on localhost HTTP for `{ "transcript": "...", "confidence": ... }` from the ear daemon.
-- Pushes it into the session as a channel notification (`<channel source="voice">` event).
-- Session launched via `claude --dangerously-load-development-channels server:bridge` (custom channels aren't on the curated allowlist yet).
+**`console` tools** (thin HTTP calls to the API server): `display(view, props)` over a
+registry of 20+ panels (status, text, alert, weather, charts, maps, night sky, quiz,
+timeline, scoreboard, YouTube, …), `speak(text, opts)` (blocks until playback; ordering
+contract: display before speak), `chime(name)`, `screen_state()`.
 
-**Risk**: channels are a research preview; protocol may change. Mitigation in §9.
+**`tricorder` tools** (Phase 5): `save_item` / `list_items` / `get_item` against the
+cloud API with a tenant service token — the brain's hand into the *private* per-user
+data plane. Saves never route through the TNG API server; the wall isn't involved.
 
-### 3.4 The Hands — console + music MCP servers (`packages/console-mcp/`)
+### 3.5 The Face & Voice — API server + wall (`apps/server`, `apps/web`, `apps/tts`)
 
-The tool surface Claude uses to drive the physical room. Thin: each tool is an HTTP call to the API server.
+Node/Fastify API: WebSocket hub (broadcasts to every connected display), TTS front
+(Piper sidecar on :3790; degrade to on-screen captions if it's down), YouTube routes,
+widget/timer state, panel history (powers the `recall` skill).
 
-**`console` tools**
-- `display(view, props)` — render a named panel: `status`, `weather`, `calendar`, `now-playing`, `web`, `chart`, `text`, `alert`, `blank`…
-- `speak(text, opts)` — synthesize in the Computer voice and play through the webapp. Returns when playback completes (so Claude can sequence speech).
-- `chime(name)` — earcons: acknowledge, complete, error, red-alert.
-- `screen_state()` — what's currently displayed (so Claude can reason about the screen).
+Wall: full-screen LCARS (authentic geometry, gold `#FF9900` / lavender `#CC99CC` /
+blue `#9999CC`), panel registry keyed by `view`, karaoke read-along highlighting,
+ambient data cascades. **Same-origin by construction**: the vite dev server proxies
+`/api`, `/audio`, `/ws` to the server, so a remote display only ever needs port 5173.
 
-**`music` tools** (own thin Spotify MCP — the community servers are fragmented/stale; we need ~6 endpoints)
-- `search(query)` (limit ≤10 — Feb 2026 cap), `play(uri|query)`, `pause`, `next`, `queue(uri)`, `now_playing`, `set_volume`.
-
-### 3.5 The Face & Voice — API server + webapp (`apps/server/`, `apps/web/`)
-
-**API server (Node/TypeScript, Fastify or Hono):**
-- WebSocket hub pushing display/speak/chime commands to the webapp.
-- **TTS service**: fronts a local **Qwen3-TTS** process holding the cloned Majel-style voice (reference: 30–60s of cleaned, isolated TNG computer lines). Streams audio to the webapp. Fallbacks: Chatterbox → XTTS-v2 → a stock voice so the system never goes mute.
-- **Spotify auth**: Authorization Code + PKCE. **Redirect URI must be `http://127.0.0.1:<port>/callback` — `localhost` is banned.** Owner Premium required. Stores/refreshes tokens (access 1h, refresh 6mo).
-- REST endpoints mirroring the MCP tools (the MCP servers are thin clients of this API).
-
-**Webapp (Vite + React, fullscreen kiosk):**
-- LCARS aesthetic: authentic panel geometry, the classic palette (gold `#FF9900`, lavender `#CC99CC`, blue `#9999CC`, orange-red `#CC6666`), Antonio/Khan-style condensed type, beveled elbow frames. Idle state = slowly updating status board, like a bridge console.
-- Panel registry keyed by `view` name; WebSocket messages swap/animate panels.
-- **Audio out**: plays TTS streams and earcons. (Browser autoplay policy requires one user gesture after load to unlock audio — kiosk boot flow includes a single "engage" tap.)
-- **Spotify Web Playback SDK**: the tab registers itself as a Connect device ("TNG Computer") so music plays out of the same speakers. Needs Widevine/EME (Chrome/Edge). Playback calls must target this `device_id` or they 404 `NO_ACTIVE_DEVICE`.
-
----
+**Displays:** office browser and/or the TV-room Chrome in F11. Only :5173 is LAN-
+exposed (WSL2 → Windows portproxy via `scripts/expose-lan.ps1`); the control API and
+TTS ports stay loopback-only because they're unauthenticated. Audio unlock: browsers
+block autoplay until a gesture — the wall probes on load and shows a one-tap **ENGAGE**
+overlay when needed (the office kiosk script launches Chrome with the autoplay flag and
+never sees it). SOP: [`sops/tv-room-kiosk.md`](sops/tv-room-kiosk.md).
 
 ## 4. End-to-End Flow
 
-"Computer, play some Miles Davis and dim the lights display."
+"Computer, tell me about bees" — from the guest iPad in the TV room:
 
-1. Ear daemon wake-word hit → chirp plays on webapp → VAD captures utterance → faster-whisper → transcript.
-2. POST → bridge → MCP notification → Claude session receives `<channel source="voice">play some miles davis…</channel>`.
-3. Claude (persona + skills): calls `music.search("Miles Davis")`, `music.play(uri)`, `console.display("now-playing", {...})`, `console.speak("Playing Miles Davis.")`.
-4. API server: Spotify API targets the webapp's device_id; WebSocket pushes the now-playing panel; Qwen3-TTS synthesizes and the webapp speaks.
-5. Total target latency, wake→first spoken response: **< 4s** (wake ~0.2s, capture = utterance length, STT <1s, Claude first tool call ~1–2s, TTS start ~0.3s). Chirp + instant "Working…" panel make perceived latency much lower.
+1. Guest holds the Tricorder button, speaks, releases → phone STT produces the
+   transcript → POST to the Tricorder API with the device token.
+2. DO persists to the queue, pushes `{user: "guest-ipad", device, transcript, ts}` down
+   the socket to the bridge.
+3. The session's pending `await_message` returns the message. Persona: instant spoken
+   acknowledgment (`speak`, non-blocking), then the work.
+4. Claude researches, calls `display("subject", …)` then `speak("Bees are…")` — the
+   API server pushes panels over the WS hub, the Piper sidecar synthesizes, the TV
+   speaks.
+5. Claude re-arms `await_message`. If the guest says "save this to my tricorder",
+   the *attribution on that new message* decides whose saved items it lands in.
 
----
+Latency budget: PTT release → wall responding ≈ phone STT (sub-second) + cloud hop
+(~100–300ms) + first tool call (~1–2s), masked by the acknowledgment line.
 
-## 5. Monorepo Layout
+## 5. Session Configuration
 
-```
-tng-computer/
-├── apps/
-│   ├── web/            # Vite + React LCARS frontend
-│   ├── server/         # Node API: WebSocket hub, TTS front, Spotify auth
-│   └── ear/            # Python: openWakeWord + Silero VAD + faster-whisper
-├── packages/
-│   ├── console-mcp/    # MCP server: display / speak / chime / music tools
-│   ├── bridge/         # MCP channel server: voice transcript → session
-│   └── shared/         # TS types shared by web/server/mcp (panel props, WS protocol)
-├── claude/
-│   ├── CLAUDE.md       # Computer persona + operating rules
-│   ├── skills/         # music, display, briefing, ...
-│   ├── settings.json   # hooks, permissions (pre-allowed tools)
-│   └── mcp.json        # console, music, bridge registrations
-├── voice/
-│   ├── reference/      # cleaned Majel reference clips (gitignored)
-│   └── training/       # openWakeWord "computer" model + training notes
-├── docs/
-│   └── DESIGN.md       # this file
-└── package.json        # pnpm workspaces; ear managed with uv
-```
+- **Launch:** plain `claude` in `claude/` (`make computer`). No dev flags — the v1
+  `--dangerously-load-development-channels` requirement is gone with channels.
+- **Persona:** speak through `console.speak`, display through `console.display`;
+  ≤2 spoken sentences unless asked; display-before-speak ordering; instant
+  acknowledgments with `waitForPlayback: false`; **when idle, `await_message`**.
+- **Permissions:** pre-allow `console.*`, `bridge.*`, `tricorder.*`, WebFetch/WebSearch,
+  whitelisted Bash. MCP tool-timeout raised to cover long `await_message` blocks.
+- **Hooks:** SessionStart (health check, boot panel, "Computer online."); Stop
+  (block stops that leave no pending await → re-arm; clears the wall's working badge).
 
-Tooling: **pnpm workspaces** (TS side), **uv** (Python side), one `dev` script that brings up server + web + ear + prints the `claude` launch command.
+## 6. Always-On Operation
 
----
+- Supervisor (Phase 6): server, TTS sidecar, session with `--resume`; restart on crash;
+  kill by port, not by process-name pattern (the pkill-tsx orphan gotcha).
+- Context: auto-compaction plus nightly rotation — fresh session each night with the
+  previous day summarized into a memory note; keeps cost and latency flat.
+- The wall reconnects its WS with backoff; the bridge reconnects its WSS with backoff
+  and replays unacked (fresh) messages; the ENGAGE tap re-unlocks audio after refresh.
 
-## 6. The Voice (deep-dive)
-
-**Goal:** the flat, warm, precise TNG computer delivery — this is the soul of the project.
-
-**Primary path — local clone (private, non-commercial home use):**
-1. Collect 30–60s of Majel computer lines from TNG; the raw audio carries music/SFX and the post-production "computer filter" — clean with a source separator (Demucs/UVR) and pick dry-ish lines.
-2. Zero-shot clone with **Qwen3-TTS** (Apache-2.0, 3s minimum reference, ~97ms streaming, modest VRAM). Evaluate; if the filtered timbre confuses it, fall back to **Chatterbox** (MIT, ~10s reference — note: outputs carry Resemble's inaudible watermark) or **XTTS-v2** (non-commercial license — fine here).
-3. Optional post-chain in the server: subtle band-pass + compression to taste, matching the shipboard sound.
-
-**Compliant alternative:** ElevenLabs Voice Design prompt ("calm, warm, precise adult female computer voice, mid-Atlantic, measured, slightly formal") — Majel-*adjacent*, zero ToS ambiguity, ~$22/mo.
-
-**Legal/ToS posture (not legal advice):** CA's post-mortem publicity right (Civ. Code §3344.1) is scoped to *commercial* use; the pending NO FAKES Act is not yet law. Private, non-commercial, in-home use of a locally-run clone appears outside these triggers, but it's untested — so: local models only (cloud providers' ToS prohibit it anyway), never publish the cloned voice model or generated audio, and this stays a home project, not a YouTube monetization asset featuring "Majel Barrett."
-
----
-
-## 7. Claude Session Configuration
-
-- **Launch:** `claude --dangerously-load-development-channels server:bridge` inside `claude/` (wrapped in a `computer` supervisor script).
-- **Persona (`CLAUDE.md`):** speak through `console.speak`, display through `console.display`; verbal replies ≤ 2 sentences unless asked for detail; acknowledge long tasks with "Working." then a chime on completion; TNG diction ("Unable to comply" for refusals).
-- **Permissions:** pre-allow `console.*`, `music.*`, WebFetch/WebSearch, and whitelisted Bash — the Computer must never stall on a permission prompt mid-conversation.
-- **Hooks:**
-  - `SessionStart`: verify server/ear health, display boot panel, speak "Computer online."
-  - `Stop`: optional safety net — if the turn produced no `speak` call but has a user-facing answer, synthesize a spoken summary.
-- **Model:** Sonnet (org policy) — right latency/cost profile for an always-on conversational agent anyway.
-
-## 8. Always-On Operation
-
-- Supervisor script (systemd user unit or pm2): starts server, ear daemon, TTS process, Chromium in kiosk mode, and the Claude session; restarts on crash; resumes the session with `--resume <id>` so room context survives restarts.
-- Context growth: auto-compaction handles long sessions; nightly scheduled restart with a fresh session (previous day summarized into a memory note) keeps costs and latency flat.
-- Known wart: MCP subprocesses sometimes outlive sessions (claude-code#36730) — supervisor sweeps orphans on restart.
-
-## 9. Risks & Fallbacks
+## 7. Risks & Fallbacks
 
 | Risk | Likelihood | Fallback |
 |---|---|---|
-| Channels protocol changes / dev flag removed (research preview) | Medium | **Agent SDK streaming-input loop**: a small Node host using `query()` with streaming input replaces "interactive Claude Code + channel" — same brain, same MCP tools, transcript injection becomes trivial. Bridge is isolated so only it changes. |
-| WSL2 mic access | High (known pain) | Ear daemon runs natively on Windows, POSTs over localhost; or dedicated Linux box. |
-| Qwen3-TTS quality on the filtered Majel timbre | Medium | Chatterbox → XTTS-v2 → ElevenLabs Voice Design (Majel-adjacent). |
-| openWakeWord custom-model false accepts/rejects ("computer" is a common word) | Medium | Tune threshold + VAD gating; require short pause after wake word; retrain with more synthetic negatives. |
-| Spotify tightens dev mode further | Low-Medium | Single-user usage is the most protected class; worst case, swap the `music` MCP to a local library/player. |
-| Whisper hallucination on silence | Low | VAD gating (already the mitigation); drop transcripts below confidence floor. |
+| Session fails to re-arm the await loop | Medium, early | Persona rule + Stop-hook block; Phase 2 AC includes an overnight soak and a mid-task-failure test |
+| Blocking-tool pattern is a convention, not a contract | Low | Channels (if it graduates) or an Agent SDK streaming-input host — either replaces only the bridge's delivery guts |
+| Web Speech API quirks (iOS prefixes, permission prompts) | Medium | Text input + keyboard-mic dictation is always present; PTT is progressive enhancement |
+| Cloudflare / internet outage | Low | Wall + office PTT are LAN-local and keep working; PWA shows offline |
+| Interleaved commands from multiple speakers | Certain, by design | `speak` serializes; attribution keeps "my" correct per message; fine at household scale |
+| WSL2 LAN plumbing breaks (IP churn) | Low | Portproxy pins to 127.0.0.1 (survives WSL restarts); DHCP reservation for the Windows IP; `make lan` diagnoses |
 
-## 10. Build Phases
+## 8. Build Phases
 
-1. **Phase 0 — Scaffold**: monorepo, pnpm+uv, shared WS protocol types, kiosk shell with static LCARS boot screen.
-2. **Phase 1 — Text loop (no voice)**: console MCP + API + webapp; drive the display by *typing* into the Claude session. Proves the Claude→MCP→WebSocket→panel spine.
-3. **Phase 2 — The Voice**: Qwen3-TTS service, Majel reference prep, `console.speak`, earcons. The moment it first talks back.
-4. **Phase 3 — The Ears**: openWakeWord training, ear daemon, bridge channel, end-to-end "Computer, …" → spoken reply. (WSL mic decision lands here.)
-5. **Phase 4 — Music**: Spotify PKCE + Web Playback SDK + music MCP + now-playing panel.
-6. **Phase 5 — Polish**: more panels (weather, calendar, web viewer, charts), briefing skill, red-alert mode, nightly session rotation, multi-room ideas.
+See [`TRICORDER_PLAN.md`](TRICORDER_PLAN.md) — epic TNGC-10, tickets TNGC-11…17.
+Summary: **0** record reset · **1** wall on the LAN · **2** await_message loop (local)
+· **3** Tricorder backend + outbound link · **4** Tricorder PWA · **5** personal data
+plane (saved articles) · **6** appliance hardening (ear/channels deleted, supervisor,
+torture tests).
 
-Each phase ends with a demo you can show someone.
+---
+
+## Appendix A — v1 research findings (July 2026) — *historical*
+
+Preserved because the reasoning still informs v2 (and TNGC-4). The **struck-through
+consequences** are obsolete under v2.
+
+| Finding | v1 consequence → v2 status |
+|---|---|
+| Claude Code has native voice dictation but no wake-word mode | ~~Build our own ear daemon~~ → moot; input is phone PTT |
+| Channels (experimental) can push into a running session; needs a dev flag | ~~Transcript-injection path~~ → replaced by the blocking `await_message` loop; channels is a possible future upgrade |
+| No native TTS; community pattern is hooks → external TTS | Confirmed v2: the webapp owns TTS behind `speak` (Piper today) |
+| Picovoice Porcupine free tier died June 2026 | ~~openWakeWord instead~~ → moot |
+| Qwen3-TTS (Apache-2.0) zero-shot clones from 3s reference | Still the Majel-clone plan — shelved in TNGC-4 with the legal/ToS notes |
+| Roddenberry estate's Majel voice never licensable; cloud providers block third-party voice cloning | Ditto — local-only, private home use, per TNGC-4 |
+| Spotify Feb 2026 tightening (dev-mode caps, endpoint removals) | ~~Code against the migration guide~~ → Spotify scrapped entirely; YouTube is the media path |
+| For 2–10s commands, VAD-endpoint-then-batch beats streaming STT | Moot — the phone does STT; button release is the endpoint |
+| Long-running sessions: `--resume`, Stop hooks, MCP subprocess wart (claude-code#36730) | Still governs Phase 6 hardening |
+
+## Appendix B — v1 architecture (superseded)
+
+v1 (design v1, 2026-07-20) was: always-on **ear daemon** (openWakeWord "computer" →
+Silero VAD → faster-whisper) → **channel MCP server** pushing transcripts into the
+session via the experimental channels feature → console MCP → wall, with **Spotify**
+as the music system and a **Majel-cloned** voice as Phase 2. Of that stack: the ear
+daemon is dead code awaiting deletion (TNGC-17), channels was never enabled in anger,
+Spotify was cancelled, and the Majel clone is shelved (TNGC-4). The console-MCP → API
+server → WS hub → LCARS wall spine survives unchanged — it was always the part that
+worked.

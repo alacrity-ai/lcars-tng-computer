@@ -4,21 +4,23 @@ A personal Star Trek TNG ship's computer. A persistent **Claude Code session is 
 this monorepo is everything around it: the LCARS display terminal, the audio pipeline, and
 the MCP servers Claude uses to drive them.
 
-See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design. Tracked on kbRelay board **TNGC**.
+See [`docs/DESIGN.md`](docs/DESIGN.md) for the design and
+[`docs/TRICORDER_PLAN.md`](docs/TRICORDER_PLAN.md) for the current phased plan
+(the "Tricorder era", epic TNGC-10). Tracked on kbRelay board **TNGC**.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `apps/web` | Vite + React fullscreen LCARS webapp (display, TTS audio out, Spotify device) |
-| `apps/server` | Node API: WebSocket hub, TTS front, Spotify auth |
-| `apps/ear` | Python voice daemon: wake word → VAD → STT (Phase 3) |
-| `apps/tts` | Python TTS sidecar: `/synth` text→WAV (Piper baseline; Qwen3-TTS Majel-clone slot) |
+| `apps/web` | Vite + React fullscreen LCARS webapp (display, TTS audio out, YouTube media) |
+| `apps/server` | Node API: WebSocket hub, TTS front |
+| `apps/tts` | Python TTS sidecar: `/synth` text→WAV (Piper; Qwen3-TTS slot shelved with TNGC-4) |
+| `apps/ear` | *(dead — v1 wake-word daemon; removal tracked in TNGC-17)* |
 | `packages/shared` | Typed WebSocket protocol + panel props shared across TS packages |
 | `packages/console-mcp` | MCP server Claude uses: `display` / `speak` / `chime` / `screen_state` |
-| `packages/bridge` | Channel MCP server: voice transcripts → running Claude session (Phase 3) |
+| `packages/bridge` | Message-queue MCP server (rework to blocking `await_message` in TNGC-13) |
 | `claude/` | The Computer's identity: `CLAUDE.md`, skills, MCP registrations, settings |
-| `voice/` | Reference clips + wake-word training artifacts (gitignored) |
+| `voice/` | Piper voice models + legacy training artifacts |
 
 ## Run
 
@@ -27,6 +29,7 @@ make setup        # one-time: pnpm install, TTS deps, Piper voice model
 make dev          # server (:3789) + web (:5173) + TTS sidecar (:3790)   [terminal 1]
 make kiosk        # fullscreen LCARS display                             [terminal 2]
 make computer     # the Claude session that IS the Computer              [terminal 3]
+make lan          # TV-room kiosk status/instructions (docs/sops/tv-room-kiosk.md)
 
 make demo         # tour the display without Claude (panels, speech, chimes)
 make health       # is everything up?
