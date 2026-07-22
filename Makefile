@@ -58,6 +58,7 @@ computer:
 health:
 	@printf "server:  " && (curl -sf --max-time 2 http://127.0.0.1:3789/health || echo "DOWN") && echo
 	@printf "tts:     " && (curl -sf --max-time 2 http://127.0.0.1:3790/health || echo "DOWN (speak degrades to captions)") && echo
+	@printf "bridge:  " && (curl -sf --max-time 2 http://127.0.0.1:3791/health || echo "DOWN (no event loop — is the Computer session running?)") && echo
 	@printf "display: " && (curl -sf --max-time 2 http://127.0.0.1:3789/api/console/screen || echo "unknown") && echo
 
 # A guided tour of everything working, no Claude session needed.

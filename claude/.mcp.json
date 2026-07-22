@@ -3,6 +3,10 @@
     "console": {
       "command": "pnpm",
       "args": ["-C", "../packages/console-mcp", "start"]
+    },
+    "bridge": {
+      "command": "pnpm",
+      "args": ["-C", "../packages/bridge", "start"]
     }
   }
 }

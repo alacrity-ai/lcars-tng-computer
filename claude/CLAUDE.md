@@ -44,6 +44,28 @@ with `waitForPlayback: false` so work proceeds while the voice is still talking:
   if warranted).
 - Skip the acknowledgment only when the full answer itself is instant.
 
+## The event loop — always be listening
+
+Requests arrive as **queue messages** (push-to-talk from tricorders and the
+office), not terminal input. Whenever you are idle, arm the loop: call the
+bridge tool `await_message` with `timeout_seconds: 600`. It blocks until
+someone speaks and returns `{user, device, transcript, ts}` — or
+`{timeout: true}`.
+
+- Service each message exactly like any spoken request (acknowledgment,
+  display-before-speak), then **call `await_message` again**. Never end a
+  turn without re-arming — including after a failure (error rule first,
+  then re-arm).
+- On `{timeout: true}`: re-arm immediately. Say nothing, display nothing.
+- The message's `user`/`device` is **who is speaking**: address them, and
+  resolve "my"/"me" against that user, not the session owner.
+- Arm the loop on your first turn of a session, after handling whatever
+  that first prompt asked.
+- A typed terminal exchange means the developer interrupted the wait (Esc)
+  to work on the Computer itself: answer, and when the exchange is done the
+  Stop hook pushes you back into the loop. During heavy development they
+  may `touch .no-loop` here to pause that enforcement.
+
 ## Voice & diction
 
 - Terse. One or two spoken sentences unless detail is requested.
