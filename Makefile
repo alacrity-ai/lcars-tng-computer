@@ -52,12 +52,29 @@ lan:
 	@echo "windows IPv4 candidates (use one of these on the TV):" && \
 		{ ipconfig.exe 2>/dev/null | tr -d '\r' | grep -i 'IPv4' | sed 's/^ */  /' || echo "  (couldn't query — run ipconfig on Windows)"; }
 
-# Injects the Tricorder link creds from agentsecrets; if unavailable the
-# bridge logs "local-only mode" and office PTT still works.
+# The Computer session, containerized (TNGC-19): the whole process tree —
+# session, file tools, hooks, console+bridge MCP — lives inside the Docker
+# fence (default-deny egress, host secrets absent, repo bind-mounted rw so
+# the self-improvement loop is untouched). Tricorder creds injected from
+# agentsecrets on the HOST; only the token crosses into the container env.
+# --service-ports is what publishes the bridge to host 127.0.0.1:3791.
 # The dev-channels flag is required: without it the bridge's channel
 # notifications are dropped SILENTLY (research-preview behavior). Expect the
-# one-time "local development" confirmation dialog at launch.
+# one-time "local development" confirmation dialog at launch (and a browser
+# login on the very first run — credentials persist in a named volume).
 computer:
+	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
+	docker compose run --rm --service-ports computer
+
+# Rebuild the session image (new Claude Code release, Dockerfile edits).
+# Allowlist edits (docker/allowed-domains.txt) do NOT need a rebuild — just
+# relaunch the session.
+computer-image:
+	docker compose build computer
+
+# The pre-TNGC-19 direct launch — NO container, NO fence. Fallback only
+# (Docker broken, or debugging the container itself).
+computer-bare:
 	cd claude && \
 	TNG_TRICORDER_URL="$${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}" \
 	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \

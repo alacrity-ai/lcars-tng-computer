@@ -43,7 +43,8 @@ local endpoint and rides the same path.
 make setup        # one-time: pnpm install, TTS deps, Piper voice model
 make dev          # server (:3789) + web (:5173) + TTS sidecar (:3790)   [terminal 1]
 make kiosk        # fullscreen LCARS display                             [terminal 2]
-make computer     # the Claude session that IS the Computer              [terminal 3]
+make computer     # the Claude session that IS the Computer — runs in a
+                  # Docker fence (docs/sops/computer-container.md)       [terminal 3]
 make lan          # TV-room kiosk status/instructions (docs/sops/tv-room-kiosk.md)
 
 make demo         # tour the display without Claude (panels, speech, chimes)

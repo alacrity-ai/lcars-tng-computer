@@ -1,0 +1,40 @@
+# The Computer session container (TNGC-19) — the brain runs inside this fence.
+# The dev stack (make dev) stays on the HOST; the rw repo mount below is what
+# keeps the self-improvement loop alive (host vite hot-reloads the session's
+# edits). Launch via `make computer` (it injects the tricorder token and adds
+# --service-ports so the bridge port reaches the host).
+services:
+  computer:
+    build: ./docker
+    image: tng-computer-session
+    stdin_open: true
+    tty: true
+    # NET_ADMIN only for the entrypoint's egress firewall; the session itself
+    # runs unprivileged (node, uid 1000).
+    cap_add: [NET_ADMIN]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # bridge local endpoint for say.sh — host loopback ONLY, never the LAN
+      - "127.0.0.1:3791:3791"
+    volumes:
+      - .:/home/node/tng-computer
+      - tng-claude-config:/home/node/.claude
+      - ./docker/allowed-domains.txt:/etc/tng/allowed-domains.txt:ro
+    environment:
+      # console-mcp + working-badge hooks reach the host API through the gateway
+      TNG_SERVER_URL: http://host.docker.internal:3789
+      # bind 0.0.0.0 INSIDE the container so the published port works;
+      # docker maps it back to host 127.0.0.1 above
+      TNG_BRIDGE_HOST: 0.0.0.0
+      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}
+      TNG_TRICORDER_TOKEN: ${TNG_TRICORDER_TOKEN:-}
+      # local commits by the Computer keep the right author
+      GIT_AUTHOR_NAME: leifktaylor
+      GIT_AUTHOR_EMAIL: leiftaylor@gmail.com
+      GIT_COMMITTER_NAME: leifktaylor
+      GIT_COMMITTER_EMAIL: leiftaylor@gmail.com
+
+volumes:
+  # Session state incl. OAuth — survives restarts, isolated from host ~/.claude
+  tng-claude-config:

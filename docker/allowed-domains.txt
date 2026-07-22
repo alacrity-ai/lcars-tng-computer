@@ -1,0 +1,25 @@
+# Egress allowlist for the Computer container (TNGC-19).
+# One hostname per line; resolved to IPs at container start (relaunch the
+# session after editing). Bind-mounted read-only — no image rebuild needed.
+
+# Claude Code / Anthropic (session API, login, telemetry)
+api.anthropic.com
+claude.ai
+console.anthropic.com
+sentry.io
+
+# Tricorder cloud — the bridge's outbound WSS
+tricorder.lalalimited.com
+
+# Package registry (self-improvement may add dependencies)
+registry.npmjs.org
+
+# Skill data sources (weather / directions / maps / climate)
+api.open-meteo.com
+api.weather.gov
+nominatim.openstreetmap.org
+router.project-osrm.org
+www.ncei.noaa.gov
+
+# Reference reading (WebFetch; WebSearch is server-side and unaffected)
+en.wikipedia.org

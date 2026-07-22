@@ -164,8 +164,12 @@ http.on("error", (err: NodeJS.ErrnoException) => {
   }
   process.exit(1);
 });
-http.listen(PORT, "127.0.0.1", () => {
-  console.error(`[bridge] queue endpoint on http://127.0.0.1:${PORT} (channel push, ttl ${TTL_MS}ms)`);
+// Loopback by default; the Computer container sets TNG_BRIDGE_HOST=0.0.0.0 so
+// Docker can publish the port back to the host's 127.0.0.1 (say.sh). Never
+// bind 0.0.0.0 on a bare host — this endpoint is unauthenticated by design.
+const HOST = process.env.TNG_BRIDGE_HOST ?? "127.0.0.1";
+http.listen(PORT, HOST, () => {
+  console.error(`[bridge] queue endpoint on http://${HOST}:${PORT} (channel push, ttl ${TTL_MS}ms)`);
 });
 
 // ---- the outbound Tricorder link ---------------------------------------------

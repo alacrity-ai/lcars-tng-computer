@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 1 -X POST http://127.0.0.1:3789/api/console/working -H 'content-type: application/json' -d '{\"active\":true}' >/dev/null 2>&1 || true"
+            "command": "curl -s -m 1 -X POST \"${TNG_SERVER_URL:-http://127.0.0.1:3789}/api/console/working\" -H 'content-type: application/json' -d '{\"active\":true}' >/dev/null 2>&1 || true"
           }
         ]
       }
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 1 -X POST http://127.0.0.1:3789/api/console/working -H 'content-type: application/json' -d '{\"active\":false}' >/dev/null 2>&1 || true"
+            "command": "curl -s -m 1 -X POST \"${TNG_SERVER_URL:-http://127.0.0.1:3789}/api/console/working\" -H 'content-type: application/json' -d '{\"active\":false}' >/dev/null 2>&1 || true"
           }
         ]
       }
