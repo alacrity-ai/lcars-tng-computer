@@ -75,7 +75,14 @@
     touch-action: none; -webkit-touch-callout: none;
   }
   #ptt.listening { background: var(--gold); color: var(--ink); box-shadow: 0 0 40px rgba(255,153,0,.55); }
+  #ptt.send { background: var(--gold); color: var(--ink); border-color: #fff; }
   #ptt[disabled] { border-color: #444; color: #666; background: #0a0a0a; }
+  .ptt-holder { position: relative; }
+  #ptt-cancel {
+    position: absolute; top: -4px; right: -4px; width: 48px; height: 48px;
+    border-radius: 50%; border: 2px solid #000; background: var(--red); color: var(--ink);
+    font: inherit; font-size: 22px; font-weight: 700; cursor: pointer;
+  }
   #live { min-height: 44px; margin-top: 14px; color: #fff; font-size: 16px; text-align: center; padding: 0 8px; }
   #toast { min-height: 22px; font-size: 14px; text-align: center; color: var(--blue); }
   #toast.bad { color: var(--red); }
@@ -132,7 +139,10 @@
       <div class="pill" id="pill">…</div>
     </div>
     <div class="ptt-wrap">
-      <button id="ptt">Hold<br>to talk</button>
+      <div class="ptt-holder">
+        <button id="ptt">Hold<br>to talk</button>
+        <button id="ptt-cancel" hidden>&#10005;</button>
+      </div>
       <div id="live"></div>
       <div id="toast"></div>
     </div>
@@ -298,7 +308,9 @@ const ptt = $("ptt");
 // held; `runText` is ALWAYS rebuilt from the full result list of the current
 // run — some engines (iOS Safari) re-deliver grown copies of earlier results
 // on every event, so appending deltas duplicates every prefix.
-let rec = null, held = false, committed = "", runText = "";
+// Release doesn't send: it parks the transcript in `pendingText` for review —
+// the big button becomes SEND, the ✕ discards.
+let rec = null, held = false, committed = "", runText = "", pendingText = "";
 
 if (!SR) {
   ptt.disabled = true;
@@ -307,7 +319,7 @@ if (!SR) {
 }
 
 function beginPTT() {
-  if (!SR || held) return;
+  if (!SR || held || pendingText) return;
   held = true;
   committed = ""; runText = "";
   ptt.classList.add("listening");
@@ -337,40 +349,67 @@ function beginPTT() {
   rec.onerror = (e) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       held = false;
-      endVisuals();
+      resetIdle();
       $("live").textContent = "Microphone permission denied — type below.";
     }
   };
   // iOS ends recognition on its own schedule; while the button is held,
-  // bank this run's text and re-arm a fresh one.
+  // bank this run's text and re-arm a fresh one. On release, park the
+  // transcript for review instead of sending.
   rec.onend = () => {
     committed = (committed + " " + runText).trim();
     runText = "";
     if (held) { try { rec.start(); } catch {} return; }
     const text = committed;
     committed = "";
-    $("live").textContent = "";
-    if (text) send(text);
+    if (text) enterPending(text);
+    else resetIdle();
   };
   try { rec.start(); } catch {}
 }
 
-function endVisuals() {
+function enterPending(text) {
+  pendingText = text;
   ptt.classList.remove("listening");
+  ptt.classList.add("send");
+  ptt.innerHTML = "Send";
+  $("ptt-cancel").hidden = false;
+  $("live").textContent = text;
+}
+
+function resetIdle() {
+  pendingText = "";
+  ptt.classList.remove("listening", "send");
   ptt.innerHTML = "Hold<br>to talk";
+  $("ptt-cancel").hidden = true;
+  $("live").textContent = "";
 }
 
 function endPTT() {
   if (!held) return;
   held = false;
-  endVisuals();
+  ptt.classList.remove("listening");
   if (rec) { try { rec.stop(); } catch {} }
 }
 
-ptt.addEventListener("pointerdown", (e) => { e.preventDefault(); ptt.setPointerCapture(e.pointerId); beginPTT(); });
-ptt.addEventListener("pointerup", endPTT);
-ptt.addEventListener("pointercancel", endPTT);
+ptt.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  if (pendingText) return; // tap-to-send resolves on pointerup
+  ptt.setPointerCapture(e.pointerId);
+  beginPTT();
+});
+ptt.addEventListener("pointerup", () => {
+  if (pendingText) {
+    const t = pendingText;
+    resetIdle();
+    send(t);
+    return;
+  }
+  endPTT();
+});
+ptt.addEventListener("pointercancel", () => { if (!pendingText) endPTT(); });
 ptt.addEventListener("contextmenu", (e) => e.preventDefault());
+$("ptt-cancel").addEventListener("click", resetIdle);
 
 // ---- admin --------------------------------------------------------------------
 function fmtAgo(ts) {
