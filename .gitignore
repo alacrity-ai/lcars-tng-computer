@@ -32,3 +32,8 @@ voice/training/*
 # misc
 .DS_Store
 *.log
+
+# Claude Code session-local state (the committed Computer persona lives in
+# claude/.claude — this is only the root-level local settings dir)
+/.claude/
+**/.claude/settings.local.json
