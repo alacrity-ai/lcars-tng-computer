@@ -54,11 +54,14 @@ lan:
 
 # Injects the Tricorder link creds from agentsecrets; if unavailable the
 # bridge logs "local-only mode" and office PTT still works.
+# The dev-channels flag is required: without it the bridge's channel
+# notifications are dropped SILENTLY (research-preview behavior). Expect the
+# one-time "local development" confirmation dialog at launch.
 computer:
 	cd claude && \
 	TNG_TRICORDER_URL="$${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}" \
 	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
-	claude --dangerously-skip-permissions
+	claude --dangerously-skip-permissions --dangerously-load-development-channels server:bridge
 
 health:
 	@printf "server:  " && (curl -sf --max-time 2 http://127.0.0.1:3789/health || echo "DOWN") && echo

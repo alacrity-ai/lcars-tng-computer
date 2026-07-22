@@ -1,9 +1,9 @@
 {
   "name": "@tng/bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Bridge MCP server: blocking await_message event loop + local message queue + outbound WSS link to the Tricorder cloud queue",
+  "description": "Bridge MCP server: pushes voice commands into the session as channel events; local POST /message + outbound WSS link to the Tricorder cloud queue",
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

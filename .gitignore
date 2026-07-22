@@ -32,5 +32,3 @@ voice/training/*
 # misc
 .DS_Store
 *.log
-# event-loop enforcement pause (touch claude/.no-loop during heavy dev)
-claude/.no-loop

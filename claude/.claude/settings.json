@@ -12,15 +12,12 @@
       "mcp__console__show_profile",
       "mcp__console__show_image",
       "mcp__console__show_quote",
-      "mcp__bridge__await_message",
+      "mcp__bridge__peek_messages",
       "WebFetch",
       "WebSearch"
     ]
   },
   "enableAllProjectMcpServers": true,
-  "env": {
-    "MCP_TOOL_TIMEOUT": "900000"
-  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -38,10 +35,6 @@
           {
             "type": "command",
             "command": "curl -s -m 1 -X POST http://127.0.0.1:3789/api/console/working -H 'content-type: application/json' -d '{\"active\":false}' >/dev/null 2>&1 || true"
-          },
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/hooks/stop-rearm.sh\""
           }
         ]
       }

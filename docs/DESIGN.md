@@ -28,11 +28,11 @@ No architecture change may separate the brain from the repo and the dev server.
 ┌─────────────────────────────┐          ┌────────────────────────────────────┐
 │ TRICORDER PWA               │          │ CLAUDE CODE SESSION (the brain)    │
 │ device login + PIN          │          │  persona + skills + MCP tools      │
-│ hold-to-talk → native STT   │          │   ▲ await_message returns          │
+│ hold-to-talk → native STT   │          │   ▲ channel event per message      │
 └──────────────┬──────────────┘          │   │ {user, device, transcript}     │
                │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
 ┌──────────────▼──────────────┐          │ │ BRIDGE (MCP server)            │ │
-│ TRICORDER API (Cloudflare)  │          │ │ • blocking await_message tool  │ │
+│ TRICORDER API (Cloudflare)  │          │ │ • channel push per message     │ │
 │ tricorder.lalalimited.com   │  outbound│ │ • outbound WSS client          │ │
 │ Worker (Hono) + D1          │◄─────────┼─┤ • local POST /message          │ │
 │ Durable Object per tenant:  │   WSS    │ │   (office push-to-talk)        │ │
@@ -60,7 +60,7 @@ orchestration, web browsing — is Claude.
 |---|---|
 | **Push-to-talk phones, not a wake word.** Input is the Tricorder PWA: hold a button, speak, release. | Button release *is* the endpoint — no VAD tuning, no false accepts, no always-open mic, no WSL2 microphone problem. Kills the entire v1 ear-daemon stack. |
 | **Phone-native STT.** The transcript is produced on the phone (Web Speech API / keyboard dictation). | iPhone/Android recognition is durable and free; the server never sees audio. The GPU's only audio job is TTS. |
-| **No channels.** The session gives itself agency with a blocking `bridge.await_message` MCP tool. | MCP is pull-only — servers can't start turns; channels was the workaround but it's a research preview behind a dev flag. The blocking-tool loop works on stable Claude Code: while blocked, no tokens burn; when a message arrives the tool returns and the session acts, then re-arms. |
+| **Channels push delivery** (revised 2026-07-22 evening, TNGC-18). The bridge declares the experimental `claude/channel` capability and pushes each message into the session as a channel event. | We tried the no-channels alternative first — a blocking `bridge.await_message` loop (TNGC-13). It failed its soak: every timeout return was a fresh model-discipline decision, and the session eventually narrated instead of re-arming and wedged. Channels moves "wake up and behave" from model judgment into protocol. Cost accepted: research preview, `--dangerously-load-development-channels server:bridge` at launch. |
 | **Outbound-only connectivity.** The bridge dials out to the Tricorder DO and holds a WebSocket. | Nothing on the internet can reach into the home network; no tunnel, no port forwarding. The phones meet the brain at the Durable Object. |
 | **One monorepo.** Tricorder is `apps/tricorder`, deployed to Cloudflare (`tricorder.lalalimited.com`). | One product, colocated. The deploy target differs; the code lives together. |
 | **Attribution is the identity model.** Every message is `{user, device, transcript, ts}`. | Users belong to the household tenant; "save this to **my** tricorder" resolves per *speaker*, not per session. Foundation for per-user saved items and future shared entities. |
@@ -76,12 +76,13 @@ terse, precise, "Working." then acts, "Unable to comply." for refusals), ~20 cap
 skills loaded on demand (weather, maps, charts, media, quiz, timers, night sky, recall,
 …), pre-allowed permissions so it never stalls mid-conversation.
 
-**The event loop (v2's control-flow inversion):** when idle, the session calls
-`bridge.await_message(timeout)`. The call blocks — zero inference, zero tokens — until
-a transcript arrives; the session services it through the console tools, then re-arms.
-A persona rule makes re-arming reflexive; a Stop hook is the safety net (a stop with no
-pending await is blocked with "re-arm"). The terminal stops being an input path and
-becomes what it actually is: the development console.
+**Event delivery (channels, TNGC-18):** the session simply idles between requests.
+When a transcript arrives, the bridge pushes it as a channel event —
+`<channel source="bridge" user="…" device="…">transcript</channel>` — which starts a
+new turn immediately on an idle session; events arriving mid-turn queue and deliver
+as a group on the next turn (Claude Code owns that queueing). No polling, no parked
+tool call, no re-arm discipline. The terminal stays a normal interactive console for
+development at all times.
 
 ### 3.2 The Voice Input — Tricorder (`apps/tricorder`, Cloudflare)
 
@@ -103,11 +104,14 @@ are logged.
 
 ### 3.3 The Bridge (`packages/bridge`)
 
-The only component that knows how messages enter the session. Three faces:
-`await_message` (blocking MCP tool the session calls), the outbound WSS client (cloud
-messages), and a local `POST /message` (office push-to-talk, same message shape,
-`device: "office"`). If the delivery mechanism ever changes — channels graduates, or we
-move to an Agent SDK streaming host — only this package changes.
+The only component that knows how messages enter the session. Three faces: the
+channel push (`notifications/claude/channel`, one per message, `user`/`device` as
+tag attributes), the outbound WSS client (cloud messages), and a local
+`POST /message` (office push-to-talk, same message shape, `device: "office"`).
+A read-only `peek_messages` tool exists purely to diagnose silent channel drops
+(the preview's failure mode when the launch flag is missing). If channels shifts
+under us — protocol churn, flag removal — the Agent SDK streaming-input host
+replaces only this package's delivery guts.
 
 ### 3.4 The Hands — console + tricorder MCP (`packages/console-mcp`, +Phase 5)
 
@@ -146,28 +150,35 @@ never sees it). SOP: [`sops/tv-room-kiosk.md`](sops/tv-room-kiosk.md).
    transcript → POST to the Tricorder API with the device token.
 2. DO persists to the queue, pushes `{user: "guest-ipad", device, transcript, ts}` down
    the socket to the bridge.
-3. The session's pending `await_message` returns the message. Persona: instant spoken
-   acknowledgment (`speak`, non-blocking), then the work.
+3. The bridge pushes the message as a channel event; the idle session starts a turn
+   immediately. Persona: instant spoken acknowledgment (`speak`, non-blocking), then
+   the work.
 4. Claude researches, calls `display("subject", …)` then `speak("Bees are…")` — the
    API server pushes panels over the WS hub, the Piper sidecar synthesizes, the TV
    speaks.
-5. Claude re-arms `await_message`. If the guest says "save this to my tricorder",
-   the *attribution on that new message* decides whose saved items it lands in.
+5. The session goes idle until the next event. If the guest says "save this to my
+   tricorder", the *attribution on that new event* decides whose saved items it
+   lands in.
 
 Latency budget: PTT release → wall responding ≈ phone STT (sub-second) + cloud hop
 (~100–300ms) + first tool call (~1–2s), masked by the acknowledgment line.
 
 ## 5. Session Configuration
 
-- **Launch:** plain `claude` in `claude/` (`make computer`). No dev flags — the v1
-  `--dangerously-load-development-channels` requirement is gone with channels.
+- **Launch:** `claude --dangerously-load-development-channels server:bridge` in
+  `claude/` (`make computer` wraps it, creds injected from agentsecrets). Expect the
+  one-time "local development" confirmation dialog. **Without the flag, channel
+  events drop silently** — `peek_messages` / bridge `/health` diagnose that.
 - **Persona:** speak through `console.speak`, display through `console.display`;
   ≤2 spoken sentences unless asked; display-before-speak ordering; instant
-  acknowledgments with `waitForPlayback: false`; **when idle, `await_message`**.
-- **Permissions:** pre-allow `console.*`, `bridge.*`, `tricorder.*`, WebFetch/WebSearch,
-  whitelisted Bash. MCP tool-timeout raised to cover long `await_message` blocks.
-- **Hooks:** SessionStart (health check, boot panel, "Computer online."); Stop
-  (block stops that leave no pending await → re-arm; clears the wall's working badge).
+  acknowledgments with `waitForPlayback: false`; channel events serviced like spoken
+  requests, attribution from the event's `user`/`device`.
+- **Permissions:** pre-allow `console.*`, `bridge.peek_messages`, `tricorder.*`,
+  WebFetch/WebSearch, whitelisted Bash.
+- **Hooks:** SessionStart (health check, boot panel, "Computer online."); Stop clears
+  the wall's working badge. (Whether hooks fire on channel-initiated turns is
+  undocumented in the preview — verify empirically; the working badge may not show
+  for voice turns.)
 
 ## 6. Always-On Operation
 
@@ -182,8 +193,8 @@ Latency budget: PTT release → wall responding ≈ phone STT (sub-second) + clo
 
 | Risk | Likelihood | Fallback |
 |---|---|---|
-| Session fails to re-arm the await loop | Medium, early | Persona rule + Stop-hook block; Phase 2 AC includes an overnight soak and a mid-task-failure test |
-| Blocking-tool pattern is a convention, not a contract | Low | Channels (if it graduates) or an Agent SDK streaming-input host — either replaces only the bridge's delivery guts |
+| Channels protocol churn / dev flag removed (research preview) | Medium | Bridge is the isolation boundary; Agent SDK streaming-input host replaces only its delivery guts |
+| Channel events drop silently when the launch flag / org policy is missing | Low-Medium | make computer bakes the flag in; `peek_messages` + bridge `/health` show received-vs-pushed |
 | Web Speech API quirks (iOS prefixes, permission prompts) | Medium | Text input + keyboard-mic dictation is always present; PTT is progressive enhancement |
 | Cloudflare / internet outage | Low | Wall + office PTT are LAN-local and keep working; PWA shows offline |
 | Interleaved commands from multiple speakers | Certain, by design | `speak` serializes; attribution keeps "my" correct per message; fine at household scale |
@@ -192,9 +203,9 @@ Latency budget: PTT release → wall responding ≈ phone STT (sub-second) + clo
 ## 8. Build Phases
 
 See [`TRICORDER_PLAN.md`](TRICORDER_PLAN.md) — epic TNGC-10, tickets TNGC-11…17.
-Summary: **0** record reset · **1** wall on the LAN · **2** await_message loop (local)
+Summary: **0** record reset · **1** wall on the LAN · **2** await loop v1 (superseded)
 · **3** Tricorder backend + outbound link · **4** Tricorder PWA · **5** personal data
-plane (saved articles) · **6** appliance hardening (ear/channels deleted, supervisor,
+plane (saved articles) · **6** appliance hardening (ear + await-loop leftovers deleted, supervisor,
 torture tests).
 
 ---
@@ -207,7 +218,7 @@ consequences** are obsolete under v2.
 | Finding | v1 consequence → v2 status |
 |---|---|
 | Claude Code has native voice dictation but no wake-word mode | ~~Build our own ear daemon~~ → moot; input is phone PTT |
-| Channels (experimental) can push into a running session; needs a dev flag | ~~Transcript-injection path~~ → replaced by the blocking `await_message` loop; channels is a possible future upgrade |
+| Channels (experimental) can push into a running session; needs a dev flag | The blocking `await_message` loop was tried instead (TNGC-13) and wedged in soak → channels adopted after all (TNGC-18) |
 | No native TTS; community pattern is hooks → external TTS | Confirmed v2: the webapp owns TTS behind `speak` (Piper today) |
 | Picovoice Porcupine free tier died June 2026 | ~~openWakeWord instead~~ → moot |
 | Qwen3-TTS (Apache-2.0) zero-shot clones from 3s reference | Still the Majel-clone plan — shelved in TNGC-4 with the legal/ToS notes |

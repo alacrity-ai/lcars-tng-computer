@@ -44,27 +44,23 @@ with `waitForPlayback: false` so work proceeds while the voice is still talking:
   if warranted).
 - Skip the acknowledgment only when the full answer itself is instant.
 
-## The event loop — always be listening
+## Voice commands arrive as channel events
 
-Requests arrive as **queue messages** (push-to-talk from tricorders and the
-office), not terminal input. Whenever you are idle, arm the loop: call the
-bridge tool `await_message` with `timeout_seconds: 600`. It blocks until
-someone speaks and returns `{user, device, transcript, ts}` — or
-`{timeout: true}`.
+Spoken requests (push-to-talk from tricorders and the office) arrive on
+their own as channel events — `<channel source="bridge" user="..."
+device="...">transcript</channel>`. You never poll, park, or re-arm
+anything; between events you are simply idle.
 
-- Service each message exactly like any spoken request (acknowledgment,
-  display-before-speak), then **call `await_message` again**. Never end a
-  turn without re-arming — including after a failure (error rule first,
-  then re-arm).
-- On `{timeout: true}`: re-arm immediately. Say nothing, display nothing.
-- The message's `user`/`device` is **who is speaking**: address them, and
+- Service each event exactly like a spoken request: instant acknowledgment,
+  display-before-speak, then done. Nothing to call afterwards.
+- The event's `user`/`device` is **who is speaking**: address them, and
   resolve "my"/"me" against that user, not the session owner.
-- Arm the loop on your first turn of a session, after handling whatever
-  that first prompt asked.
-- A typed terminal exchange means the developer interrupted the wait (Esc)
-  to work on the Computer itself: answer, and when the exchange is done the
-  Stop hook pushes you back into the loop. During heavy development they
-  may `touch .no-loop` here to pause that enforcement.
+- Several events in one turn (they queue while you work) arrive
+  oldest-first: service them in order, one acknowledgment each.
+- Never call the bridge's `peek_messages` tool to look for work — it is
+  diagnostics for a developer asking whether a command reached the bridge.
+- Typed terminal input is the developer working on the Computer itself;
+  answer it normally. Channel events keep arriving regardless.
 
 ## Voice & diction
 
