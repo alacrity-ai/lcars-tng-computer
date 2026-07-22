@@ -31,7 +31,7 @@ dev:
 
 # Kill the orchestrator first so it can't respawn/react, then anything on the ports.
 down:
-	@-pkill -f "scripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator: not running"
+	@-pkill -f "[s]cripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator: not running"
 	@-fuser -k -TERM 3789/tcp 2>/dev/null && echo "server  (:3789): stopped" || echo "server  (:3789): not running"
 	@-fuser -k -TERM 5173/tcp 2>/dev/null && echo "web     (:5173): stopped" || echo "web     (:5173): not running"
 	@-fuser -k -TERM 3790/tcp 2>/dev/null && echo "tts     (:3790): stopped" || echo "tts     (:3790): not running"
