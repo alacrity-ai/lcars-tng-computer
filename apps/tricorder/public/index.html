@@ -317,9 +317,21 @@ function beginPTT() {
   rec.continuous = true;
   rec.interimResults = true;
   rec.onresult = (e) => {
-    let t = "";
-    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-    runText = t;
+    // Engines disagree about the results list: some replace an interim entry
+    // in place, others (iOS Safari) append each grown copy as a NEW entry —
+    // ["testing", "testing 1", "testing 1 2"]. Treat an entry that extends
+    // (or repeats) the previous one as a replacement, not a new phrase.
+    const parts = [];
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript.trim();
+      if (!t) continue;
+      const prev = parts[parts.length - 1];
+      const a = t.toLowerCase(), b = prev ? prev.toLowerCase() : null;
+      if (prev && a.startsWith(b)) parts[parts.length - 1] = t;
+      else if (prev && b.startsWith(a)) { /* shrunk re-send — keep prev */ }
+      else parts.push(t);
+    }
+    runText = parts.join(" ");
     $("live").textContent = (committed + " " + runText).trim();
   };
   rec.onerror = (e) => {
