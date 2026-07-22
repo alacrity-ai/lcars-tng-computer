@@ -3,6 +3,7 @@ import { LcarsFrame } from "./components/LcarsFrame";
 import { WidgetLayer } from "./components/WidgetLayer";
 import { Panel } from "./panels/registry";
 import { useSocket } from "./useSocket";
+import { EngageOverlay, useEngage } from "./engage";
 
 /** Tripwire for the stacked-app failure mode (a dev-server re-execution
     mounting a second live copy — two sockets, two karaoke carets, doubled
@@ -28,6 +29,7 @@ function useDuplicateInstanceCheck(): boolean {
 export function App() {
   const { screen, voice, connected, audioLocked, working, widgets } = useSocket();
   const duplicated = useDuplicateInstanceCheck();
+  const { needsEngage, engage } = useEngage();
 
   return (
     <LcarsFrame title="LCARS 40274">
@@ -53,7 +55,10 @@ export function App() {
       )}
       {!connected && <div className="offline-badge">Link offline</div>}
       {duplicated && <div className="offline-badge">Duplicate UI instance — hard refresh</div>}
-      {audioLocked && <div className="audio-locked-badge">Audio muted by browser — tap to enable</div>}
+      {audioLocked && !needsEngage && (
+        <div className="audio-locked-badge">Audio muted by browser — tap to enable</div>
+      )}
+      {needsEngage && <EngageOverlay onEngage={engage} />}
       {working && (
         <div className="working-badge">
           <span className="working-sweep" aria-hidden>

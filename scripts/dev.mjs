@@ -29,6 +29,7 @@ console.log(`
 ┌─────────────────────────────────────────────────────────────┐
 │ TNG Computer dev                                            │
 │   display:  http://127.0.0.1:5173   (pnpm kiosk for fullscreen)
+│   TV kiosk: http://<windows-ip>:5173 from the LAN (make lan / docs/sops/tv-room-kiosk.md)
 │   server:   http://127.0.0.1:3789/health
 │
 │ Launch the Computer (from ./claude):

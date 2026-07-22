@@ -5,7 +5,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 PIPER_VOICE ?= en_US-lessac-medium
 
-.PHONY: help setup dev down kiosk computer health demo earcons clean
+.PHONY: help setup dev down kiosk lan computer health demo earcons clean
 
 help:
 	@echo "TNG Computer"
@@ -13,6 +13,7 @@ help:
 	@echo "  make dev       - run the stack: server :3789, web :5173, tts :3790 (foreground)"
 	@echo "  make down      - stop everything (server, web, tts, dev orchestrator)"
 	@echo "  make kiosk     - open the LCARS display fullscreen (run 'make dev' first)"
+	@echo "  make lan       - status/instructions for the TV-room kiosk (LAN exposure)"
 	@echo "  make computer  - launch the Claude session that IS the Computer"
 	@echo "  make health    - check server / tts / display status"
 	@echo "  make demo      - drive the display without Claude (panels, speech, chimes)"
@@ -38,6 +39,18 @@ down:
 
 kiosk:
 	bash scripts/kiosk.sh
+
+# TV-room kiosk: full SOP in docs/sops/tv-room-kiosk.md
+lan:
+	@echo "TV kiosk: Chrome on the TV PC -> http://<office-windows-IP>:5173, then F11 + tap ENGAGE"
+	@echo "One-time Windows step (admin PowerShell): scripts\\expose-lan.ps1"
+	@printf "vite LAN bind:  " && { ss -tln 2>/dev/null | grep -E '(\*|0\.0\.0\.0):5173 ' >/dev/null \
+		&& echo "0.0.0.0:5173 OK" \
+		|| { ss -tln 2>/dev/null | grep -q ':5173 ' \
+			&& echo "loopback only — restart 'make dev' to pick up the vite host config" \
+			|| echo "not running — run 'make dev' first"; }; }
+	@echo "windows IPv4 candidates (use one of these on the TV):" && \
+		{ ipconfig.exe 2>/dev/null | tr -d '\r' | grep -i 'IPv4' | sed 's/^ */  /' || echo "  (couldn't query — run ipconfig on Windows)"; }
 
 computer:
 	cd claude && claude --dangerously-skip-permissions
