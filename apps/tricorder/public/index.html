@@ -294,7 +294,11 @@ $("btn-admin").onclick = () => { renderAdmin(); show("admin"); };
 // ---- push to talk -------------------------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const ptt = $("ptt");
-let rec = null, held = false, finalText = "", interimText = "";
+// `committed` carries text across engine auto-restarts while the button is
+// held; `runText` is ALWAYS rebuilt from the full result list of the current
+// run — some engines (iOS Safari) re-deliver grown copies of earlier results
+// on every event, so appending deltas duplicates every prefix.
+let rec = null, held = false, committed = "", runText = "";
 
 if (!SR) {
   ptt.disabled = true;
@@ -305,7 +309,7 @@ if (!SR) {
 function beginPTT() {
   if (!SR || held) return;
   held = true;
-  finalText = ""; interimText = "";
+  committed = ""; runText = "";
   ptt.classList.add("listening");
   ptt.innerHTML = "Listening";
   rec = new SR();
@@ -313,13 +317,10 @@ function beginPTT() {
   rec.continuous = true;
   rec.interimResults = true;
   rec.onresult = (e) => {
-    interimText = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) finalText += r[0].transcript;
-      else interimText += r[0].transcript;
-    }
-    $("live").textContent = (finalText + " " + interimText).trim();
+    let t = "";
+    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+    runText = t;
+    $("live").textContent = (committed + " " + runText).trim();
   };
   rec.onerror = (e) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -328,10 +329,14 @@ function beginPTT() {
       $("live").textContent = "Microphone permission denied — type below.";
     }
   };
-  // iOS ends recognition on its own schedule; while the button is held, re-arm.
+  // iOS ends recognition on its own schedule; while the button is held,
+  // bank this run's text and re-arm a fresh one.
   rec.onend = () => {
+    committed = (committed + " " + runText).trim();
+    runText = "";
     if (held) { try { rec.start(); } catch {} return; }
-    const text = (finalText + " " + interimText).trim();
+    const text = committed;
+    committed = "";
     $("live").textContent = "";
     if (text) send(text);
   };
