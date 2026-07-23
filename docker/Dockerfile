@@ -4,7 +4,7 @@
 FROM node:24-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      iptables ipset dnsutils curl git jq procps psmisc \
+      iptables ipset iproute2 dnsutils curl git jq procps psmisc \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@10 @anthropic-ai/claude-code

@@ -10,7 +10,7 @@ PIPER_VOICE ?= en_US-lessac-medium
 help:
 	@echo "TNG Computer"
 	@echo "  make setup     - install everything (pnpm, tts deps, piper voice model)"
-	@echo "  make dev       - run the stack: server :3789, web :5173, tts :3790 (foreground)"
+	@echo "  make dev       - run the stack in Docker: server :3789, web :5173, tts :3790"
 	@echo "  make down      - stop everything (server, web, tts, dev orchestrator)"
 	@echo "  make kiosk     - open the LCARS display fullscreen (run 'make dev' first)"
 	@echo "  make lan       - status/instructions for the TV-room kiosk (LAN exposure)"
@@ -26,12 +26,25 @@ setup:
 		uv run --project apps/tts python -m piper.download_voices $(PIPER_VOICE) --data-dir voice/piper
 	@echo "✔ setup complete — next: make dev (one terminal), make kiosk (another)"
 
+# The dev stack, containerized (TNGC-20): server + wall + TTS run inside the
+# stack container — repo code executes in there, never on the host. Foreground
+# with streaming logs, Ctrl+C stops it. First run builds the image and uv
+# downloads the TTS deps into a volume (a minute or two).
 dev:
+	docker compose up stack
+
+# Rebuild the stack image (Dockerfile change / new node base).
+stack-image:
+	docker compose build stack
+
+# The pre-TNGC-20 host launch — NO container. Fallback only.
+dev-bare:
 	pnpm dev
 
-# Kill the orchestrator first so it can't respawn/react, then anything on the ports.
+# Containers first, then any bare-mode leftovers on the ports.
 down:
-	@-pkill -f "[s]cripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator: not running"
+	@-docker compose down --remove-orphans 2>/dev/null || true
+	@-pkill -f "[s]cripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator (bare): not running"
 	@-fuser -k -TERM 3789/tcp 2>/dev/null && echo "server  (:3789): stopped" || echo "server  (:3789): not running"
 	@-fuser -k -TERM 5173/tcp 2>/dev/null && echo "web     (:5173): stopped" || echo "web     (:5173): not running"
 	@-fuser -k -TERM 3790/tcp 2>/dev/null && echo "tts     (:3790): stopped" || echo "tts     (:3790): not running"

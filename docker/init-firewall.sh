@@ -44,8 +44,18 @@ iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 if [[ -n "$HOST_GW" ]]; then
   iptables -A OUTPUT -d "$HOST_GW" -p tcp --dport "$HOST_API_PORT" -j ACCEPT
 else
-  echo "[firewall] WARN: host.docker.internal unresolved — console API will be unreachable" >&2
+  echo "[firewall] WARN: host.docker.internal unresolved — bare-stack fallback unavailable" >&2
 fi
+# The stack container (console API) lives on the same compose network —
+# allow :3789 within the local subnet so http://stack:3789 works. Loudly
+# refuse to continue if the subnet can't be determined (a silent miss here
+# once cost a debugging session — the rule just didn't exist).
+SUBNET=$(ip -4 route show dev eth0 2>/dev/null | awk '/proto kernel/ {print $1; exit}')
+if [[ -z "$SUBNET" ]]; then
+  echo "[firewall] FAIL: could not determine the container subnet (iproute2 missing?)" >&2
+  exit 1
+fi
+iptables -A OUTPUT -d "$SUBNET" -p tcp --dport "$HOST_API_PORT" -j ACCEPT
 iptables -A OUTPUT -m set --match-set tng-allowed dst -j ACCEPT
 iptables -P OUTPUT DROP
 

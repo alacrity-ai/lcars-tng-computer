@@ -1,9 +1,38 @@
-# The Computer session container (TNGC-19) — the brain runs inside this fence.
-# The dev stack (make dev) stays on the HOST; the rw repo mount below is what
-# keeps the self-improvement loop alive (host vite hot-reloads the session's
-# edits). Launch via `make computer` (it injects the tricorder token and adds
-# --service-ports so the bridge port reaches the host).
+# The TNG Computer containers (TNGC-19/20). The host runs Docker and
+# browsers — nothing else. Repo code EXECUTES only inside these boxes:
+#
+#   stack    — server (:3789) + vite wall (:5173, LAN for the TV kiosk) +
+#              Piper TTS (:3790). `make dev`.
+#   computer — the Claude session (the brain), default-deny egress,
+#              host secrets absent. `make computer`.
+#
+# Both bind-mount the repo rw (the self-improvement loop), but the paths the
+# HOST executes — docker/, compose.yaml, Makefile, scripts/, .git/ — are
+# overlaid read-only in BOTH containers: nothing that runs inside a fence
+# can rewrite the fence, the host tooling, or git hooks. Change those from
+# the host only.
 services:
+  stack:
+    build:
+      context: ./docker
+      dockerfile: stack.Dockerfile
+    image: tng-computer-stack
+    init: true
+    volumes:
+      - .:/home/node/tng-computer
+      - ./docker:/home/node/tng-computer/docker:ro
+      - ./compose.yaml:/home/node/tng-computer/compose.yaml:ro
+      - ./Makefile:/home/node/tng-computer/Makefile:ro
+      - ./scripts:/home/node/tng-computer/scripts:ro
+      - ./.git:/home/node/tng-computer/.git:ro
+      - tng-tts-venv:/opt/venvs
+    ports:
+      - "5173:5173"            # the wall — LAN-exposed (TV kiosk portproxy)
+      - "127.0.0.1:3789:3789"  # console API — host loopback (make health, curl)
+      - "127.0.0.1:3790:3790"  # TTS — host loopback (make health)
+    environment:
+      TNG_ALLOWED_HOSTS: ${TNG_ALLOWED_HOSTS:-}
+
   computer:
     build: ./docker
     image: tng-computer-session
@@ -19,11 +48,18 @@ services:
       - "127.0.0.1:3791:3791"
     volumes:
       - .:/home/node/tng-computer
+      - ./docker:/home/node/tng-computer/docker:ro
+      - ./compose.yaml:/home/node/tng-computer/compose.yaml:ro
+      - ./Makefile:/home/node/tng-computer/Makefile:ro
+      - ./scripts:/home/node/tng-computer/scripts:ro
+      - ./.git:/home/node/tng-computer/.git:ro
       - tng-claude-config:/home/node/.claude
       - ./docker/allowed-domains.txt:/etc/tng/allowed-domains.txt:ro
     environment:
-      # console-mcp + working-badge hooks reach the host API through the gateway
-      TNG_SERVER_URL: http://host.docker.internal:3789
+      # console-mcp + working-badge hooks reach the stack container by
+      # service DNS on the compose network (host.docker.internal:3789 is the
+      # fallback when running a bare stack — see docs/sops/computer-container.md)
+      TNG_SERVER_URL: ${TNG_SERVER_URL:-http://stack:3789}
       # bind 0.0.0.0 INSIDE the container so the published port works;
       # docker maps it back to host 127.0.0.1 above
       TNG_BRIDGE_HOST: 0.0.0.0
@@ -38,3 +74,5 @@ services:
 volumes:
   # Session state incl. OAuth — survives restarts, isolated from host ~/.claude
   tng-claude-config:
+  # TTS python env + uv cache — built in-container, never in the repo's .venv
+  tng-tts-venv:

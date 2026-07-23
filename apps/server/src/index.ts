@@ -10,6 +10,11 @@ import { registerQuoteRoutes } from "./routes/quote.js";
 import { warmSynthCache } from "./tts.js";
 
 const port = Number(process.env.TNG_SERVER_PORT ?? DEFAULT_SERVER_PORT);
+// Loopback by default; the stack container sets TNG_SERVER_HOST=0.0.0.0 so
+// Docker can publish the port (host loopback) and the session container can
+// reach it by service DNS. Never bind 0.0.0.0 on a bare host — the console
+// API is unauthenticated by design.
+const host = process.env.TNG_SERVER_HOST ?? "127.0.0.1";
 
 const app = Fastify({ logger: { level: "info" } });
 const hub = new DisplayHub();
@@ -30,8 +35,8 @@ registerYoutubeRoutes(app, hub);
 registerProfileRoutes(app, hub);
 registerQuoteRoutes(app, hub);
 
-await app.listen({ port, host: "127.0.0.1" });
-app.log.info(`TNG Computer server on http://127.0.0.1:${port}`);
+await app.listen({ port, host });
+app.log.info(`TNG Computer server on http://${host}:${port}`);
 
 // Pre-synthesize stock acknowledgments so first responses are instant.
 void warmSynthCache();

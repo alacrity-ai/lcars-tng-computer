@@ -371,7 +371,13 @@ def synth(req: SynthRequest) -> JSONResponse:
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("TNG_TTS_PORT", "3790")))
+    # Loopback by default; the stack container sets TNG_TTS_HOST=0.0.0.0 so the
+    # published port works. Never bind 0.0.0.0 on a bare host.
+    uvicorn.run(
+        app,
+        host=os.environ.get("TNG_TTS_HOST", "127.0.0.1"),
+        port=int(os.environ.get("TNG_TTS_PORT", "3790")),
+    )
 
 
 if __name__ == "__main__":
