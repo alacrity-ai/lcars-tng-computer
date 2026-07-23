@@ -19,6 +19,12 @@
   "durable_objects": {
     "bindings": [{ "name": "TENANT_HUB", "class_name": "TenantHub" }]
   },
+  // Verification email (TNGC-29). The API key is a Worker secret
+  // (MAILGUN_API_KEY, set via `wrangler secret put`) — never in this file.
+  "vars": {
+    "MAILGUN_DOMAIN": "mg.kbrelay.lalalimited.com",
+    "MAIL_FROM": "TNG Computer <tricorder@mg.kbrelay.lalalimited.com>"
+  },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TenantHub"] }],
   "observability": { "enabled": true }
 }

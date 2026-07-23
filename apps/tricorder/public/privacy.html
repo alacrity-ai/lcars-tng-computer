@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tricorder — Privacy</title>
+<style>
+  body { background:#000; color:#ddd; font-family: Georgia, serif; max-width: 640px; margin: 0 auto; padding: 24px 20px 60px; line-height: 1.6; }
+  h1, h2 { font-family: Antonio, "Arial Narrow", sans-serif; color:#FF9900; letter-spacing:.04em; text-transform: uppercase; }
+  h1 { border-bottom: 3px solid #FF9900; padding-bottom: 8px; }
+  a { color:#9999CC; }
+</style>
+</head>
+<body>
+<h1>Privacy</h1>
+<p>Last updated: July 2026. Short version: this service exists to move your words from
+your phone to your own computer. We keep as little as possible for as short as possible.</p>
+
+<h2>What we store</h2>
+<ul>
+  <li><strong>Account data</strong> — your email, a password hash (never the password),
+      household name, and member handles.</li>
+  <li><strong>Commands in flight</strong> — a voice command is held only until your home
+      computer confirms receipt, and is discarded unread after 60 seconds if your
+      computer is offline. We do not keep a history of what you said.</li>
+  <li><strong>Library items</strong> — things you explicitly save (diagrams, recipes,
+      playlists) are stored until you delete them, visible only inside your household.</li>
+  <li><strong>Operational logs</strong> — errors and delivery events. Logs never contain
+      transcript or library content.</li>
+</ul>
+
+<h2>What we don't do</h2>
+<p>No advertising, no analytics trackers, no selling or sharing data with third parties.
+The only third parties involved are our infrastructure providers (Cloudflare) and our
+email provider (Mailgun, for verification emails only).</p>
+
+<h2>Isolation</h2>
+<p>Every household is a separate tenant. Your computer authenticates with a token only
+your household can mint, and no household can read another's data.</p>
+
+<h2>Deletion &amp; questions</h2>
+<p>Email leif@lalalimited.com to delete your household entirely or ask anything about
+this policy.</p>
+
+<p><a href="/">&#9664; Back to the Tricorder</a></p>
+</body>
+</html>

@@ -66,6 +66,8 @@
   .btn[disabled] { opacity: .4; }
 
   .err { color: var(--red); min-height: 20px; font-size: 15px; margin-top: 12px; }
+  .ok { color: var(--gold); font-size: 15px; }
+  .ok:not(:empty) { margin-bottom: 10px; }
 
   /* main view: Okudagram data rail down the left edge */
   .main-cols { flex: 1; display: flex; gap: 12px; min-height: 0; }
@@ -297,14 +299,46 @@
 
   <!-- LOGIN -->
   <div class="view" id="view-login">
-    <label>Handle</label>
+    <div class="ok" id="login-ok"></div>
+    <label>Handle or email</label>
     <input id="in-handle" autocapitalize="none" autocomplete="username" spellcheck="false">
+    <div id="household-row" hidden>
+      <label>Household</label>
+      <input id="in-household" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="your household name">
+    </div>
     <label>Password</label>
     <input id="in-password" type="password" autocomplete="current-password">
     <label>This device</label>
     <input id="in-device" maxlength="40">
     <button class="btn" id="btn-login">Log in</button>
     <div class="err" id="login-err"></div>
+    <button class="link" id="btn-to-register" style="margin-top:18px">New here? Create a household</button>
+  </div>
+
+  <!-- REGISTER (TNGC-29) -->
+  <div class="view" id="view-register">
+    <button class="link" id="btn-reg-back" style="text-align:left">&#9664; Back to log in</button>
+    <div id="reg-form">
+      <label>Household name</label>
+      <input id="reg-household" autocomplete="off" placeholder="e.g. Taylor House" maxlength="40">
+      <label>Email</label>
+      <input id="reg-email" type="email" autocapitalize="none" autocomplete="email" spellcheck="false">
+      <label>Password</label>
+      <input id="reg-password" type="password" autocomplete="new-password">
+      <button class="btn" id="btn-register">Create household</button>
+      <div class="err" id="reg-err"></div>
+      <div class="muted" style="margin-top:14px">
+        By creating a household you accept the
+        <a href="/tos" target="_blank" rel="noopener" style="color:var(--blue)">terms</a> and
+        <a href="/privacy" target="_blank" rel="noopener" style="color:var(--blue)">privacy policy</a>.
+      </div>
+    </div>
+    <div id="reg-done" hidden>
+      <div class="li-placard" style="padding-top:60px">Check your email</div>
+      <div class="muted" style="text-align:center" id="reg-done-note"></div>
+      <button class="btn lav" id="btn-resend" style="margin-top:24px">Resend the email</button>
+      <div class="err" id="resend-err" style="text-align:center"></div>
+    </div>
   </div>
 
   <!-- MAIN -->
@@ -396,6 +430,7 @@
   <!-- ADMIN -->
   <div class="view" id="view-admin">
     <button class="link" id="btn-back" style="text-align:left">&#9664; Back</button>
+    <button class="btn" id="btn-pair">Pair your Computer</button>
     <button class="btn lav" id="btn-rotate">Rotate guest password</button>
     <div id="admin-users"></div>
     <div class="card">
@@ -413,9 +448,9 @@
 
 <div id="modal">
   <div class="modal-box">
-    <div style="color:var(--gold);text-transform:uppercase;font-weight:700">New guest password</div>
+    <div style="color:var(--gold);text-transform:uppercase;font-weight:700" id="modal-title">New guest password</div>
     <div class="pw" id="modal-pw"></div>
-    <div class="note">Shown once — all previous guest sessions are revoked.</div>
+    <div class="note" id="modal-note">Shown once — all previous guest sessions are revoked.</div>
     <button class="btn" id="btn-modal-close">Done</button>
   </div>
 </div>
@@ -478,24 +513,92 @@ function guessDevice() {
 
 $("btn-login").onclick = async () => {
   $("login-err").textContent = "";
-  try {
-    const data = await api("/api/login", {
-      method: "POST",
-      body: JSON.stringify({
-        handle: $("in-handle").value.trim(),
-        password: $("in-password").value,
-        deviceLabel: $("in-device").value.trim() || guessDevice(),
-      }),
-    });
-    store.token = data.token;
-    store.user = data.user;
-    $("in-password").value = "";
-    enterMain({ user: data.user, deviceLabel: data.deviceLabel });
-  } catch (e) {
-    $("login-err").textContent = e.message;
+  $("login-ok").textContent = "";
+  const household = $("in-household").value.trim();
+  const payload = {
+    handle: $("in-handle").value.trim(),
+    password: $("in-password").value,
+    deviceLabel: $("in-device").value.trim() || guessDevice(),
+  };
+  if (household) payload.household = household;
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // Two households share this handle — reveal the disambiguation field
+    // (remembered across logins once it has worked).
+    if (data.needHousehold) $("household-row").hidden = false;
+    $("login-err").textContent = data.error || ("login failed (" + res.status + ")");
+    return;
   }
+  if (household) localStorage.setItem("tricorder.household", household);
+  store.token = data.token;
+  store.user = data.user;
+  $("in-password").value = "";
+  enterMain({ user: data.user, deviceLabel: data.deviceLabel });
 };
 $("in-password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-login").click(); });
+
+// ---- registration (TNGC-29) ---------------------------------------------------
+$("btn-to-register").onclick = () => { $("reg-err").textContent = ""; show("register"); };
+$("btn-reg-back").onclick = () => show("login");
+
+let regEmail = "";
+$("btn-register").onclick = async () => {
+  $("reg-err").textContent = "";
+  const household = $("reg-household").value.trim();
+  const email = $("reg-email").value.trim();
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ household, email, password: $("reg-password").value }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { $("reg-err").textContent = data.error || ("registration failed (" + res.status + ")"); return; }
+  regEmail = email;
+  $("reg-password").value = "";
+  $("reg-form").hidden = true;
+  $("reg-done").hidden = false;
+  $("reg-done-note").textContent =
+    "We sent a verification link to " + email + ". Your handle is “" + data.handle + "”.";
+};
+
+$("btn-resend").onclick = async () => {
+  $("resend-err").textContent = "";
+  const res = await fetch("/api/verify/resend", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: regEmail }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { $("resend-err").textContent = data.error || "resend failed"; return; }
+  $("resend-err").textContent = "";
+  $("btn-resend").textContent = "Sent ✓";
+  setTimeout(() => { $("btn-resend").textContent = "Resend the email"; }, 3000);
+};
+
+// Arriving via the emailed link: /?verify=<token> — redeem it, then land on
+// the login view with the verdict. The param is scrubbed from the URL either way.
+async function handleVerifyParam() {
+  const token = new URLSearchParams(location.search).get("verify");
+  if (!token) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const res = await fetch("/api/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) $("login-ok").textContent = "Email verified — log in to your household “" + data.household + "”.";
+    else $("login-err").textContent = data.error || "verification failed";
+  } catch {
+    $("login-err").textContent = "verification failed — network error";
+  }
+}
 
 // ---- main -------------------------------------------------------------------
 function enterMain(identity) {
@@ -1301,9 +1404,26 @@ $("btn-rotate").onclick = async () => {
   if (!confirm("Rotate the guest password? All guest sessions are revoked immediately.")) return;
   try {
     const r = await api("/api/admin/rotate-guest", { method: "POST", body: "{}" });
+    $("modal-title").textContent = "New guest password";
+    $("modal-note").textContent = "Shown once — all previous guest sessions are revoked.";
     $("modal-pw").textContent = r.password;
     $("modal").classList.add("open");
     renderAdmin();
+  } catch (e) { $("admin-err").textContent = e.message; }
+};
+
+// Pair your Computer (TNGC-29): the code goes into the house setup wizard.
+// Re-pairing severs whatever box paired before — say so up front.
+$("btn-pair").onclick = async () => {
+  try {
+    const r = await api("/api/admin/pair-code", { method: "POST", body: "{}" });
+    const mins = Math.max(1, Math.round((r.expiresAt - Date.now()) / 60000));
+    $("modal-title").textContent = "Pairing code";
+    $("modal-note").textContent =
+      "Enter this in your Computer's setup (tng pair). Single use, expires in " + mins +
+      " min. Pairing a new box disconnects any previous one.";
+    $("modal-pw").textContent = r.code;
+    $("modal").classList.add("open");
   } catch (e) { $("admin-err").textContent = e.message; }
 };
 $("btn-create").onclick = async () => {
@@ -1325,7 +1445,10 @@ $("btn-modal-close").onclick = () => $("modal").classList.remove("open");
 // ---- boot ---------------------------------------------------------------------
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 $("in-device").value = guessDevice();
+const savedHousehold = localStorage.getItem("tricorder.household");
+if (savedHousehold) { $("in-household").value = savedHousehold; $("household-row").hidden = false; }
 (async () => {
+  await handleVerifyParam();
   if (!store.token) { show("login"); return; }
   try {
     const identity = await api("/api/me");

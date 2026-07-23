@@ -15,6 +15,7 @@ import { CONTRACT_VERSION, type TngMessage } from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
 import { libraryRoutes } from "./library";
+import { mintPairCode, registerRoutes } from "./register";
 
 export { TenantHub } from "./hub";
 
@@ -23,6 +24,7 @@ const MAX_FAILED_LOGINS = 5;
 const LOGIN_COOLDOWN_MS = 5 * 60_000;
 const GUEST_SESSION_TTL_MS = 24 * 60 * 60_000;
 const MAX_DEVICE_LABEL_CHARS = 40;
+const MAX_USERS_PER_TENANT = 8;
 
 const ROLES = ["admin", "member", "guest"] as const;
 type Role = (typeof ROLES)[number];
@@ -72,10 +74,33 @@ app.get("/link", async (c) => {
   return hub(c, tenant.id).fetch(new Request("https://hub/link", c.req.raw));
 });
 
+// ---- self-serve tenancy (TNGC-29): register / verify / pair — all public,
+// all throttled, mounted before the session gate like /api/login -------------
+
+app.route("/api", registerRoutes());
+
 // ---- login (public — registered before the session gate) ---------------------
 
+interface LoginRow {
+  id: string;
+  tenantId: string;
+  handle: string;
+  name: string;
+  role: Role;
+  disabled: number;
+  passwordHash: string | null;
+  failedAttempts: number;
+  lockedUntil: number | null;
+  email: string | null;
+  emailVerifiedAt: number | null;
+}
+
+const LOGIN_COLS = `u.id, u.tenant_id AS tenantId, u.handle, u.name, u.role, u.disabled,
+       u.password_hash AS passwordHash, u.failed_attempts AS failedAttempts,
+       u.locked_until AS lockedUntil, u.email, u.email_verified_at AS emailVerifiedAt`;
+
 app.post("/api/login", async (c) => {
-  let body: { handle?: unknown; password?: unknown; deviceLabel?: unknown };
+  let body: { handle?: unknown; password?: unknown; deviceLabel?: unknown; household?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -88,25 +113,37 @@ app.post("/api/login", async (c) => {
     (typeof body.deviceLabel === "string" ? body.deviceLabel.trim().slice(0, MAX_DEVICE_LABEL_CHARS) : "") ||
     "unknown device";
 
-  // Single-tenant lookup by handle; the uniform 401 below never reveals
-  // whether the handle exists, has no password yet, or is disabled.
-  const user = await c.env.DB.prepare(
-    `SELECT id, tenant_id AS tenantId, handle, name, role, disabled, password_hash AS passwordHash,
-            failed_attempts AS failedAttempts, locked_until AS lockedUntil
-       FROM users WHERE handle = ?`,
-  )
-    .bind(body.handle.trim().toLowerCase())
-    .first<{
-      id: string;
-      tenantId: string;
-      handle: string;
-      name: string;
-      role: Role;
-      disabled: number;
-      passwordHash: string | null;
-      failedAttempts: number;
-      lockedUntil: number | null;
-    }>();
+  // Multi-tenant resolution (TNGC-29): a household slug scopes the handle; an
+  // email is globally unique on its own; a bare handle works while it is
+  // unambiguous (one match across all tenants) — the moment two households
+  // share "mom", the PWA asks for the household name. The uniform 401 below
+  // never reveals whether the identity exists, has no password, or is disabled.
+  const identifier = body.handle.trim().toLowerCase();
+  const household = typeof body.household === "string" ? body.household.trim().toLowerCase() : "";
+  let user: LoginRow | null | undefined;
+  if (household) {
+    user = await c.env.DB.prepare(
+      `SELECT ${LOGIN_COLS} FROM users u JOIN tenants t ON t.id = u.tenant_id
+        WHERE t.slug = ? AND u.handle = ?`,
+    )
+      .bind(household, identifier)
+      .first<LoginRow>();
+  } else if (identifier.includes("@")) {
+    user = await c.env.DB.prepare(`SELECT ${LOGIN_COLS} FROM users u WHERE u.email = ?`)
+      .bind(identifier)
+      .first<LoginRow>();
+  } else {
+    const rows = await c.env.DB.prepare(`SELECT ${LOGIN_COLS} FROM users u WHERE u.handle = ? LIMIT 2`)
+      .bind(identifier)
+      .all<LoginRow>();
+    if (rows.results.length > 1) {
+      return c.json(
+        { error: "that handle exists in more than one household — add your household name", needHousehold: true },
+        400,
+      );
+    }
+    user = rows.results[0];
+  }
 
   if (!user || user.disabled || !user.passwordHash) {
     return c.json({ error: "invalid credentials" }, 401);
@@ -126,6 +163,12 @@ app.post("/api/login", async (c) => {
       return c.json({ error: "too many attempts — try again later", retryAfterMs: LOGIN_COOLDOWN_MS }, 429);
     }
     return c.json({ error: "invalid credentials" }, 401);
+  }
+
+  // Self-registered admins must verify their email before first login;
+  // console-created household members have no email and are never gated.
+  if (user.email && !user.emailVerifiedAt) {
+    return c.json({ error: "verify your email first — check your inbox", unverified: true }, 403);
   }
 
   const token = randomToken();
@@ -347,6 +390,17 @@ app.post("/api/admin/users", async (c) => {
     .bind(tenantId, handle)
     .first();
   if (dupe) return c.json({ error: `handle "${handle}" is taken` }, 409);
+  // Household cap (TNGC-29): the guest identity doesn't count against it.
+  if (role !== "guest") {
+    const n = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role != 'guest'",
+    )
+      .bind(tenantId)
+      .first<{ n: number }>();
+    if ((n?.n ?? 0) >= MAX_USERS_PER_TENANT) {
+      return c.json({ error: `household is full (${MAX_USERS_PER_TENANT} members max)` }, 409);
+    }
+  }
   const id = `u_${crypto.randomUUID().slice(0, 8)}`;
   await c.env.DB.prepare(
     "INSERT INTO users (id, tenant_id, handle, name, created_at, password_hash, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -415,6 +469,16 @@ app.delete("/api/admin/sessions/:id", async (c) => {
     .run();
   if (!res.meta.changes) return c.json({ error: "no such session" }, 404);
   return c.json({ ok: true });
+});
+
+// Pair your Computer (TNGC-29): mint the single-use code the house wizard
+// trades for the service token. One live code per tenant; 15-minute TTL;
+// shown to the admin exactly once.
+app.post("/api/admin/pair-code", async (c) => {
+  const s = c.get("session");
+  const { code, expiresAt } = await mintPairCode(c.env, s.tenantId, s.userId);
+  // Human-friendly display grouping; /api/pair strips separators anyway.
+  return c.json({ code: `${code.slice(0, 4)}-${code.slice(4)}`, expiresAt });
 });
 
 // One tap at the door when the party ends: fresh word-pair password (shown to

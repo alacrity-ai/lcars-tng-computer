@@ -42,12 +42,21 @@ export interface Env {
   /** Library payloads (TNGC-23) — props JSON, one object per saved item. */
   LIBRARY: R2Bucket;
   MESSAGE_TTL_MS?: string;
+  /** Verification email plumbing (TNGC-29). Absent → mail is disabled and
+      registration logs instead of sending (local dev). */
+  MAILGUN_API_KEY?: string;
+  MAILGUN_DOMAIN?: string;
+  MAIL_FROM?: string;
+  /** "1" echoes the verify URL in the register response — LOCAL HARNESSES ONLY. */
+  DEV_ECHO_VERIFY?: string;
 }
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 export class TenantHub extends DurableObject<Env> {
+  private enqueueTimes: number[] = [];
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Keepalive never wakes the hub: the platform answers "ping" with "pong".
@@ -94,6 +103,15 @@ export class TenantHub extends DurableObject<Env> {
     }
 
     if (url.pathname === "/enqueue" && req.method === "POST") {
+      // Per-tenant flood fuse (TNGC-29): a DO is single-threaded per tenant,
+      // so an in-memory sliding window is exact. Generous for a household —
+      // it exists for runaway scripts, not people.
+      const now = Date.now();
+      this.enqueueTimes = this.enqueueTimes.filter((t) => now - t < 60_000);
+      if (this.enqueueTimes.length >= 30) {
+        return json({ error: "rate limit — slow down" }, 429);
+      }
+      this.enqueueTimes.push(now);
       const base = (await req.json()) as TngMessage;
       const msg: CloudMessage = { ...base, id: crypto.randomUUID() };
       await this.ctx.storage.put(`msg:${msg.id}`, msg);
@@ -168,11 +186,12 @@ export class TenantHub extends DurableObject<Env> {
     const cutoff = Date.now() - this.ttlMs;
     const ordered = [...stored.values()].sort((a, b) => a.ts - b.ts);
     for (const cmd of ordered) {
-      const label = isDisplayCommand(cmd) ? cmd.title : cmd.transcript;
       if (cmd.ts < cutoff) {
+        // Log identity + age only — never transcript content (multi-tenant
+        // logs must not carry what people said in their homes, TNGC-29).
         console.log(
-          `[hub] dropped stale command at replay (${Math.round((Date.now() - cmd.ts) / 1000)}s old): ` +
-            `"${label.slice(0, 60)}" from ${cmd.user}/${cmd.device}`,
+          `[hub] dropped stale command at replay (${Math.round((Date.now() - cmd.ts) / 1000)}s old) ` +
+            `id=${cmd.id} from ${cmd.user}/${cmd.device}`,
         );
         await this.ctx.storage.delete(`msg:${cmd.id}`);
         continue;
