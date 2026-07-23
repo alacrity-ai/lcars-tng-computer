@@ -41,6 +41,14 @@ export class TenantHub extends DurableObject<Env> {
     return (await this.ctx.storage.list({ prefix: "msg:" })).size;
   }
 
+  /** Session-pending count as last reported by the bridge (TNGC-21).
+      Meaningless without a live link — report 0 when the bridge is offline
+      rather than a stale number. */
+  private async pending(): Promise<number> {
+    if (!this.online()) return 0;
+    return (await this.ctx.storage.get<number>("pending")) ?? 0;
+  }
+
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
@@ -69,11 +77,20 @@ export class TenantHub extends DurableObject<Env> {
           // dead socket — the message stays stored; replay covers it
         }
       }
-      return json({ ok: true, online: this.online(), queued: await this.depth() });
+      return json({
+        ok: true,
+        online: this.online(),
+        queued: await this.depth(),
+        pending: await this.pending(),
+      });
     }
 
     if (url.pathname === "/status") {
-      return json({ online: this.online(), queued: await this.depth() });
+      return json({
+        online: this.online(),
+        queued: await this.depth(),
+        pending: await this.pending(),
+      });
     }
 
     return json({ error: "not found" }, 404);
@@ -104,6 +121,8 @@ export class TenantHub extends DurableObject<Env> {
       const frame = JSON.parse(data) as LinkUpFrame;
       if (frame.type === "ack" && typeof frame.id === "string") {
         await this.ctx.storage.delete(`msg:${frame.id}`);
+      } else if (frame.type === "pending" && typeof frame.count === "number") {
+        await this.ctx.storage.put("pending", Math.max(0, Math.trunc(frame.count)));
       }
     } catch {
       // not a frame we know — ignore (forward compatibility)

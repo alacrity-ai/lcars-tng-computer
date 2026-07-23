@@ -105,10 +105,10 @@ export class DisplayHub {
       WidgetsMessage is a full-state sync, so producers (TimerEngine, the
       play queue) must not broadcast their own lists — they'd clobber each
       other's. Badge stack order is fixed per producer, not insertion order. */
-  setWidgets(source: "timers" | "queue", widgets: Widget[]) {
+  setWidgets(source: "commands" | "timers" | "queue", widgets: Widget[]) {
     if (widgets.length === 0) this.widgetSources.delete(source);
     else this.widgetSources.set(source, widgets);
-    const composed = (["timers", "queue"] as const).flatMap(
+    const composed = (["commands", "timers", "queue"] as const).flatMap(
       (s) => this.widgetSources.get(s) ?? [],
     );
     this.broadcast({ type: "widgets", widgets: composed });

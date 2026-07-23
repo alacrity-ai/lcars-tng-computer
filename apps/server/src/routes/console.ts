@@ -174,6 +174,18 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     return { ok: true, active };
   });
 
+  // Hit by the bridge (not the model) on every command delivery and on the
+  // session's turn-end hook: the wall's pending-commands badge mirrors how
+  // many voice commands are waiting on the busy session (TNGC-21).
+  app.post<{ Body: { count?: number } }>("/api/console/command-pending", async (req) => {
+    const count = Math.max(0, Math.trunc(req.body?.count ?? 0));
+    hub.setWidgets(
+      "commands",
+      count === 0 ? [] : [{ id: "commands", kind: "commands", count }],
+    );
+    return { ok: true, count };
+  });
+
   const MAP_ACTIONS: MapControlAction[] = ["zoom_in", "zoom_out", "north", "south", "east", "west", "goto"];
   app.post<{ Body: MapControlRequest }>("/api/console/map-control", async (req, reply) => {
     const { action, amount, lat, lng, zoom, title } = req.body ?? {};

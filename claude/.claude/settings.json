@@ -35,6 +35,10 @@
           {
             "type": "command",
             "command": "curl -s -m 1 -X POST \"${TNG_SERVER_URL:-http://127.0.0.1:3789}/api/console/working\" -H 'content-type: application/json' -d '{\"active\":false}' >/dev/null 2>&1 || true"
+          },
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/turn-end\" >/dev/null 2>&1 || true"
           }
         ]
       }

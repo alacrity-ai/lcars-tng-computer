@@ -546,8 +546,19 @@ export interface QueueWidget {
   nextTitle?: string;
 }
 
+/** Pending voice-command badge — commands the bridge has pushed into the
+    session that the current turn hasn't finished absorbing (TNGC-21). The
+    bridge owns the count (it sees every delivery and the turn-end hook);
+    the badge exists iff count > 0. Singleton (id "commands"). */
+export interface CommandsWidget {
+  id: string;
+  kind: "commands";
+  /** Commands delivered since the session's last turn ended. */
+  count: number;
+}
+
 /** Union grows as new widget kinds land (weather badge, now-playing, …). */
-export type Widget = TimerWidget | QueueWidget;
+export type Widget = TimerWidget | QueueWidget | CommandsWidget;
 
 // ---------- Server → webapp ----------
 

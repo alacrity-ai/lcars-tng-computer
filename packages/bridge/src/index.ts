@@ -63,6 +63,37 @@ const server = new McpServer(
 
 let delivered = 0;
 let deliveryFailures = 0;
+
+// ---- pending-commands badge (TNGC-21) ----------------------------------------
+// Counts commands pushed into the session since its last turn ended: while the
+// session is mid-turn, new commands queue in the harness and this is their
+// count; the Stop hook POSTs /turn-end and the badge clears as the queued
+// group is absorbed into the next turn. A command delivered while idle shows
+// briefly as 1 — "command in flight" — until its turn's own Stop.
+// Two sinks, both fire-and-forget: the console server (wall badge widget) and
+// the Tricorder cloud (a "pending" up-frame, surfaced to phones via /status).
+const SERVER_URL = process.env.TNG_SERVER_URL ?? "http://127.0.0.1:3789";
+let pendingCommands = 0;
+
+function pushPending(count: number): void {
+  pendingCommands = count;
+  void fetch(`${SERVER_URL}/api/console/command-pending`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ count }),
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => {
+    // wall badge is best-effort; the count re-syncs on the next change
+  });
+  if (cloudSocket?.readyState === WebSocket.OPEN) {
+    const frame: LinkUpFrame = { v: 1, type: "pending", count };
+    try {
+      cloudSocket.send(JSON.stringify(frame));
+    } catch {
+      // link recycling — the next change re-syncs
+    }
+  }
+}
 /** Ring buffer of recent messages for diagnostics (peek_messages / debugging
     silent channel drops). NOT the delivery path. */
 const recent: Array<InboundMessage & { deliveredAt: number; pushed: boolean }> = [];
@@ -87,6 +118,7 @@ async function deliver(msg: InboundMessage): Promise<void> {
     });
     pushed = true;
     delivered++;
+    pushPending(pendingCommands + 1);
     if (msg.cloudId && cloudSocket?.readyState === WebSocket.OPEN) {
       const frame: LinkUpFrame = { v: 1, type: "ack", id: msg.cloudId };
       cloudSocket.send(JSON.stringify(frame));
@@ -125,9 +157,16 @@ const http = createServer((req, res) => {
       mode: "channel-push",
       delivered,
       deliveryFailures,
+      pendingCommands,
       ttlMs: TTL_MS,
       cloud: cloudState,
     });
+  }
+  // Hit by the session's Stop hook: the turn ended, so every command counted
+  // so far is serviced (or being absorbed into the next turn right now).
+  if (req.method === "POST" && req.url === "/turn-end") {
+    if (pendingCommands !== 0) pushPending(0);
+    return respond(200, { ok: true });
   }
   if (req.method === "POST" && req.url === "/message") {
     let raw = "";
@@ -213,6 +252,10 @@ function startCloudLink() {
       cloudState = "up";
       lastActivity = Date.now();
       console.error("[bridge] tricorder link up");
+      // Re-sync the pending badge after a link blip (frames sent while down
+      // are lost — the count, unlike messages, has no replay).
+      const frame: LinkUpFrame = { v: 1, type: "pending", count: pendingCommands };
+      ws.send(JSON.stringify(frame));
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {
         if (Date.now() - lastActivity > 90_000) {

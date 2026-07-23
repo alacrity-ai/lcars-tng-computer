@@ -2171,6 +2171,9 @@ body {
 .widget-queue {
   border-color: var(--lcars-blue);
 }
+.widget-commands {
+  border-color: var(--lcars-peach);
+}
 .widget-queue-title {
   font-size: 20px;
   font-weight: 700;

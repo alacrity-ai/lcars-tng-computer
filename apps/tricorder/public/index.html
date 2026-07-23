@@ -62,9 +62,11 @@
   /* status strip */
   .strip { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .who { color: var(--lav); font-size: 15px; text-transform: uppercase; }
+  .pills { display: flex; gap: 8px; }
   .pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 12px; color: var(--ink); background: #555; text-transform: uppercase; }
   .pill.on  { background: var(--gold); }
   .pill.off { background: var(--red); }
+  .pill.q   { background: var(--lav); }
 
   /* push to talk */
   .ptt-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; }
@@ -161,7 +163,10 @@
   <div class="view" id="view-main">
     <div class="strip">
       <div class="who" id="who"></div>
-      <div class="pill" id="pill">…</div>
+      <div class="pills">
+        <div class="pill q" id="qpill" hidden></div>
+        <div class="pill" id="pill">…</div>
+      </div>
     </div>
     <div class="ptt-wrap">
       <div class="ptt-holder">
@@ -289,20 +294,35 @@ function enterMain(identity) {
   startPolling();
 }
 
-let pollTimer = null;
+// Adaptive poll: 15s at rest, 2s while commands are pending on the Computer
+// (or just after a send, so the queue badge appears without waiting a cycle).
+let pollTimer = null, fastUntil = 0;
 async function pollStatus() {
   try {
     const s = await api("/api/status");
-    setPill(s.online);
+    setPill(s.online, s.pending || 0);
   } catch { /* 401 already handled; network blips keep last state */ }
 }
-function setPill(online) {
+function setPill(online, pending) {
   const pill = $("pill");
   pill.textContent = online ? "Computer online" : "Computer offline";
   pill.className = "pill " + (online ? "on" : "off");
+  const q = $("qpill");
+  q.hidden = !(pending > 0);
+  if (pending > 0) {
+    q.textContent = "Queue " + pending;
+    fastUntil = Math.max(fastUntil, Date.now() + 10000);
+  }
+  schedulePoll();
 }
-function startPolling() { stopPolling(); pollStatus(); pollTimer = setInterval(pollStatus, 15000); }
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function schedulePoll() {
+  if (!me) return;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => { await pollStatus(); schedulePoll(); },
+    Date.now() < fastUntil ? 2000 : 15000);
+}
+function startPolling() { stopPolling(); pollStatus(); schedulePoll(); }
+function stopPolling() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && me) pollStatus(); });
 
 // Tricorder chirps: press-to-listen and transmit. Instantiated once and
@@ -330,7 +350,8 @@ async function send(text) {
   chirp(sndSend);
   try {
     const r = await api("/api/message", { method: "POST", body: JSON.stringify({ transcript: text }) });
-    setPill(r.online);
+    fastUntil = Date.now() + 30000; // watch for our command landing in the queue
+    setPill(r.online, r.pending || 0);
     if (r.online) toast("Transmitted");
     else toast("Computer offline — command not delivered", true);
   } catch (e) {

@@ -37,6 +37,15 @@ export function WidgetLayer({ widgets }: { widgets: Widget[] }) {
   return (
     <div className="widget-layer">
       {widgets.map((w) => {
+        if (w.kind === "commands") {
+          return (
+            <div key={w.id} className="widget-badge widget-commands">
+              <span className="widget-label">Commands</span>
+              <span className="widget-time">{w.count}</span>
+              <span className="widget-sub">queued</span>
+            </div>
+          );
+        }
         if (w.kind === "queue") {
           return (
             <div key={w.id} className="widget-badge widget-queue">

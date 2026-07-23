@@ -25,7 +25,13 @@ export interface CloudMessage extends TngMessage {
     the hub). */
 export type LinkDownFrame = { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage };
 
-/** Frames sent up the /link socket (bridge → cloud). An ack means the
-    message was handed to the session (returned by await_message); the hub
-    deletes it and will never replay it. */
-export type LinkUpFrame = { v: typeof CONTRACT_VERSION; type: "ack"; id: string };
+/** Frames sent up the /link socket (bridge → cloud).
+    - ack: the message was handed to the session; the hub deletes it and
+      will never replay it.
+    - pending: how many delivered commands the session hasn't absorbed yet
+      (TNGC-21) — the hub stores the latest and serves it on /status so the
+      Tricorder app can badge it. Additive in v1: both ends ignore unknown
+      frame types, so a version bump is not required. */
+export type LinkUpFrame =
+  | { v: typeof CONTRACT_VERSION; type: "ack"; id: string }
+  | { v: typeof CONTRACT_VERSION; type: "pending"; count: number };
