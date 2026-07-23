@@ -84,6 +84,10 @@ anything else.
 
 ### Library
 
+- **`cast-external-device`** — architecture of casting Netflix/Prime to a
+  Chromecast (mDNS → Cast v2 :8009) or Fire TV (ADB :5555 deep-link), TV's
+  native app plays, Computer relays transport. Title it "Path B — Casting to
+  Chromecast / Fire TV". Hand-built, no generator.
 - **`periodic-table`** — all 118 elements, colored by family, legend and
   f-block rows included. Title it "The Periodic Table of the Elements".
   The generator that produced it is `assets/periodic-table.gen.py` (data +
