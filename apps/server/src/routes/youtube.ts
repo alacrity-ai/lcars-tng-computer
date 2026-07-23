@@ -232,6 +232,38 @@ export async function searchYoutube(
     }));
 }
 
+/** One track of a saved playlist (TNGC-25) — metadata only; playability is
+    re-decided at restore time by the TNGC-24 decoration. */
+interface PlaylistTrack {
+  videoId: string;
+  title?: string;
+  channel?: string;
+  durationSeconds?: number;
+}
+
+function asTracks(value: unknown): PlaylistTrack[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+    .filter((t) => typeof t.videoId === "string" && /^[A-Za-z0-9_-]{11}$/.test(t.videoId as string))
+    .map((t) => ({
+      videoId: t.videoId as string,
+      title: typeof t.title === "string" ? t.title : undefined,
+      channel: typeof t.channel === "string" ? t.channel : undefined,
+      durationSeconds: typeof t.durationSeconds === "number" ? t.durationSeconds : undefined,
+    }));
+}
+
+/** Restore a saved playlist (TNGC-25): REPLACE the play queue with tracks
+    2..N and start track 1 through the embed-vs-audio decoration. Assigned a
+    real implementation inside registerYoutubeRoutes (it needs the hub
+    closures); the console display route calls it for view === "playlist",
+    which is what makes the PWA's "Display on wall" and the voice path
+    restore identically with no bridge involvement. */
+export let restorePlaylist: (props: Record<string, unknown>) =>
+  | { ok: true; started: PlaylistTrack; queued: number }
+  | { error: string } = () => ({ error: "youtube routes not registered yet" });
+
 export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // Candidates from the most recent search, in rank order — the pool the
   // runtime auto-advance draws from when a played video errors on the wall.
@@ -337,6 +369,48 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
     return reply.code(400).send({ error: "action must be add, skip, clear, or list" });
   });
+
+  // The playlist snapshot (TNGC-25): now playing + everything queued, in
+  // order — what "save this playlist" captures. Read by console-mcp so the
+  // track list flows server → MCP → cloud without touching model context.
+  app.get("/api/console/playlist/current", async (_req, reply) => {
+    const s = hub.state;
+    const now: PlaylistTrack[] =
+      s.view === "youtube" && typeof s.props.videoId === "string"
+        ? [
+            {
+              videoId: s.props.videoId,
+              title: typeof s.props.title === "string" ? s.props.title : undefined,
+              channel: typeof s.props.channel === "string" ? s.props.channel : undefined,
+            },
+          ]
+        : [];
+    const tracks = [...now, ...queue];
+    if (tracks.length === 0) {
+      return reply.code(409).send({ error: "nothing is playing and nothing is queued" });
+    }
+    return { ok: true, tracks, count: tracks.length };
+  });
+
+  restorePlaylist = (props) => {
+    const tracks = asTracks(props.tracks);
+    if (tracks.length === 0) return { error: "playlist has no playable tracks" };
+    const [first, ...rest] = tracks;
+    // REPLACE the queue: playing a playlist means starting that vibe, not
+    // appending to whatever was pending.
+    queue = rest.slice(0, MAX_QUEUE);
+    if (rest.length > MAX_QUEUE) {
+      console.warn(`[youtube] playlist restore truncated ${rest.length - MAX_QUEUE} tracks (queue cap ${MAX_QUEUE})`);
+    }
+    void broadcastYoutube({
+      videoId: first.videoId,
+      title: first.title,
+      channel: first.channel,
+      autoplay: true,
+    });
+    pushQueueWidget();
+    return { ok: true, started: first, queued: queue.length };
+  };
 
   // The audio stream proxy (TNGC-24): the wall's <audio> element plays
   // /api/console/audio/<id>. Proxy, never redirect — googlevideo URLs are

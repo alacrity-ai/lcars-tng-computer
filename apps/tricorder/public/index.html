@@ -1125,6 +1125,33 @@ function renderPayload(view, props, box) {
       }
       return;
     }
+    case "playlist": {
+      // A restorable play queue (TNGC-25): Display on wall replaces the
+      // current queue with these tracks and starts the first one.
+      const tracks = Array.isArray(props.tracks) ? props.tracks : [];
+      const head = mk("div", "cap", tracks.length + " track" + (tracks.length === 1 ? "" : "s") +
+        " — Display on wall starts the whole set");
+      head.style.textAlign = "left";
+      const ol = mk("ol");
+      for (const t of tracks) {
+        const li = document.createElement("li");
+        li.textContent = t && t.title ? t.title : (t && t.videoId) || "?";
+        const bits = [];
+        if (t && t.channel) bits.push(t.channel);
+        if (t && typeof t.durationSeconds === "number") {
+          const m = Math.floor(t.durationSeconds / 60), s = t.durationSeconds % 60;
+          bits.push(m + ":" + String(s).padStart(2, "0"));
+        }
+        if (bits.length) {
+          const d = document.createElement("div");
+          d.className = "det";
+          d.textContent = bits.join(" · ");
+          li.appendChild(d);
+        }
+        ol.appendChild(li);
+      }
+      return;
+    }
     default:
       mk("div", "li-placard", "Live panel — view on the wall.");
   }

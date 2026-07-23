@@ -26,6 +26,9 @@ const FAMILY_BY_VIEW: Record<string, string> = {
   steps: "procedure", quiz: "procedure",
   code: "notation", math: "notation",
   youtube: "media",
+  // Not a wall panel: a restorable play-queue snapshot (TNGC-25). The house
+  // display route turns it back into now-playing + queue.
+  playlist: "media",
 };
 const FAMILIES = [...new Set(Object.values(FAMILY_BY_VIEW))];
 

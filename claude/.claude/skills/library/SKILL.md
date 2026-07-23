@@ -48,6 +48,21 @@ media (youtube bookmarks).
 Saved `data`-family items are snapshots — "your saved AAPL quote is from
 January" beats presenting stale numbers as current. Offer a fresh lookup.
 
+## Playlists — "save this playlist" / "play my party mix"
+
+The whole music session — the playing track PLUS every queued track, in
+order — saves as **one playlist item**:
+
+- "Save this playlist (to my tricorder)" → `library save_playlist {owner}`.
+  A spoken name ("…as party mix") → pass `name`. Confirm with the count:
+  "Saved: nineteen tracks."
+- "Play my party mix" / "put on my saved playlist" → search (it's in the
+  media family), then `library display {id}` — this **replaces** the current
+  play queue and starts track one. Confirm briefly with the count.
+- Nothing playing or queued → the tool 409s; say there's no playlist to save.
+- A single playing track with an empty queue saves fine, but plain `save`
+  (the youtube bookmark) is usually what they mean then.
+
 ## Sending — "send this to Ariel"
 
 A copy lands in the recipient's library, marked as from the sender.

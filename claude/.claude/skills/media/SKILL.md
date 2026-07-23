@@ -79,6 +79,9 @@ one-line spoken confirmation is enough.
 - **"Play X" while a queue exists** plays X now and leaves the queue intact
   — it resumes after X. Mention that only if the user seems surprised.
 - Queue cap is 25; a full queue returns 409.
+- **"Save this playlist"** (current track + everything queued, as one
+  reusable item) and **"play my party mix"** (restore it later) → the
+  `library` skill, action `save_playlist` / `display`.
 
 ## Transport controls
 

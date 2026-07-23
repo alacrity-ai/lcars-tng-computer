@@ -28,7 +28,7 @@ import { getArticle, parseArticleUrl } from "./article.js";
 import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
-import { decorateYoutubeProps, getQueue } from "./youtube.js";
+import { decorateYoutubeProps, getQueue, restorePlaylist } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
 const CHUNK_MIN_CHARS = 180;
@@ -149,6 +149,14 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (!view) return reply.code(400).send({ error: "view is required" });
     // A new panel supersedes an in-flight reading session.
     cancelActiveReading();
+    // A saved playlist isn't a panel — it's queue state (TNGC-25). Restoring
+    // here means the PWA's "Display on wall" (bridge POSTs to this route)
+    // and the voice path both work with zero extra machinery.
+    if ((view as string) === "playlist") {
+      const result = restorePlaylist(props ?? {});
+      if ("error" in result) return reply.code(409).send(result);
+      return { view, ...result };
+    }
     // Embed-blocked youtube videos flip to the extracted-audio path here —
     // server-decided, from cache (TNGC-24); the session never reasons about it.
     const resolved = view === "youtube" ? await decorateYoutubeProps(props ?? {}) : (props ?? {});

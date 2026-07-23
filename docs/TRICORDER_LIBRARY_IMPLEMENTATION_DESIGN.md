@@ -282,6 +282,35 @@ creds via agentsecrets inline). Steps 2/3/5 touch console-mcp/bridge/skills → 
 activate at the **next `make computer` restart**; batch them onto a restart Leif is
 already taking. Stack picks up the console routes by hot reload.
 
+## 11b. Playlist items (TNGC-25)
+
+A playlist — **now playing + every queued track, in order** — is a first-class
+library item: `view: "playlist"`, family `media`, props
+`{ tracks: [{videoId, title?, channel?, durationSeconds?}] }`. Not a wall
+panel; it's a *restorable queue state* (~2 KB for a 20-track party).
+
+- **Save (voice):** "save this playlist [as party mix]" → `library
+  save_playlist {owner, name?}` → console-mcp GETs
+  `/api/console/playlist/current` (hub's youtube panel + the play queue,
+  server-side — zero bytes through the model) → cloud ingest. Default title
+  `"<first track> +N more"`. 409 when nothing is playing or queued. Save from
+  the phone is deliberately out of scope: the queue lives house-side, and you
+  save the vibe while you're in the room.
+- **Restore (both paths, one branch):** the console display route intercepts
+  `view === "playlist"` → `restorePlaylist(props)` in youtube.ts: the play
+  queue is **replaced** with tracks 2..N (capped at MAX_QUEUE), track 1
+  broadcasts through the TNGC-24 embed-vs-audio decoration, and auto-advance
+  does the rest. Because the bridge's display dispatch already POSTs
+  `{view, props}` to that route, the PWA's "Display on wall" and the voice
+  path both restore with **zero bridge or contract changes**. Restoring
+  replaces the current queue by design — playing a playlist means starting
+  that vibe, not appending to the old one.
+- **PWA:** native renderer — count header + ordered track list (title,
+  channel · duration). Send/Delete/search work generically. It files under
+  the `media` chip; the row's `playlist` view label is its badge.
+- Tracks carry metadata only — never `audioOnly`/`startSeconds`; playability
+  is re-decided at restore time (embeddability changes; TNGC-24 owns it).
+
 ## 12. Decisions log (closing the handoff's open questions)
 
 | Question | Decision | Why |

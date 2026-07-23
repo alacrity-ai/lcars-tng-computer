@@ -457,26 +457,33 @@ server.registerTool(
       "save {owner} — capture the CURRENT wall panel to owner's library ('save to my " +
       "tricorder' → owner is the channel event's user; typed input with no user → the " +
       "session owner). Returns {id, title}; confirm briefly ('Saved to your tricorder.'). " +
+      "save_playlist {owner, name?} — capture the whole music session: the playing track " +
+      "PLUS every queued track, in order, as ONE playlist item ('save this playlist', " +
+      "'save this queue as party mix' → name: 'Party Mix'). Displaying a playlist item " +
+      "later REPLACES the play queue and starts it. 409 when nothing is playing or queued. " +
       "search {owner, q?, family?} — list owner's items, metadata only ('what's in my " +
       "library', 'show my saved diagrams'). Speak titles, never ids. family: prose | data | " +
       "visual | procedure | notation | media. " +
       "display {id} — put a saved item back on the wall ('show my saved warp core diagram' " +
-      "→ search first, pick the match, display its id). Instant, nothing regenerated. " +
+      "→ search first, pick the match, display its id). Instant, nothing regenerated. For a " +
+      "PLAYLIST item ('play my party mix') this restores the play queue and starts track 1 " +
+      "— confirm with the track count ('Party mix: nineteen tracks. Playing.'). " +
       "send {id, to} — copy an item to another member's library ('send this to Ariel'; if " +
       "the panel isn't saved yet, save {owner: speaker} first, then send). " +
       "remove {id} — delete from owner's library (search first to get the right id). " +
       "Saved items are FROZEN copies: data-family items (quotes, weather, scores) show " +
       "their capture time, not live data.",
     inputSchema: {
-      action: z.enum(["save", "search", "display", "send", "remove"]),
+      action: z.enum(["save", "save_playlist", "search", "display", "send", "remove"]),
       owner: z.string().optional(),
       id: z.string().optional(),
       to: z.string().optional(),
       q: z.string().optional(),
+      name: z.string().optional(),
       family: z.enum(["prose", "data", "visual", "procedure", "notation", "media"]).optional(),
     },
   },
-  async ({ action, owner, id, to, q, family }) => {
+  async ({ action, owner, id, to, q, name, family }) => {
     switch (action) {
       case "save": {
         if (!owner) throw new Error("save needs owner (the speaking user's handle)");
@@ -488,6 +495,25 @@ server.registerTool(
         };
         const saved = await saveItem({ owner, view: current.view, title: current.title, props: current.props });
         return textResult(JSON.stringify({ id: saved.id, title: saved.title, family: saved.family }));
+      }
+      case "save_playlist": {
+        if (!owner) throw new Error("save_playlist needs owner (the speaking user's handle)");
+        // Track list flows server → here → cloud; the model sees id + title + count.
+        const current = JSON.parse(await call("/api/console/playlist/current")) as {
+          tracks: Array<{ title?: string }>;
+          count: number;
+        };
+        const first = current.tracks[0]?.title ?? "Playlist";
+        const title =
+          name?.trim() ||
+          (current.count > 1 ? `${first} +${current.count - 1} more` : first);
+        const saved = await saveItem({
+          owner,
+          view: "playlist",
+          title,
+          props: { tracks: current.tracks },
+        });
+        return textResult(JSON.stringify({ id: saved.id, title: saved.title, tracks: current.count }));
       }
       case "search": {
         if (!owner) throw new Error("search needs owner (whose library to search)");
