@@ -138,6 +138,38 @@ the `news` panel; don't repeat it.)
 - **Not handling missing/empty data**: A panel that crashes on incomplete props will crash the wall
 - **CSS that assumes a specific viewport size**: The LCARS display is full-screen; use responsive units
 
+## Prebuilt SVG assets — the diagram cache
+
+Some diagram panels carry a large, deterministic SVG (the periodic table is
+~33k characters) that is expensive for the model to emit and never changes.
+Re-emitting it every time is slow — not because the wall is slow, but because
+every byte transits the model's context on the way to the `display` tool.
+
+The fix: **resolve the SVG in the console MCP, by reference.** The model passes
+`props.svgAsset: "<slug>"` on a `diagram` view instead of `props.svg`. The MCP
+(`packages/console-mcp/src/index.ts`, `loadDiagramAsset`) reads
+`claude/.claude/skills/diagrams/assets/<slug>.svg` off disk and substitutes it
+into `props.svg` before forwarding to the server. The wall and server are
+unchanged — they only ever see `svg`.
+
+Why the MCP and not the server: the assets are authored alongside the diagrams
+skill (session side), and the MCP runs in that same fence, so it has natural
+read access. The server (stack fence) may not. This keeps the resolver where
+the files live. Override the directory with `TNG_DIAGRAM_ASSETS_DIR`.
+
+Rules that keep it safe and honest:
+- The slug is validated against `^[a-z0-9][a-z0-9-]*$` — no `/`, `.`, or `..`,
+  so a reference can never escape the assets dir.
+- A missing or misnamed asset throws, and the error surfaces to the model
+  (it does not silently render an empty panel).
+- Only cache **timeless** content. Anything with a date — prices, standings,
+  weather — must never become an asset.
+
+The runtime half of this (when to save, the library of slugs, how to display
+by reference) lives in `claude/.claude/skills/diagrams/SKILL.md` under
+"Prebuilt assets". Keep the two in sync: a new asset means a new library bullet
+there, not a code change here.
+
 ## Roadmap panels (don't add yet)
 
 These are intentionally NOT in `PANEL_VIEWS` (see the comment in shared/index.ts):

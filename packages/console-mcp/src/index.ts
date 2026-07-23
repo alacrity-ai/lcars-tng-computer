@@ -4,12 +4,38 @@
  * Thin stdio MCP wrapper over the @tng/server console REST API.
  * All intelligence stays in the Claude session; this just forwards.
  */
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DEFAULT_SERVER_PORT, PANEL_VIEWS } from "@tng/shared";
 
 const BASE = process.env.TNG_SERVER_URL ?? `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
+
+// Prebuilt diagram SVGs live beside the diagrams skill (authored session-side).
+// The MCP — the Computer's hands, in the same fence — reads them so a big,
+// deterministic diagram renders WITHOUT its ~30k characters ever transiting the
+// model's context. Override the location with TNG_DIAGRAM_ASSETS_DIR.
+const DIAGRAM_ASSETS_DIR =
+  process.env.TNG_DIAGRAM_ASSETS_DIR ??
+  resolve(dirname(fileURLToPath(import.meta.url)), "../../../claude/.claude/skills/diagrams/assets");
+
+/** Load a prebuilt diagram by slug. The slug is restricted to a safe kebab
+    charset so it can never escape the assets dir (no `/`, `.`, `..`). Throws a
+    user-legible error the display handler surfaces to the model. */
+async function loadDiagramAsset(slug: string): Promise<string> {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`invalid svgAsset "${slug}" — use a kebab-case slug like "periodic-table"`);
+  }
+  const path = join(DIAGRAM_ASSETS_DIR, `${slug}.svg`);
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    throw new Error(`no prebuilt diagram "${slug}" (looked in ${DIAGRAM_ASSETS_DIR})`);
+  }
+}
 
 async function call(path: string, body?: unknown): Promise<string> {
   const res = await fetch(`${BASE}${path}`, {
@@ -49,9 +75,12 @@ server.registerTool(
       "moment; steer it afterwards with sky_control, never by re-displaying, " +
       "image {url, title?, caption?, body?, source?} — framed image; with body it becomes a " +
       "library record (blurb beside image). For wiki subjects prefer show_profile instead, " +
-      "diagram {title?, svg, caption?} — compose complete inline SVG (viewBox required, the " +
-      "wall scales it) for visual explanations the chart panel can't express: recursion " +
-      "trees, flow diagrams, geometry, architectures, " +
+      "diagram {title?, svg | svgAsset, caption?} — compose complete inline SVG (viewBox " +
+      "required, the wall scales it) for visual explanations the chart panel can't express: " +
+      "recursion trees, flow diagrams, geometry, architectures. For a PREBUILT diagram pass " +
+      "svgAsset: '<slug>' (e.g. 'periodic-table') INSTEAD of svg — the server-side hands read " +
+      "the saved SVG so its bytes never pass through you; never read the .svg file and inline " +
+      "it yourself, " +
       "quiz {subject, questionNumber, question, choices: [string], score?: {correct, answered}, " +
       "selectedIndex?, correctIndex?, explanation?} — one multiple-choice question; redisplay " +
       "with correctIndex (+ selectedIndex) to reveal the answer (explanation shown when missed), " +
@@ -81,7 +110,18 @@ server.registerTool(
       props: z.record(z.unknown()).optional(),
     },
   },
-  async ({ view, props }) => textResult(await call("/api/console/display", { view, props })),
+  async ({ view, props }) => {
+    // Resolve a prebuilt diagram reference to its SVG here, in the hands, so
+    // the markup is never something the model had to carry. svgAsset is a
+    // convenience the wall never sees — it only ever receives `svg`.
+    let resolved = props;
+    if (view === "diagram" && props && typeof props.svgAsset === "string") {
+      const { svgAsset, ...rest } = props;
+      const svg = await loadDiagramAsset(svgAsset); // throws → surfaced to the model
+      resolved = { ...rest, svg };
+    }
+    return textResult(await call("/api/console/display", { view, props: resolved }));
+  },
 );
 
 server.registerTool(

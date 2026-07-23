@@ -361,7 +361,11 @@ export interface NowPlayingPanelProps {
 export interface DiagramPanelProps {
   title?: string;
   /** Complete inline <svg> markup. MUST carry a viewBox (the wall scales it
-      to fit); scripts and event handlers are stripped before render. */
+      to fit); scripts and event handlers are stripped before render.
+      The wall always receives this. A caller may instead pass `svgAsset:
+      "<slug>"` to the display tool for a prebuilt diagram — the console MCP
+      resolves it to this `svg` from disk before broadcasting, so `svgAsset`
+      never reaches the wall (see console-mcp loadDiagramAsset). */
   svg: string;
   /** One-line explanation shown under the diagram. */
   caption?: string;

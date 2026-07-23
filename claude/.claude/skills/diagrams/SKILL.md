@@ -45,8 +45,19 @@ the detail.
 
 Some diagrams are big, deterministic, and asked for repeatedly. Their
 finished SVG lives under `assets/`. **Before building any diagram, check
-the library below** — if it's there, read the file and pass its contents
-verbatim as the `svg` prop; never rebuild it by hand.
+the library below** — if it's there, display it by reference and don't
+rebuild it by hand:
+
+```
+display({ view: "diagram", props: { svgAsset: "periodic-table", title: "…", caption: "…" } })
+```
+
+Pass **`svgAsset: "<slug>"` instead of `svg`** — the console's hands read
+`assets/<slug>.svg` on the server side and slot it in, so the ~30k
+characters never pass through you. Do **not** Read the `.svg` file and
+inline it into the `svg` prop; that pumps every byte through your context
+(slow, exactly what the cache exists to avoid). `svgAsset` and `svg` are
+mutually exclusive — a hand-composed diagram still passes `svg`.
 
 **When to save.** Two triggers, same procedure:
 - the user says so — "save this diagram", "keep that", "remember this one";
@@ -62,16 +73,19 @@ anything with a date on it. When in doubt, don't.
 2. If a script generated it, save that too as `assets/<kebab-slug>.gen.*`
    — future edits are edit-and-re-run, not redraw. Hand-built SVGs have no
    generator; that's fine.
-3. Add a bullet to the library below: file, what it shows, the display
-   title to use, and the generator if one exists.
+3. Add a bullet to the library below: the **slug** (its `svgAsset` value),
+   what it shows, the display title to use, and the generator if one exists.
 4. Confirm to the user in one spoken sentence ("Saved — I can show that
    instantly now.").
 
+The slug is just the filename without `.svg`: `assets/periodic-table.svg`
+→ `svgAsset: "periodic-table"`. Slugs are kebab-case; the resolver rejects
+anything else.
+
 ### Library
 
-- **Periodic table** — `assets/periodic-table.svg`. All 118 elements, colored
-  by family, legend and f-block rows included. Title it "The Periodic Table
-  of the Elements". The generator that produced it is
-  `assets/periodic-table.gen.py` (data + layout, ~50px cells on a 950×498
-  canvas) — edit and re-run that if the table itself needs changing, then
-  overwrite the `.svg`.
+- **`periodic-table`** — all 118 elements, colored by family, legend and
+  f-block rows included. Title it "The Periodic Table of the Elements".
+  The generator that produced it is `assets/periodic-table.gen.py` (data +
+  layout, ~50px cells on a 950×498 canvas) — edit and re-run that if the
+  table itself needs changing, then overwrite `assets/periodic-table.svg`.
