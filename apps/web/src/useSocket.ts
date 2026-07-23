@@ -41,6 +41,11 @@ export function useSocket() {
   /** TNGC-26: what the persistent PlaybackLayer is playing — set by youtube
       displays and `playback track` messages, cleared by stop. */
   const [playback, setPlayback] = useState<PanelProps | null>(null);
+  /** TNGC-27: the voice setting as React state (drives the muted badge) and
+      a transient flash shown for a few seconds after any CHANGE. */
+  const [voiceState, setVoiceState] = useState({ volume: 100, muted: false });
+  const [voiceFlash, setVoiceFlash] = useState<{ volume: number; muted: boolean } | null>(null);
+  const voiceFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const workingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Kills in-flight speech (audio or caption timer) and reports speak_done. */
@@ -124,8 +129,17 @@ export function useSocket() {
           // Background track swap / session teardown — panel untouched.
           setPlayback(msg.action === "track" ? (msg.props ?? null) : null);
         } else if (msg.type === "voice_state") {
+          // Flash the new level only when something actually CHANGED — the
+          // sync a reconnect re-delivers must not ghost-flash the wall.
+          const changed = msg.volume !== voiceAudio.volume || msg.muted !== voiceAudio.muted;
           voiceAudio.volume = msg.volume;
           voiceAudio.muted = msg.muted;
+          setVoiceState({ volume: msg.volume, muted: msg.muted });
+          if (changed) {
+            setVoiceFlash({ volume: msg.volume, muted: msg.muted });
+            if (voiceFlashTimer.current) clearTimeout(voiceFlashTimer.current);
+            voiceFlashTimer.current = setTimeout(() => setVoiceFlash(null), 3000);
+          }
         } else if (msg.type === "widgets") {
           setWidgets(msg.widgets);
         } else if (msg.type === "chime") {
@@ -362,5 +376,5 @@ export function useSocket() {
     };
   }, []);
 
-  return { screen, voice, connected, audioLocked, working, widgets, playback };
+  return { screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash };
 }

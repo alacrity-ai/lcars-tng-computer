@@ -28,7 +28,8 @@ function useDuplicateInstanceCheck(): boolean {
 }
 
 export function App() {
-  const { screen, voice, connected, audioLocked, working, widgets, playback } = useSocket();
+  const { screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash } =
+    useSocket();
   const duplicated = useDuplicateInstanceCheck();
   const { needsEngage, engage } = useEngage();
 
@@ -56,6 +57,24 @@ export function App() {
           </div>
         </div>
       )}
+      {/* transient confirmation after any voice-setting change (TNGC-27) */}
+      {voiceFlash && (
+        <div className="voice-volume-flash">
+          {voiceFlash.muted ? (
+            <span className="vvf-label">Voice muted</span>
+          ) : (
+            <>
+              <span className="vvf-label">Voice {voiceFlash.volume}</span>
+              <span className="vvf-bar">
+                <span className="vvf-fill" style={{ width: `${voiceFlash.volume}%` }} />
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {/* persistent reminder while the voice is silenced — answers come as
+          panels and captions until someone says "voice back on" */}
+      {voiceState.muted && !voiceFlash && <div className="voice-muted-badge">Voice muted</div>}
       {!connected && <div className="offline-badge">Link offline</div>}
       {duplicated && <div className="offline-badge">Duplicate UI instance — hard refresh</div>}
       {audioLocked && !needsEngage && (

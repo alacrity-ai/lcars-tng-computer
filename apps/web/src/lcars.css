@@ -710,6 +710,65 @@ body {
 
 .widget-nowplaying .widget-label { color: var(--lcars-lavender); }
 
+/* Voice-setting feedback (TNGC-27): a 3s flash on any change, bottom-center
+   where the voice captions live — it's ABOUT the voice; and a small
+   persistent badge while muted (bottom-right, clear of widgets/badges). */
+.voice-volume-flash {
+  position: fixed;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 22px;
+  border: 2px solid var(--lcars-gold);
+  border-radius: 18px;
+  background: rgba(10, 6, 0, 0.92);
+  z-index: 1100;
+  animation: modal-pop-in 0.2s ease-out;
+}
+@keyframes modal-pop-in {
+  from { transform: translateX(-50%) scale(0.85); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+.vvf-label {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lcars-gold);
+}
+.vvf-bar {
+  width: 180px;
+  height: 10px;
+  border-radius: 5px;
+  background: #221a08;
+  overflow: hidden;
+}
+.vvf-fill {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--lcars-gold);
+  transition: width 0.25s ease-out;
+}
+.voice-muted-badge {
+  position: fixed;
+  bottom: 34px;
+  right: 40px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lcars-lavender);
+  border: 1px solid var(--lcars-lavender);
+  border-radius: 10px;
+  padding: 4px 12px;
+  opacity: 0.85;
+  z-index: 1050;
+}
+
 /* ---------- Results panel ---------- */
 
 .results-panel {
