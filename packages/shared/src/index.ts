@@ -122,6 +122,12 @@ export interface YouTubePanelProps {
   /** Defaults to true — the kiosk launches Chrome with autoplay allowed. */
   autoplay?: boolean;
   startSeconds?: number;
+  /** TNGC-24: play the extracted audio stream (server proxy) instead of the
+      iframe embed — the path for embed-blocked music. Usually set by the
+      SERVER (embeddability cache / runtime fallback), not the session. */
+  audioOnly?: boolean;
+  /** Uploader name for the audio now-playing card. */
+  channel?: string;
 }
 
 export interface SearchResult {
@@ -745,11 +751,14 @@ export interface ScreenStateMessage {
 }
 
 /** The wall's YouTube player failed (101/150 = embedding disabled, 100 = not
-    found). The server auto-advances to the next viable search result. */
+    found). The server retries the same video as extracted audio (TNGC-24),
+    then auto-advances to the next viable search result. `audio` marks a
+    failure of the audio path itself, so the fallback never loops. */
 export interface VideoErrorMessage {
   type: "video_error";
   videoId: string;
   code?: number;
+  audio?: boolean;
 }
 
 /** The wall's YouTube player reached the natural end of its video
@@ -990,6 +999,10 @@ export interface YoutubeSearchResult {
   durationSeconds?: number;
   viewCount?: number;
   url: string;
+  /** TNGC-24: false = iframe embedding disabled. Still fully playable — the
+      server plays it as extracted audio automatically. Results keep YouTube
+      relevance order; nothing is dropped for being embed-blocked. */
+  embeddable?: boolean;
 }
 
 export interface YoutubeSearchResponse {

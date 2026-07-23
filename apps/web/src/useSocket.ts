@@ -290,12 +290,13 @@ export function useSocket() {
     const onVideoError = (e: Event) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const { videoId, code } = ((e as CustomEvent).detail ?? {}) as {
+      const { videoId, code, audio } = ((e as CustomEvent).detail ?? {}) as {
         videoId?: string;
         code?: number;
+        audio?: boolean;
       };
       if (!videoId) return;
-      ws.send(JSON.stringify({ type: "video_error", videoId, code }));
+      ws.send(JSON.stringify({ type: "video_error", videoId, code, audio }));
     };
     window.addEventListener("tng-video-error", onVideoError);
 

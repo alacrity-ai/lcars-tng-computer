@@ -62,7 +62,10 @@ server.registerTool(
       "Render a panel on the LCARS display. Views: status (idle board), text {title?, body}, " +
       "alert {level: yellow|red, title?, message?}, blank, " +
       "weather {location, days: [{name, high, low?, conditions, precip?}], units?}, " +
-      "youtube {videoId, title?, autoplay?, startSeconds?}, " +
+      "youtube {videoId, title?, channel?, autoplay?, startSeconds?, audioOnly?} — audioOnly " +
+      "plays the extracted audio stream with a now-playing card; you almost never set it " +
+      "yourself (embed-blocked videos flip to audio automatically, server-side) — pass it only " +
+      "when the user explicitly asks for audio-only playback, " +
       "results {query, results: [{title, url, snippet?}]} (numbered — user picks by number), " +
       "article {title, paragraphs, page?, url?, byline?, siteName?} (usually via open_url instead), " +
       "chart {title, kind: line|bar|pie, series: [{name?, points: [{label, value}]}], unit?, " +
@@ -168,12 +171,14 @@ server.registerTool(
       "Search YouTube natively (server-side yt-dlp). ALWAYS use this — never WebSearch — " +
       "when looking for a video or music to play ('play X', songs, covers, mixes, any " +
       "video request): it queries YouTube's own engine and finds small-channel uploads " +
-      "web search misses. Results are pre-filtered to embeddable videos, and if a played " +
-      "video still fails on the wall the server automatically plays the next result — no " +
-      "action needed from you. Returns {results: [{videoId, title, channel, " +
-      "durationSeconds, viewCount, url}]}. Pick the best match and display the youtube " +
-      "panel with its videoId; show the results panel instead when the choice is " +
-      "genuinely ambiguous.",
+      "web search misses. EVERY result is playable: embed-blocked ones (embeddable: false " +
+      "— most major-label music) play automatically as extracted audio with a now-playing " +
+      "card, and runtime failures fall back server-side — no action needed from you " +
+      "either way. Returns {results: [{videoId, title, channel, durationSeconds, " +
+      "viewCount, url, embeddable}]} in relevance order. Pick the best MATCH — for music, " +
+      "ignore embeddable entirely (the official track beats an embeddable cover); only " +
+      "when the user explicitly wants to WATCH video should you prefer embeddable: true. " +
+      "Show the results panel instead when the choice is genuinely ambiguous.",
     inputSchema: {
       query: z.string().min(1),
       limit: z.number().int().min(1).max(10).optional(),

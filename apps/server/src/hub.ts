@@ -41,7 +41,7 @@ export class DisplayHub {
   private widgetSources = new Map<string, Widget[]>();
   private speakWaiters = new Map<string, () => void>();
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
-  private videoErrorHandler: ((videoId: string, code?: number) => void) | undefined;
+  private videoErrorHandler: ((videoId: string, code?: number, audio?: boolean) => void) | undefined;
   private videoEndedHandler: ((videoId: string) => void) | undefined;
   private displayObserver: ((view: PanelView, props: PanelProps) => void) | undefined;
 
@@ -52,8 +52,9 @@ export class DisplayHub {
   }
 
   /** Called when a display reports its video player errored (see
-      VideoErrorMessage) — the youtube routes use this to auto-advance. */
-  setVideoErrorHandler(handler: (videoId: string, code?: number) => void) {
+      VideoErrorMessage) — the youtube routes use this for the audio
+      fallback and auto-advance. `audio` = the audio path itself failed. */
+  setVideoErrorHandler(handler: (videoId: string, code?: number, audio?: boolean) => void) {
     this.videoErrorHandler = handler;
   }
 
@@ -95,7 +96,7 @@ export class DisplayHub {
       this.speakWaiters.get(msg.utteranceId)?.();
       this.speakWaiters.delete(msg.utteranceId);
     } else if (msg.type === "video_error") {
-      this.videoErrorHandler?.(msg.videoId, msg.code);
+      this.videoErrorHandler?.(msg.videoId, msg.code, msg.audio);
     } else if (msg.type === "video_ended") {
       this.videoEndedHandler?.(msg.videoId);
     }

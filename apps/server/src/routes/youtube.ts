@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import type {
@@ -73,8 +75,8 @@ function ensureYtdlp(): Promise<string> {
 /** execFile yt-dlp, self-provisioning the binary when it's absent. An
     explicit TNG_YTDLP_PATH is authoritative — never overridden by a
     download. */
-async function runYtdlp(args: string[]) {
-  const opts = { timeout: SEARCH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 };
+async function runYtdlp(args: string[], timeout = SEARCH_TIMEOUT_MS) {
+  const opts = { timeout, maxBuffer: 8 * 1024 * 1024 };
   try {
     return await execFileAsync(ytdlpPath, args, opts);
   } catch (err) {
@@ -86,17 +88,16 @@ async function runYtdlp(args: string[]) {
 }
 
 /** Embed-disabled videos 401 on YouTube's oEmbed endpoint — a cheap keyless
-    pre-check that keeps "Playback on other websites has been disabled" off
-    the wall. Fail open on network trouble: a false positive just means the
-    runtime auto-advance handles it instead. */
-async function isEmbeddable(videoId: string): Promise<boolean> {
+    pre-check. Fail open on network trouble: a false positive just means the
+    runtime fallback (TNGC-24 Layer 1) handles it instead. */
+async function checkEmbeddable(videoId: string, timeoutMs = 5_000): Promise<boolean> {
   try {
     const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(
       `https://www.youtube.com/watch?v=${videoId}`,
     )}&format=json`;
     const res = await fetch(url, {
       headers: { "user-agent": UA },
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     // 401/403 = embedding disabled or private; 400/404 = bad or deleted id.
     if ([400, 401, 403, 404].includes(res.status)) return false;
@@ -104,6 +105,105 @@ async function isEmbeddable(videoId: string): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+// ---- embeddability cache (TNGC-24 Layer 0) -----------------------------------
+// Verdicts are computed in parallel at search time anyway; remembering them
+// lets every youtube broadcast decide embed-vs-audio with ZERO extra latency
+// and no visible failure. Runtime embed errors also feed it (Layer 1), so a
+// video oEmbed lied about stays audio for the TTL.
+const EMBED_TTL_MS = 6 * 60 * 60_000;
+const EMBED_CACHE_MAX = 500;
+const embedCache = new Map<string, { ok: boolean; at: number }>();
+
+function rememberEmbeddable(videoId: string, ok: boolean) {
+  embedCache.delete(videoId); // re-insert = move to the fresh end (Map is ordered)
+  embedCache.set(videoId, { ok, at: Date.now() });
+  while (embedCache.size > EMBED_CACHE_MAX) {
+    embedCache.delete(embedCache.keys().next().value!);
+  }
+}
+
+/** Cached verdict, or a single live oEmbed check (short timeout, fail-open —
+    a wrong "embeddable" just lands on the reactive fallback). */
+async function isEmbeddable(videoId: string): Promise<boolean> {
+  const hit = embedCache.get(videoId);
+  if (hit && Date.now() - hit.at < EMBED_TTL_MS) return hit.ok;
+  const ok = await checkEmbeddable(videoId, 1_500);
+  rememberEmbeddable(videoId, ok);
+  return ok;
+}
+
+// ---- audio stream resolution (TNGC-24) ----------------------------------------
+// yt-dlp -g resolves a direct googlevideo audio URL. Memoized per videoId so
+// prewarm (fired at broadcast time) and the proxy route share one resolution;
+// entries expire on the URL's own `expire` param. Never redirect clients to
+// these URLs — they are bound to the resolving IP; the proxy makes that moot.
+const AUDIO_RESOLVE_TIMEOUT_MS = 30_000;
+const AUDIO_URL_FALLBACK_TTL_MS = 4 * 60 * 60_000;
+const audioUrls = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+
+function resolveAudioUrl(videoId: string): Promise<string> {
+  const hit = audioUrls.get(videoId);
+  if (hit && Date.now() < hit.expiresAt) return hit.promise;
+  const entry = { expiresAt: Date.now() + AUDIO_URL_FALLBACK_TTL_MS } as {
+    promise: Promise<string>;
+    expiresAt: number;
+  };
+  entry.promise = (async () => {
+    // player_client=android: the web client refuses tokenless extraction
+    // ("This video is not available") and most clients now withhold
+    // audio-only adaptive streams, so the selector chain ends in `best` —
+    // a muxed mp4 whose audio track the wall's <audio> element plays fine
+    // (the wasted video bytes are noise at household scale). Verified
+    // 2026-07-23; if YouTube churns again, this one flag is the knob.
+    const { stdout } = await runYtdlp(
+      [
+        "--no-warnings",
+        "--extractor-args", "youtube:player_client=android",
+        "-f", "bestaudio[ext=m4a]/bestaudio/best[acodec!=none]/best",
+        "-g", `https://www.youtube.com/watch?v=${videoId}`,
+      ],
+      AUDIO_RESOLVE_TIMEOUT_MS,
+    );
+    const url = stdout.trim().split("\n")[0];
+    if (!url.startsWith("http")) throw new Error("yt-dlp returned no stream URL");
+    // googlevideo URLs carry their own expiry (epoch seconds); honor it
+    // with a safety margin so we never hand the <audio> element a corpse.
+    const expire = Number(new URL(url).searchParams.get("expire"));
+    entry.expiresAt = Number.isFinite(expire) && expire > 0
+      ? expire * 1000 - 10 * 60_000
+      : Date.now() + AUDIO_URL_FALLBACK_TTL_MS;
+    return url;
+  })();
+  entry.promise.catch(() => audioUrls.delete(videoId)); // failed resolutions don't stick
+  audioUrls.set(videoId, entry);
+  return entry.promise;
+}
+
+/** Fire-and-forget resolution at broadcast time, so the <audio> element's
+    first request finds the URL already resolved (~1–3s hidden). */
+function prewarmAudio(videoId: string) {
+  resolveAudioUrl(videoId).catch(() => {
+    // the proxy route will retry and surface a real error if it persists
+  });
+}
+
+/** Decide embed vs audio for ANY youtube broadcast — display route, queue
+    advance, error substitution. This is the whole of TNGC-24 Layer 0: no
+    MCP traffic, no model reasoning, at most one ~200ms oEmbed check on a
+    cache miss. Exported for the console display route. */
+export async function decorateYoutubeProps(
+  props: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const videoId = props.videoId;
+  if (typeof videoId !== "string" || props.audioOnly === true) {
+    if (typeof videoId === "string" && props.audioOnly === true) prewarmAudio(videoId);
+    return props;
+  }
+  if (await isEmbeddable(videoId)) return props;
+  prewarmAudio(videoId);
+  return { ...props, audioOnly: true };
 }
 
 /** Native YouTube search via yt-dlp's ytsearch extractor — surfaces
@@ -144,9 +244,14 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     const capped = Math.min(Math.max(Math.trunc(limit ?? 6), 1), 10);
     try {
       const found = await searchYoutube(query.trim(), capped);
-      // Drop embed-disabled videos up front (checked in parallel, ~200ms).
-      const checks = await Promise.all(found.map((r) => isEmbeddable(r.videoId)));
-      const results = found.filter((_, i) => checks[i]);
+      // Annotate embeddability (parallel, ~200ms) but DROP NOTHING and keep
+      // YouTube's relevance order: an embed-blocked official track is still
+      // the right answer — it just plays as extracted audio (TNGC-24).
+      const checks = await Promise.all(found.map((r) => checkEmbeddable(r.videoId)));
+      const results = found.map((r, i) => {
+        rememberEmbeddable(r.videoId, checks[i]);
+        return { ...r, embeddable: checks[i] };
+      });
       lastResults = results;
       failedIds.clear();
       const body: YoutubeSearchResponse = { ok: true, query: query.trim(), results };
@@ -175,14 +280,21 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     );
   }
 
+  /** Broadcast a youtube panel through the embed-vs-audio decision (Layer 0).
+      Async only for a cache-miss oEmbed check; callers fire-and-forget. */
+  async function broadcastYoutube(props: Record<string, unknown>): Promise<void> {
+    hub.broadcast({ type: "display", view: "youtube", props: await decorateYoutubeProps(props) });
+  }
+
   /** Pop the head of the queue onto the wall. Returns what started, if anything. */
   function playNext(): QueueItem | undefined {
     const next = queue.shift();
     if (!next) return undefined;
-    hub.broadcast({
-      type: "display",
-      view: "youtube",
-      props: { videoId: next.videoId, title: next.title, autoplay: true },
+    void broadcastYoutube({
+      videoId: next.videoId,
+      title: next.title,
+      channel: next.channel,
+      autoplay: true,
     });
     pushQueueWidget();
     return next;
@@ -226,6 +338,47 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     return reply.code(400).send({ error: "action must be add, skip, clear, or list" });
   });
 
+  // The audio stream proxy (TNGC-24): the wall's <audio> element plays
+  // /api/console/audio/<id>. Proxy, never redirect — googlevideo URLs are
+  // bound to the resolving IP, and proxying keeps retries/fixes server-only.
+  // Range passthrough is what makes seeking (startSeconds) work.
+  app.get<{ Params: { videoId: string } }>("/api/console/audio/:videoId", async (req, reply) => {
+    const { videoId } = req.params;
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      return reply.code(400).send({ error: "bad video id" });
+    }
+    const range = req.headers.range;
+    const upstream = async (fresh: boolean) => {
+      if (fresh) audioUrls.delete(videoId);
+      const url = await resolveAudioUrl(videoId);
+      // No abort signal: this response BODY streams for the whole track —
+      // a timeout here would cut the music off mid-song.
+      return fetch(url, { headers: { "user-agent": UA, ...(range ? { range } : {}) } });
+    };
+    try {
+      let up = await upstream(false);
+      if (up.status === 403 || up.status === 410) {
+        // cached URL expired early — re-resolve once
+        up.body?.cancel().catch(() => {});
+        up = await upstream(true);
+      }
+      if (up.status !== 200 && up.status !== 206) {
+        up.body?.cancel().catch(() => {});
+        return reply.code(502).send({ error: `audio upstream ${up.status}` });
+      }
+      reply.code(up.status);
+      for (const h of ["content-type", "content-length", "content-range"] as const) {
+        const v = up.headers.get(h);
+        if (v) reply.header(h, v);
+      }
+      reply.header("accept-ranges", up.headers.get("accept-ranges") ?? "bytes");
+      return reply.send(up.body ? Readable.fromWeb(up.body as NodeWebReadableStream) : Buffer.alloc(0));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(502).send({ error: `audio resolution failed: ${message}` });
+    }
+  });
+
   // Natural end of a video → seamless advance to the next queued one. Guarded
   // against stale reports: only advance if the ended video is still the one
   // on screen (a panel change or manual "play X" makes old ENDED events moot).
@@ -235,29 +388,37 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     playNext();
   });
 
-  // Backstop for failures oEmbed can't see (region locks, age restriction):
-  // when the wall's player errors on the video we're showing, silently play
-  // the next candidate from the last search.
-  hub.setVideoErrorHandler((videoId) => {
+  // Backstop for failures oEmbed can't see (region locks, age restriction).
+  // TNGC-24 layered order — the person asked for THIS track, so:
+  //   embed error → Layer 1: retry the SAME video as extracted audio;
+  //   audio error → Layer 2: next search candidate (decorated — a blocked
+  //   candidate plays as audio) → queue → yellow alert.
+  hub.setVideoErrorHandler((videoId, _code, audio) => {
     void (async () => {
-      failedIds.add(videoId);
       const s = hub.state;
       if (s.view !== "youtube" || s.props.videoId !== videoId) return;
-      for (const cand of lastResults) {
-        if (failedIds.has(cand.videoId)) continue;
-        if (!(await isEmbeddable(cand.videoId))) {
-          failedIds.add(cand.videoId);
-          continue;
-        }
+      if (!audio) {
+        // The iframe failed but the media almost certainly exists — flip to
+        // the audio path and remember the verdict so the next play of this
+        // video skips the embed entirely.
+        rememberEmbeddable(videoId, false);
+        prewarmAudio(videoId);
         hub.broadcast({
           type: "display",
           view: "youtube",
-          props: { videoId: cand.videoId, title: cand.title, autoplay: true },
+          props: { ...s.props, audioOnly: true, autoplay: true },
         });
         return;
       }
-      // No viable search-result substitute — fall through to the queue
-      // before giving up (the errored video may itself have been queued).
+      // The AUDIO path failed — this video is genuinely unplayable.
+      failedIds.add(videoId);
+      for (const cand of lastResults) {
+        if (failedIds.has(cand.videoId)) continue;
+        await broadcastYoutube({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true });
+        return;
+      }
+      // No search-result substitute — fall through to the queue before
+      // giving up (the errored video may itself have been queued).
       if (playNext()) return;
       hub.broadcast({
         type: "display",

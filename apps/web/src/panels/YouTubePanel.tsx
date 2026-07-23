@@ -11,8 +11,137 @@ import { videoFullscreen } from "../videoFullscreen";
  * enablejsapi=1 lets us drive playback over postMessage, so "computer, pause"
  * works on a wall with no pointing device (useSocket rebroadcasts media
  * messages as tng-media DOM events).
+ *
+ * TNGC-24: `audioOnly` renders the extracted-audio player instead — embed
+ * restrictions bind only the iframe, so blocked music streams through the
+ * server proxy with an LCARS now-playing card. Separate component so each
+ * branch keeps its own hooks.
  */
-export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: YouTubePanelProps) {
+export function YouTubePanel(props: YouTubePanelProps) {
+  return props.audioOnly ? <YouTubeAudio {...props} /> : <YouTubeEmbed {...props} />;
+}
+
+function fmtClock(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return "--:--";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** Audio-only branch: <audio> against the server's stream proxy + an LCARS
+    now-playing card. Speaks the same tng-media transport and emits the same
+    ended/error events as the embed, so the queue and the server's fallback
+    chain treat both branches identically (error carries audio: true so the
+    server never loops back into this path). */
+function YouTubeAudio({ videoId, title, channel, autoplay = true, startSeconds }: YouTubePanelProps) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [fullscreen, setFullscreen] = useState(videoFullscreen.value);
+  const [playing, setPlaying] = useState(autoplay);
+  const [clock, setClock] = useState({ t: 0, d: NaN });
+
+  useEffect(() => {
+    function onMedia(ev: Event) {
+      const el = audioRef.current;
+      if (!el) return;
+      const { action, rate, level } = (
+        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number }>
+      ).detail;
+      if (action === "fullscreen" || action === "windowed") {
+        setFullscreen(action === "fullscreen");
+      } else if (action === "play") {
+        void el.play().catch(() => {});
+      } else if (action === "pause" || action === "stop") {
+        el.pause();
+      } else if (action === "speed") {
+        el.playbackRate = rate ?? 1;
+      } else if (action === "mute") {
+        el.muted = true;
+      } else if (action === "unmute") {
+        el.muted = false;
+      } else if (action === "volume" || action === "volume_up" || action === "volume_down") {
+        // same 0–100 / ±15-nudge semantics as the embed; element is 0–1
+        const current = Math.round(el.volume * 100);
+        const target = Math.max(
+          0,
+          Math.min(
+            100,
+            action === "volume" ? Math.round(level ?? current) : current + (action === "volume_up" ? 15 : -15),
+          ),
+        );
+        el.muted = false; // setting a level implies wanting to hear it
+        el.volume = target / 100;
+      }
+    }
+    window.addEventListener("tng-media", onMedia);
+    return () => window.removeEventListener("tng-media", onMedia);
+  }, []);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    let errorReported = false;
+    let endedReported = false;
+    const onLoaded = () => {
+      if (startSeconds && startSeconds > 0) el.currentTime = startSeconds;
+      setClock({ t: el.currentTime, d: el.duration });
+    };
+    const onTime = () => setClock({ t: el.currentTime, d: el.duration });
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => {
+      if (endedReported) return;
+      endedReported = true;
+      window.dispatchEvent(new CustomEvent("tng-video-ended", { detail: { videoId } }));
+    };
+    const onError = () => {
+      if (errorReported) return;
+      errorReported = true;
+      window.dispatchEvent(
+        new CustomEvent("tng-video-error", { detail: { videoId, audio: true } }),
+      );
+    };
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    el.addEventListener("error", onError);
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("error", onError);
+    };
+  }, [videoId, startSeconds]);
+
+  const progress = Number.isFinite(clock.d) && clock.d > 0 ? clock.t / clock.d : 0;
+  return (
+    <div className={fullscreen ? "youtube-panel youtube-panel-full" : "youtube-panel"}>
+      <div className={playing ? "audio-card playing" : "audio-card"}>
+        <div className="audio-eq" aria-hidden="true">
+          <span /><span /><span /><span /><span />
+        </div>
+        <div className="audio-info">
+          <div className="audio-title">{title ?? "Audio"}</div>
+          {channel && <div className="audio-channel">{channel}</div>}
+          <div className="audio-progress">
+            <div className="audio-progress-fill" style={{ width: `${Math.min(100, progress * 100)}%` }} />
+          </div>
+          <div className="audio-clock">
+            <span>{fmtClock(clock.t)}</span>
+            <span className="audio-tag">AUDIO</span>
+            <span>{fmtClock(clock.d)}</span>
+          </div>
+        </div>
+        <audio ref={audioRef} src={`/api/console/audio/${encodeURIComponent(videoId)}`} autoPlay={autoplay} />
+      </div>
+    </div>
+  );
+}
+
+function YouTubeEmbed({ videoId, title, autoplay = true, startSeconds }: YouTubePanelProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   // CSS full-bleed, not the browser Fullscreen API — requestFullscreen()
   // needs a user gesture, and the wall has no pointing device. Seeded from

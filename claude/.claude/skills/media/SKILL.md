@@ -18,9 +18,16 @@ own engine and finds small-channel uploads the web index misses.
 - Titles rarely match a request word-for-word — a "prelude" cover may be titled
   "Awakening". Judge results by **channel + title together**.
 - Retry with looser terms before declaring something unfindable.
-- Results are pre-filtered to embeddable videos. If a played video still fails
-  on the wall, the server automatically plays the next result — no action
-  needed from you.
+- **Every result is playable.** Embed-blocked videos (`embeddable: false` —
+  most major-label music) play automatically as **extracted audio** with an
+  LCARS now-playing card; the server decides, you never do. Pick the best
+  MATCH: for music the official blocked track beats an embeddable cover, so
+  ignore the flag entirely. Only when the user explicitly wants to *watch*
+  (music video, documentary, "put on X to watch") prefer `embeddable: true`.
+- "Audio only" / "just the music, no video" → pass `audioOnly: true` on the
+  youtube display yourself. Otherwise never set it.
+- If a played video still fails on the wall, the server retries it as audio,
+  then substitutes — no action needed from you.
 
 ## Picking from results
 

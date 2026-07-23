@@ -28,7 +28,7 @@ import { getArticle, parseArticleUrl } from "./article.js";
 import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
-import { getQueue } from "./youtube.js";
+import { decorateYoutubeProps, getQueue } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
 const CHUNK_MIN_CHARS = 180;
@@ -135,7 +135,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     const entry = history.get(id);
     if (!entry) return reply.code(404).send({ error: `no history entry ${id}` });
     cancelActiveReading();
-    hub.broadcast({ type: "display", view: entry.view, props: entry.props });
+    const props =
+      entry.view === "youtube"
+        ? ((await decorateYoutubeProps(entry.props)) as typeof entry.props)
+        : entry.props;
+    hub.broadcast({ type: "display", view: entry.view, props });
     const body: RedisplayResponse = { ok: true, view: entry.view, summary: entry.summary };
     return body;
   });
@@ -145,7 +149,10 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (!view) return reply.code(400).send({ error: "view is required" });
     // A new panel supersedes an in-flight reading session.
     cancelActiveReading();
-    hub.broadcast({ type: "display", view, props: props ?? {} });
+    // Embed-blocked youtube videos flip to the extracted-audio path here —
+    // server-decided, from cache (TNGC-24); the session never reasons about it.
+    const resolved = view === "youtube" ? await decorateYoutubeProps(props ?? {}) : (props ?? {});
+    hub.broadcast({ type: "display", view, props: resolved });
     return { ok: true, view };
   });
 
