@@ -63,7 +63,7 @@ services:
       # bind 0.0.0.0 INSIDE the container so the published port works;
       # docker maps it back to host 127.0.0.1 above
       TNG_BRIDGE_HOST: 0.0.0.0
-      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}
+      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://myhome.computer/link}
       TNG_TRICORDER_TOKEN: ${TNG_TRICORDER_TOKEN:-}
       # local commits by the Computer keep the right author
       GIT_AUTHOR_NAME: leifktaylor

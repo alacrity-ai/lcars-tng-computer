@@ -5,7 +5,13 @@
   // The PWA. Assets are matched before the Worker runs; /api/*, /link and
   // /health have no files, so they always reach Hono.
   "assets": { "directory": "./public" },
-  "routes": [{ "pattern": "tricorder.lalalimited.com", "custom_domain": true }],
+  // myhome.computer is canonical (2026-07-23); the lalalimited host stays a
+  // live legacy alias so existing bridges/phones keep working untouched.
+  "routes": [
+    { "pattern": "myhome.computer", "custom_domain": true },
+    { "pattern": "www.myhome.computer", "custom_domain": true },
+    { "pattern": "tricorder.lalalimited.com", "custom_domain": true }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

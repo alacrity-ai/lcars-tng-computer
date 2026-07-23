@@ -29,7 +29,7 @@ local endpoint and rides the same path.
 | `apps/server` | Node API: WebSocket hub, TTS front |
 | `apps/tts` | Python TTS sidecar: `/synth` text→WAV (Piper; Qwen3-TTS slot shelved with TNGC-4) |
 | `apps/ear` | *(dead — v1 wake-word daemon; removal tracked in TNGC-17)* |
-| `apps/tricorder` | Cloudflare Worker + per-tenant DO queue + D1 + the Tricorder PWA, at tricorder.lalalimited.com |
+| `apps/tricorder` | Cloudflare Worker + per-tenant DO queue + D1 + the Tricorder PWA, at myhome.computer |
 | `packages/shared` | Typed WebSocket protocol + panel props shared across TS packages |
 | `packages/contract` | The tiny versioned cloud↔bridge message contract |
 | `packages/console-mcp` | MCP server Claude uses: `display` / `speak` / `chime` / `screen_state` |

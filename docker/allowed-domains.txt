@@ -8,7 +8,9 @@ claude.ai
 console.anthropic.com
 sentry.io
 
-# Tricorder cloud — the bridge's outbound WSS
+# Tricorder cloud — the bridge's outbound WSS. myhome.computer is canonical
+# (2026-07-23); the lalalimited host stays live as a legacy alias.
+myhome.computer
 tricorder.lalalimited.com
 
 # Package registry (self-improvement may add dependencies)

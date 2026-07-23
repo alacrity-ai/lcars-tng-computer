@@ -33,7 +33,7 @@ No architecture change may separate the brain from the repo and the dev server.
                │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
 ┌──────────────▼──────────────┐          │ │ BRIDGE (MCP server)            │ │
 │ TRICORDER API (Cloudflare)  │          │ │ • channel push per message     │ │
-│ tricorder.lalalimited.com   │  outbound│ │ • outbound WSS client          │ │
+│ myhome.computer   │  outbound│ │ • outbound WSS client          │ │
 │ Worker (Hono) + D1          │◄─────────┼─┤ • local POST /message          │ │
 │ Durable Object per tenant:  │   WSS    │ │   (office push-to-talk)        │ │
 │  queue · ack · replay ·     │          │ └────────────────────────────────┘ │
@@ -62,7 +62,7 @@ orchestration, web browsing — is Claude.
 | **Phone-native STT.** The transcript is produced on the phone (Web Speech API / keyboard dictation). | iPhone/Android recognition is durable and free; the server never sees audio. The GPU's only audio job is TTS. |
 | **Channels push delivery** (revised 2026-07-22 evening, TNGC-18). The bridge declares the experimental `claude/channel` capability and pushes each message into the session as a channel event. | We tried the no-channels alternative first — a blocking `bridge.await_message` loop (TNGC-13). It failed its soak: every timeout return was a fresh model-discipline decision, and the session eventually narrated instead of re-arming and wedged. Channels moves "wake up and behave" from model judgment into protocol. Cost accepted: research preview, `--dangerously-load-development-channels server:bridge` at launch. |
 | **Outbound-only connectivity.** The bridge dials out to the Tricorder DO and holds a WebSocket. | Nothing on the internet can reach into the home network; no tunnel, no port forwarding. The phones meet the brain at the Durable Object. |
-| **One monorepo.** Tricorder is `apps/tricorder`, deployed to Cloudflare (`tricorder.lalalimited.com`). | One product, colocated. The deploy target differs; the code lives together. |
+| **One monorepo.** Tricorder is `apps/tricorder`, deployed to Cloudflare (`myhome.computer`). | One product, colocated. The deploy target differs; the code lives together. |
 | **Attribution is the identity model.** Every message is `{user, device, transcript, ts}`. | Users belong to the household tenant; "save this to **my** tricorder" resolves per *speaker*, not per session. Foundation for per-user saved items and future shared entities. |
 | **YouTube is the media path.** Spotify scrapped. | It works today and needs no auth dance; the v1 Spotify plan (PKCE, Web Playback SDK, dev-mode caps) is cancelled. |
 | **Piper is the voice.** Majel clone shelved (TNGC-4). | Good-enough now; the Qwen3-TTS clone slot in `apps/tts` stays for when we circle back. Voice-clone research is preserved in TNGC-4, not here. |

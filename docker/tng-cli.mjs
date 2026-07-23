@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 
 const TOKEN_FILE = "/var/lib/tng/token";
 const META_FILE = "/var/lib/tng/pair.json";
-const LINK_URL = process.env.TNG_TRICORDER_URL ?? "wss://tricorder.lalalimited.com/link";
+const LINK_URL = process.env.TNG_TRICORDER_URL ?? "wss://myhome.computer/link";
 const SERVER_URL = process.env.TNG_SERVER_URL ?? "http://stack:3789";
 const BRIDGE_URL = "http://127.0.0.1:3791";
 

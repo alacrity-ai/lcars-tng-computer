@@ -46,7 +46,7 @@ services:
     environment:
       TNG_SERVER_URL: http://stack:3789
       TNG_BRIDGE_HOST: 0.0.0.0
-      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}
+      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://myhome.computer/link}
       # Comma-separated extra hostnames the Computer may reach (egress fence).
       TNG_EXTRA_ALLOWED_DOMAINS: ${TNG_EXTRA_ALLOWED_DOMAINS:-}
 

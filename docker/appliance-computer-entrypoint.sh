@@ -46,7 +46,7 @@ fi
 # WAIT here, visibly — in the terminal AND on the wall — until
 # `tng pair <code>` writes the token.
 SERVER="${TNG_SERVER_URL:-http://stack:3789}"
-REG_HOST="$(echo "${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}" | sed -E 's#^wss?://##; s#/link$##')"
+REG_HOST="$(echo "${TNG_TRICORDER_URL:-wss://myhome.computer/link}" | sed -E 's#^wss?://##; s#/link$##')"
 
 show_pair_panel() {
   curl -sf -X POST "$SERVER/api/console/display" -H 'content-type: application/json' -d @- <<EOF >/dev/null 2>&1 || true

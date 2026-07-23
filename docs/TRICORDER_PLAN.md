@@ -37,7 +37,7 @@ Decisions locked 2026-07-22:
                │ HTTPS (transcript)      │ ┌─┴──────────────────────────────┐ │
 ┌──────────────▼──────────────┐          │ │ BRIDGE (MCP server)            │ │
 │ TRICORDER API (Cloudflare)  │          │ │ • channel push per message     │ │
-│ tricorder.lalalimited.com   │  outbound│ │ • outbound WSS client ─────────┼─┼──┐
+│ myhome.computer   │  outbound│ │ • outbound WSS client ─────────┼─┼──┐
 │ Worker (Hono) + D1          │◄─────────┼─┤ • local POST /message          │ │  │
 │ Durable Object per tenant:  │   WSS    │ │   (office push-to-talk)        │ │  │
 │  queue · ack · replay ·     │          │ └────────────────────────────────┘ │  │
@@ -112,7 +112,7 @@ proven with zero infrastructure in Phase 2 (and its v1 failed honestly there, he
 | **1 — Wall on the LAN** | TNGC-12 | Serve web+API on the network; TV Chrome kiosk; audio-unlock boot flow; make target | LCARS on the living-room TV, driven from the office session |
 | **2 — Event loop v1** | TNGC-13 | *(superseded by TNGC-18)* blocking `await_message` + re-arm discipline | Worked in demo; wedged in soak |
 | **2b — Event loop v2** | TNGC-18 | channels push delivery; remove re-arm/Stop-hook machinery; `--dangerously-load-development-channels server:bridge` | say.sh → channel event → wall; terminal free; zero timeout cycles |
-| **3 — Tricorder backend** | TNGC-14 | `apps/tricorder`: Worker + per-tenant DO + D1; device auth; ack/replay/TTL; bridge outbound WSS; deploy to tricorder.lalalimited.com | Off-LAN curl → wall responds; replay/TTL verified by killing the bridge |
+| **3 — Tricorder backend** | TNGC-14 | `apps/tricorder`: Worker + per-tenant DO + D1; device auth; ack/replay/TTL; bridge outbound WSS; deploy to myhome.computer | Off-LAN curl → wall responds; replay/TTL verified by killing the bridge |
 | **4 — Tricorder PWA v1** | TNGC-15 | User login (password; leif/ariel/guest, roles); hold-to-talk via native speech + first-class type mode; admin console (create/disable users, rotate-guest); online/offline indicator; installable | Guest picks up TV-room iPad: "tell me about bees" → wall answers |
 | **5 — Personal data plane** | TNGC-16 → **delivered by TNGC-23** | The Library: D1 index + R2 payloads; `library` MCP tool; speaker-resolved "save to my tricorder"; PWA Library screen (search/browse/send/display-on-wall). Design: `TRICORDER_LIBRARY_IMPLEMENTATION_DESIGN.md` + `TRICORDER_LIBRARY_PWA_UX_DESIGN.md` | Ariel saves the bees article; it appears on Ariel's phone only — and goes back on the wall from the phone |
 | **6 — Appliance hardening** | TNGC-17 | Delete `apps/ear` + await-loop leftovers; supervisor/autostart; nightly session rotation; reconnect torture tests; SOPs | Pull the plug mid-interaction; everything returns unattended |

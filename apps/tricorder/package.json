@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Tricorder cloud API: Hono Worker + per-tenant Durable Object queue + D1 identity, at tricorder.lalalimited.com",
+  "description": "Tricorder cloud API: Hono Worker + per-tenant Durable Object queue + D1 identity, at myhome.computer",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

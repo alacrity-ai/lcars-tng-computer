@@ -89,7 +89,7 @@ computer-image:
 # (Docker broken, or debugging the container itself).
 computer-bare:
 	cd claude && \
-	TNG_TRICORDER_URL="$${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}" \
+	TNG_TRICORDER_URL="$${TNG_TRICORDER_URL:-wss://myhome.computer/link}" \
 	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
 	claude --dangerously-skip-permissions --dangerously-load-development-channels server:bridge
 

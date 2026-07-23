@@ -1,6 +1,6 @@
 # Tricorder cloud (TNGC-14/15)
 
-The public face at **tricorder.lalalimited.com**: Cloudflare Worker (Hono) +
+The public face at **myhome.computer**: Cloudflare Worker (Hono) +
 one **TenantHub** Durable Object per tenant + D1 identity + the **Library**
 (TNGC-23: D1 metadata index + R2 `tricorder-library` payload bucket, fronted
 exclusively by the Worker), serving the **Tricorder PWA** (`./public` —

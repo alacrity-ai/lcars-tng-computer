@@ -22,7 +22,7 @@ curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/ma
 docker compose up -d
 ```
 
-1. **Pair.** Register your household at https://tricorder.lalalimited.com
+1. **Pair.** Register your household at https://myhome.computer
    (phone or laptop). In the admin console tap **Pair your Computer** to get a
    code, then on the box:
 

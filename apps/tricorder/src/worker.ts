@@ -1,5 +1,6 @@
 /**
- * Tricorder Worker (TNGC-14/15) — the public face at tricorder.lalalimited.com.
+ * Tricorder Worker (TNGC-14/15) — the public face at myhome.computer
+ * (tricorder.lalalimited.com remains a live legacy alias).
  *
  * Auth model: this API is on the open internet, so everything is gated.
  *  - people authenticate with handle+password → session token (POST /api/login);

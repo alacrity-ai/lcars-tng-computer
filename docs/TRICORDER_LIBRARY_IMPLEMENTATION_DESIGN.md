@@ -40,7 +40,7 @@ The worker fronts it for *both* sides — the PWA reads via session-auth routes,
 house reads/writes via service-token routes. Same bucket, one auth surface:
 
 - No R2 credentials ever enter the house (nothing new inside the fence).
-- No new egress domains — `tricorder.lalalimited.com` is already on
+- No new egress domains — `myhome.computer` is already on
   `docker/allowed-domains.txt` (the bridge links to it).
 - The worker enforces tenancy/ownership on every byte; a leaked R2 URL scheme or
   bucket policy can't.
