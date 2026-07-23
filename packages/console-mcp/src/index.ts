@@ -109,7 +109,15 @@ server.registerTool(
       "live?, note?}], caption?} — game scores; one game = hero card, several = grid; winner " +
       "bolds itself, live pulses the status chip, " +
       "math {title?, lines: [{latex, note?}], caption?} — KaTeX-rendered formulas or a worked " +
-      "derivation, one line per step with notes explaining each move. " +
+      "derivation, one line per step with notes explaining each move, " +
+      "composite {title?, accent?, columns?: 1-3, blocks: [...]} — the dashboard builder: " +
+      "compose LCARS primitives when no dedicated panel fits or the user asks for a " +
+      "dashboard/status board of several things at once. Block types: group {title, items: " +
+      "[blocks]}, readout {label, value, unit?}, status {label, state: on|off|warn|alert|idle, " +
+      "detail?}, gauge {label, value: 0..1, text?}, text {body, role?}, list {items: [{label, " +
+      "detail?}]}, keyvalue {pairs: [{k, v}]}, sparkline {label, points: [numbers], unit?}, " +
+      "divider. Accents: gold|peach|lav|blue|red. Max 64 blocks, nesting ≤3 — load the " +
+      "composite skill for guidance. " +
       "Props are view-specific.",
     // Derived from the webapp's installed panels — never offer a view the wall
     // would render as a "not yet installed" stub.

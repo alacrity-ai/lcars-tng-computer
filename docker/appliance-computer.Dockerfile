@@ -31,10 +31,11 @@ RUN pnpm install --frozen-lockfile --filter "@tng/bridge..." --filter "@tng/cons
 RUN cp -a /opt/tng/claude/.claude /opt/tng-persona-seed
 
 COPY docker/allowed-domains.txt /etc/tng/allowed-domains-baked.txt
-COPY docker/init-firewall.sh docker/appliance-computer-entrypoint.sh /usr/local/bin/
+COPY docker/init-firewall.sh docker/appliance-computer-entrypoint.sh docker/plugin-merge.sh /usr/local/bin/
 COPY docker/tng-cli.mjs /usr/local/bin/tng
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/appliance-computer-entrypoint.sh /usr/local/bin/tng \
-    && mkdir -p /var/lib/tng && chown node:node /var/lib/tng
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/appliance-computer-entrypoint.sh \
+      /usr/local/bin/plugin-merge.sh /usr/local/bin/tng \
+    && mkdir -p /var/lib/tng /opt/tng/plugins && chown node:node /var/lib/tng /opt/tng/plugins
 
 ENV HOME=/home/node \
     CLAUDE_CONFIG_DIR=/home/node/.claude \

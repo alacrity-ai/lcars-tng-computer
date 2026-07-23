@@ -70,6 +70,9 @@ services:
       GIT_AUTHOR_EMAIL: leiftaylor@gmail.com
       GIT_COMMITTER_NAME: leifktaylor
       GIT_COMMITTER_EMAIL: leiftaylor@gmail.com
+      # Enabled plugins (TNGC-33) — comma-separated ids under plugins/;
+      # the Makefile also chains each plugin's compose.yaml for sidecars.
+      TNG_PLUGINS: ${TNG_PLUGINS:-}
 
 volumes:
   # Session state incl. OAuth — survives restarts, isolated from host ~/.claude

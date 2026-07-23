@@ -14,6 +14,7 @@ __pycache__/
 !.env.example
 *.token
 spotify-tokens.json
+DO_NOT_COMMIT.md
 
 # voice assets — never commit reference clips, cloned voices, or model weights
 # (earcons/sound effects under apps/web/public are fine to commit)
@@ -39,3 +40,6 @@ voice/training/*
 /.claude/
 **/.claude/settings.local.json
 .pnpm-store/
+
+# generated at boot by docker/plugin-merge.sh from .mcp.base.json + enabled plugins
+claude/.mcp.json

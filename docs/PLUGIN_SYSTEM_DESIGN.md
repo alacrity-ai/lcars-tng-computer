@@ -141,7 +141,7 @@ This falls out of the architecture for free and ships with v0.
 
 ```
 plugins/<id>/
-  plugin.yaml            # the manifest (below)
+  plugin.json            # the manifest (below; JSON — the loader is bash+jq)
   compose.yaml           # sidecar services (optional)
   service/               # the plugin's backend, if any — its own container
   mcp/                   # MCP server package, run INSIDE the computer container (optional)
@@ -150,25 +150,23 @@ plugins/<id>/
   README.md              # what it is, what hardware it needs, how to enable
 ```
 
-**`plugin.yaml`:**
+**`plugin.json`** (JSON, not YAML — the loader runs as bash+jq in the
+entrypoints; no extra parser ships in the images):
 
-```yaml
-id: lighting
-name: Zigbee Lighting
-version: 0.1.0
-minCore: "0.3.0"            # refuse to load on older images
-description: Local Zigbee lighting fabric (Zigbee2MQTT + Mosquitto)
-services:                    # sidecars, for doctor + fence wiring
-  - name: lighting           # compose service name
-    internalEndpoints:       # brain→service holes to punch in the fence
-      - host: lighting
-        port: 7101
-mcp:
-  name: lights               # registered as mcpServers["lights"]
-  command: pnpm
-  args: ["-C", "/opt/tng/plugins/lighting/mcp", "start"]
-skills: [lighting]
-allowedDomains: []           # external egress — empty for lighting (fully local)
+```json
+{
+  "id": "lighting",
+  "name": "Zigbee Lighting",
+  "version": "0.1.0",
+  "minCore": "0.3.0",
+  "description": "Local Zigbee lighting fabric (Zigbee2MQTT + Mosquitto)",
+  "services": [
+    { "name": "lighting", "internalEndpoints": [{ "host": "lighting", "port": 7101 }] }
+  ],
+  "mcp": { "name": "lights", "command": "pnpm", "args": ["-C", "/opt/tng/plugins/lighting/mcp", "start"] },
+  "skills": ["lighting"],
+  "allowedDomains": []
+}
 ```
 
 **Where plugins live:** dev = `plugins/` in the repo (bind-mounted like
@@ -276,7 +274,7 @@ exists, so pairing state is born inside `lighting-z2m-data`).
 1. **Core:** composite panel (types → validator → wall renderer → console-mcp
    display schema → `composite` skill → tricorder FAMILY_BY_VIEW + PWA
    placard) — demoable alone ("Computer, make me a dashboard of…").
-2. **Loader:** plugin.yaml convention, `plugin-merge.sh` in both entrypoints,
+2. **Loader:** plugin.json convention, `plugin-merge.sh` in both entrypoints,
    `.mcp.base.json` rename, Makefile/compose chaining, doctor section.
 3. **Lighting plugin** on top (TNGC-9), Phase-0 hardware already waiting.
 4. Appliance docs: "Plugins" section in APPLIANCE.md + landing page note.

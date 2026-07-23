@@ -131,6 +131,25 @@ async function doctor() {
     check("speech (TTS)", false, "no answer via wall server", "voice falls back to on-screen captions; docker compose logs stack for the tts lines");
   }
 
+  // 5. plugins (TNGC-33): manifest present + each internal endpoint answering
+  const pluginIds = (process.env.TNG_PLUGINS ?? "").split(/[\s,]+/).filter(Boolean);
+  const pluginsDir = process.env.TNG_PLUGINS_DIR ?? "/opt/tng/plugins";
+  for (const id of pluginIds) {
+    let manifest = null;
+    try { manifest = JSON.parse(readFileSync(`${pluginsDir}/${id}/plugin.json`, "utf8")); } catch {}
+    check(`plugin ${id}`, !!manifest, manifest ? `v${manifest.version ?? "?"}` : "plugin.json missing/invalid",
+      `install the plugin folder under ${pluginsDir}/${id} (or remove ${id} from TNG_PLUGINS)`);
+    if (!manifest) continue;
+    for (const svc of manifest.services ?? []) {
+      for (const ep of svc.internalEndpoints ?? []) {
+        let ok = false;
+        try { ok = (await getJson(`http://${ep.host}:${ep.port}/health`)).ok !== false; } catch {}
+        check(`plugin ${id}: ${ep.host}:${ep.port}`, ok, ok ? "responding" : "no answer",
+          "is its sidecar up? docker compose ps; check COMPOSE_FILE includes the plugin's compose file");
+      }
+    }
+  }
+
   out(bad === 0 ? "\nAll systems nominal." : `\n${bad} problem${bad === 1 ? "" : "s"} found.`);
   process.exit(bad === 0 ? 0 : 1);
 }

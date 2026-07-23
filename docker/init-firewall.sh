@@ -20,15 +20,24 @@ ipset destroy tng-allowed 2>/dev/null || true
 ipset create tng-allowed hash:ip
 
 resolved=0
-while read -r domain; do
-  [[ -z "$domain" || "$domain" == \#* ]] && continue
-  ips=$(dig +short A "$domain" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
-  if [[ -z "$ips" ]]; then
-    echo "[firewall] WARN: $domain did not resolve — it will be unreachable" >&2
-    continue
-  fi
-  for ip in $ips; do ipset add tng-allowed "$ip" -exist; resolved=$((resolved + 1)); done
-done < "$DOMAINS_FILE"
+resolve_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  while read -r domain; do
+    [[ -z "$domain" || "$domain" == \#* ]] && continue
+    ips=$(dig +short A "$domain" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+    if [[ -z "$ips" ]]; then
+      echo "[firewall] WARN: $domain did not resolve — it will be unreachable" >&2
+      continue
+    fi
+    for ip in $ips; do ipset add tng-allowed "$ip" -exist; resolved=$((resolved + 1)); done
+  done < "$file"
+}
+resolve_file "$DOMAINS_FILE"
+# Plugin-declared EXTERNAL egress (TNGC-33) — written by plugin-merge.sh for
+# the enabled set only; kept separate because the dev allowlist is a
+# read-only bind mount.
+resolve_file /etc/tng/allowed-domains-plugins.txt
 
 HOST_GW=$(getent ahostsv4 host.docker.internal | awk '{print $1; exit}' || true)
 
@@ -56,6 +65,21 @@ if [[ -z "$SUBNET" ]]; then
   exit 1
 fi
 iptables -A OUTPUT -d "$SUBNET" -p tcp --dport "$HOST_API_PORT" -j ACCEPT
+# Plugin service endpoints (TNGC-33): pinpoint host:port holes to sidecars on
+# the compose network — never the subnet at large. Resolution needs the
+# sidecar running; plugin compose files add depends_on to guarantee order.
+if [[ -f /etc/tng/internal-endpoints.txt ]]; then
+  while IFS=: read -r ephost epport; do
+    [[ -z "$ephost" || "$ephost" == \#* ]] && continue
+    epip=$(getent ahostsv4 "$ephost" | awk '{print $1; exit}' || true)
+    if [[ -z "$epip" ]]; then
+      echo "[firewall] WARN: plugin endpoint $ephost:$epport did not resolve — unreachable until relaunch" >&2
+      continue
+    fi
+    iptables -A OUTPUT -d "$epip" -p tcp --dport "$epport" -j ACCEPT
+    echo "[firewall] plugin endpoint allowed: $ephost -> $epip:$epport"
+  done < /etc/tng/internal-endpoints.txt
+fi
 iptables -A OUTPUT -m set --match-set tng-allowed dst -j ACCEPT
 # REJECT (not silent DROP): a blocked call must fail in milliseconds with a
 # legible "prohibited" error, not hang to curl's timeout looking like a slow

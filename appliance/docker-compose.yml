@@ -43,12 +43,17 @@ services:
       - tng-claude-config:/home/node/.claude     # Claude login persists here
       - tng-learned:/opt/tng/claude/.claude      # household-learned skills/assets
       - tng-pair:/var/lib/tng                    # pairing token (tng pair writes it)
+      - tng-plugins:/opt/tng/plugins             # installed plugins (folders)
     environment:
       TNG_SERVER_URL: http://stack:3789
       TNG_BRIDGE_HOST: 0.0.0.0
       TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://myhome.computer/link}
       # Comma-separated extra hostnames the Computer may reach (egress fence).
       TNG_EXTRA_ALLOWED_DOMAINS: ${TNG_EXTRA_ALLOWED_DOMAINS:-}
+      # Enabled plugins by id (folders under the tng-plugins volume). A
+      # plugin with sidecars also adds its compose file to COMPOSE_FILE in
+      # .env — see the plugin's README.
+      TNG_PLUGINS: ${TNG_PLUGINS:-}
 
 volumes:
   tng-claude-config:
@@ -56,3 +61,4 @@ volumes:
   tng-pair:
   tng-server-cache:
   tng-voices:
+  tng-plugins:

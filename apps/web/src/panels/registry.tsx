@@ -21,6 +21,7 @@ import { StepsPanel } from "./StepsPanel";
 import { TimelinePanel } from "./TimelinePanel";
 import { ScoreboardPanel } from "./ScoreboardPanel";
 import { MathPanel } from "./MathPanel";
+import { CompositePanel } from "./CompositePanel";
 
 function BlankPanel() {
   return null;
@@ -64,6 +65,7 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   timeline: TimelinePanel,
   scoreboard: ScoreboardPanel,
   math: MathPanel,
+  composite: CompositePanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

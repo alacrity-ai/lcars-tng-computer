@@ -5,6 +5,13 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 
 PIPER_VOICE ?= en_US-lessac-medium
 
+# Plugins (TNGC-33): TNG_PLUGINS=lighting make dev/computer chains each
+# enabled plugin's compose file so its sidecars ride the same lifecycle.
+comma := ,
+PLUGIN_IDS := $(strip $(subst $(comma), ,$(TNG_PLUGINS)))
+PLUGIN_COMPOSE := $(foreach p,$(PLUGIN_IDS),$(if $(wildcard plugins/$(p)/compose.yaml),-f plugins/$(p)/compose.yaml,$(warning plugin '$(p)' has no plugins/$(p)/compose.yaml)))
+COMPOSE := docker compose -f compose.yaml $(PLUGIN_COMPOSE)
+
 .PHONY: help setup dev down kiosk lan computer health demo earcons clean
 
 help:
@@ -31,11 +38,11 @@ setup:
 # with streaming logs, Ctrl+C stops it. First run builds the image and uv
 # downloads the TTS deps into a volume (a minute or two).
 dev:
-	docker compose up stack
+	$(COMPOSE) up stack
 
 # Rebuild the stack image (Dockerfile change / new node base).
 stack-image:
-	docker compose build stack
+	$(COMPOSE) build stack
 
 # The pre-TNGC-20 host launch — NO container. Fallback only.
 dev-bare:
@@ -43,7 +50,7 @@ dev-bare:
 
 # Containers first, then any bare-mode leftovers on the ports.
 down:
-	@-docker compose down --remove-orphans 2>/dev/null || true
+	@-$(COMPOSE) down --remove-orphans 2>/dev/null || true
 	@-pkill -f "[s]cripts/dev.mjs" 2>/dev/null && echo "orchestrator: stopped" || echo "orchestrator (bare): not running"
 	@-fuser -k -TERM 3789/tcp 2>/dev/null && echo "server  (:3789): stopped" || echo "server  (:3789): not running"
 	@-fuser -k -TERM 5173/tcp 2>/dev/null && echo "web     (:5173): stopped" || echo "web     (:5173): not running"
@@ -77,13 +84,13 @@ lan:
 # login on the very first run — credentials persist in a named volume).
 computer:
 	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
-	docker compose run --rm --service-ports computer
+	$(COMPOSE) run --rm --service-ports computer
 
 # Rebuild the session image (new Claude Code release, Dockerfile edits).
 # Allowlist edits (docker/allowed-domains.txt) do NOT need a rebuild — just
 # relaunch the session.
 computer-image:
-	docker compose build computer
+	$(COMPOSE) build computer
 
 # The pre-TNGC-19 direct launch — NO container, NO fence. Fallback only
 # (Docker broken, or debugging the container itself).

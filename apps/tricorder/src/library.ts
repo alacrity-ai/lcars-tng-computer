@@ -25,6 +25,7 @@ const FAMILY_BY_VIEW: Record<string, string> = {
   diagram: "visual", image: "visual", map: "visual", "night-sky": "visual",
   steps: "procedure", quiz: "procedure",
   code: "notation", math: "notation",
+  composite: "data",
   youtube: "media",
   // Not a wall panel: a restorable play-queue snapshot (TNGC-25). The house
   // display route turns it back into now-playing + queue.

@@ -83,3 +83,12 @@ win on conflict; your own additions are never deleted.
 - Dev installs (bind-mounted repo, `make dev`) are a separate flow and stay
   exactly as documented in the main README. `TNG_MODE` tells the Computer
   which world it lives in; appliance images set it for you.
+
+## Plugins
+
+Optional integrations (lighting, and whatever comes next) install as
+folders — never shipped enabled. To add one: drop its folder into the
+`tng-plugins` volume, follow its README to add its compose file to
+`COMPOSE_FILE` in `.env`, set `TNG_PLUGINS=<id>`, then
+`docker compose up -d`. `tng doctor` shows every enabled plugin's health.
+Disable by removing it from `TNG_PLUGINS` — no other trace remains.

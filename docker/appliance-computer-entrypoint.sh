@@ -4,6 +4,9 @@
 # needed and drops to the unprivileged node user.
 set -euo pipefail
 
+# ---- plugin loader (TNGC-33) — before the firewall (writes its files) --------
+/usr/local/bin/plugin-merge.sh /opt/tng/plugins /opt/tng/claude
+
 # ---- egress fence (default-deny; baked allowlist + env additions) ------------
 MERGED=/etc/tng/allowed-domains.txt
 cp /etc/tng/allowed-domains-baked.txt "$MERGED"

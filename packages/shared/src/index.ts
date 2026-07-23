@@ -43,6 +43,7 @@ export const PANEL_VIEWS = [
   "timeline",
   "scoreboard",
   "math",
+  "composite",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -513,6 +514,97 @@ export interface MathPanelProps {
 }
 
 export type PanelProps = Record<string, unknown>;
+
+// ---------- Composite panel (TNGC-33) ----------
+// The declarative panel language: plugins AND the model compose dashboards
+// from LCARS primitives; the wall renders them through trusted components
+// only (textContent everywhere, svg by same-origin reference). The schema
+// evolves additively — renderers show a placard for unknown block types.
+
+export type CompositeAccent = "gold" | "peach" | "lav" | "blue" | "red";
+
+export interface CompositeGroupBlock {
+  type: "group";
+  title: string;
+  accent?: CompositeAccent;
+  items: CompositeBlock[];
+}
+export interface CompositeReadoutBlock {
+  type: "readout";
+  label: string;
+  value: string | number;
+  unit?: string;
+  accent?: CompositeAccent;
+}
+export interface CompositeStatusBlock {
+  type: "status";
+  label: string;
+  state: "on" | "off" | "warn" | "alert" | "idle";
+  detail?: string;
+}
+export interface CompositeGaugeBlock {
+  type: "gauge";
+  label: string;
+  /** 0..1 fill. */
+  value: number;
+  /** Optional text over the bar ("80%", "2700K"). */
+  text?: string;
+  accent?: CompositeAccent;
+}
+export interface CompositeTextBlock {
+  type: "text";
+  body: string;
+  role?: "body" | "caption";
+}
+export interface CompositeListBlock {
+  type: "list";
+  items: Array<{ label: string; detail?: string; accent?: CompositeAccent }>;
+}
+export interface CompositeKeyValueBlock {
+  type: "keyvalue";
+  pairs: Array<{ k: string; v: string | number }>;
+}
+export interface CompositeSparklineBlock {
+  type: "sparkline";
+  label: string;
+  points: number[];
+  unit?: string;
+  accent?: CompositeAccent;
+}
+export interface CompositeSvgBlock {
+  type: "svg";
+  /** Same-origin path only ("/api/plugin/..."), enforced server-side. */
+  assetUrl: string;
+  caption?: string;
+}
+export interface CompositeDividerBlock {
+  type: "divider";
+}
+
+export type CompositeBlock =
+  | CompositeGroupBlock
+  | CompositeReadoutBlock
+  | CompositeStatusBlock
+  | CompositeGaugeBlock
+  | CompositeTextBlock
+  | CompositeListBlock
+  | CompositeKeyValueBlock
+  | CompositeSparklineBlock
+  | CompositeSvgBlock
+  | CompositeDividerBlock;
+
+export interface CompositePanelProps {
+  title?: string;
+  accent?: CompositeAccent;
+  /** 1..3 layout columns; the wall may collapse when cramped. */
+  columns?: number;
+  blocks: CompositeBlock[];
+}
+
+/** Hard limits, validated server-side before broadcast. */
+export const COMPOSITE_MAX_BLOCKS = 64;
+export const COMPOSITE_MAX_DEPTH = 3;
+export const COMPOSITE_MAX_BYTES = 16 * 1024;
 
 /** Per-character speech timing for karaoke highlighting. */
 export interface CharTiming {

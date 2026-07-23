@@ -28,6 +28,7 @@ import { getArticle, parseArticleUrl } from "./article.js";
 import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
+import { validateComposite } from "../composite.js";
 import { loadSettings, saveSettings } from "../settings.js";
 import { decorateYoutubeProps, getQueue, restorePlaylist } from "./youtube.js";
 
@@ -87,6 +88,7 @@ function humanDelta(ms: number): string {
  * the hub, answer. All intelligence lives in the Claude session.
  */
 export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
+  let lastCompositeAt = 0;
   // Unprompted server-initiated speech, used when a timer fires with the
   // session idle: chime, then speak, superseding any in-flight utterance —
   // an alarm outranks whatever the Computer happens to be saying or reading.
@@ -198,6 +200,19 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       const result = restorePlaylist(props ?? {});
       if ("error" in result) return reply.code(409).send(result);
       return { view, ...result };
+    }
+    // Composite panels (TNGC-33) can be authored by PLUGINS, not just the
+    // session — validate hard limits here, and rate-limit re-broadcasts so a
+    // chatty plugin can't strobe the wall (in-place refreshes are legitimate;
+    // strobing is not).
+    if (view === "composite") {
+      const err = validateComposite(props ?? {});
+      if (err) return reply.code(400).send({ error: err });
+      const now = Date.now();
+      if (now - lastCompositeAt < 500) {
+        return reply.code(429).send({ error: "composite refresh rate limit (2/s) — batch your updates" });
+      }
+      lastCompositeAt = now;
     }
     // Embed-blocked youtube videos flip to the extracted-audio path here —
     // server-decided, from cache (TNGC-24); the session never reasons about it.
