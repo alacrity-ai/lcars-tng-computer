@@ -1,0 +1,58 @@
+# TNG Computer — the appliance (TNGC-30).
+#
+#   mkdir tng-computer && cd tng-computer
+#   curl -O https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/docker-compose.yml
+#   curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/.env.example
+#   docker compose up -d
+#
+# Then follow the wall: it will say NOT PAIRED and walk you through
+# registration + pairing. Full guide: docs/APPLIANCE.md in the repo.
+#
+# Requirements: Docker, ~4 GB RAM, any 4-core x86/ARM box. NO GPU — speech is
+# CPU (Piper). A Claude subscription (Pro/Max) for the login step.
+
+services:
+  stack:
+    image: ghcr.io/alacrity-ai/tng-stack:latest
+    init: true
+    restart: unless-stopped
+    ports:
+      # The wall. TV kiosk browser -> http://<this-box>:5173 (then F11).
+      - "5173:3789"
+    volumes:
+      # settings (voice volume etc.) + caches survive updates
+      - tng-server-cache:/opt/tng/apps/server/.cache
+      # extra language voices downloaded at runtime
+      - tng-voices:/opt/tng/voice/piper
+    environment:
+      # Audio-extraction fallback for embed-blocked music is OPT-IN on
+      # distributed installs: set 1 to enable.
+      TNG_AUDIO_FALLBACK: ${TNG_AUDIO_FALLBACK:-0}
+
+  computer:
+    image: ghcr.io/alacrity-ai/tng-computer:latest
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    # NET_ADMIN only for the entrypoint's egress firewall; the session runs
+    # unprivileged (uid 1000) behind a default-deny allowlist.
+    cap_add: [NET_ADMIN]
+    ports:
+      - "127.0.0.1:3791:3791"
+    volumes:
+      - tng-claude-config:/home/node/.claude     # Claude login persists here
+      - tng-learned:/opt/tng/claude/.claude      # household-learned skills/assets
+      - tng-pair:/var/lib/tng                    # pairing token (tng pair writes it)
+    environment:
+      TNG_SERVER_URL: http://stack:3789
+      TNG_BRIDGE_HOST: 0.0.0.0
+      TNG_TRICORDER_URL: ${TNG_TRICORDER_URL:-wss://tricorder.lalalimited.com/link}
+      # Comma-separated extra hostnames the Computer may reach (egress fence).
+      TNG_EXTRA_ALLOWED_DOMAINS: ${TNG_EXTRA_ALLOWED_DOMAINS:-}
+
+volumes:
+  tng-claude-config:
+  tng-learned:
+  tng-pair:
+  tng-server-cache:
+  tng-voices:

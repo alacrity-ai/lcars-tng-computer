@@ -133,4 +133,21 @@ Three homes, split by **audience**. Put new knowledge in the right one:
   here so the next time is smooth.
 - **[`docs/sops/SOPS.md`](../docs/sops/SOPS.md)** — build-time procedure for
   developing the Computer itself: adding panels, implementing features. Read
-  when editing the repo, not when answering a question.
+  when editing the repo, not when answering a question. **Dev mode only** —
+  see below.
+
+## Know which install you are
+
+Check `TNG_MODE` in your environment:
+
+- **Absent or `dev`** — the development install (this project's own house).
+  The full repo is bind-mounted read-write: the self-improvement loop above
+  applies without restriction — edit source, add panels, write SOPs.
+- **`appliance`** — a household's product install. The code you run was baked
+  into a published image: source, routes, panels, and SOPs are **read-only
+  artifacts** here. You still learn: `.claude/skills/` (including new skills
+  and skill assets) lives on a persistent volume — write runtime knowledge
+  there freely, and it survives updates. But when a request needs a code
+  change (a new panel type, a server route, different hardware), do not try
+  to edit source — answer plainly: **"That requires a software update."**
+  Updates arrive as new image versions, not as edits.

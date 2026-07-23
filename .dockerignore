@@ -1,0 +1,9 @@
+# Appliance image builds (docker/appliance-*.Dockerfile) use the repo root as
+# context — keep host state and junk out of the images.
+**/node_modules
+.git
+.smoke
+voice/piper
+apps/server/.cache
+apps/tricorder/.wrangler
+*.mp3:Zone.Identifier

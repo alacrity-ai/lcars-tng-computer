@@ -139,6 +139,11 @@ async function isEmbeddable(videoId: string): Promise<boolean> {
 // prewarm (fired at broadcast time) and the proxy route share one resolution;
 // entries expire on the URL's own `expire` param. Never redirect clients to
 // these URLs — they are bound to the resolving IP; the proxy makes that moot.
+// Opt-out switch for distributed builds (TNGC-30): audio extraction is a
+// HOUSE-side feature — appliance composes ship TNG_AUDIO_FALLBACK=0 and users
+// opt in. Absent (our dev stack) = enabled, unchanged.
+const AUDIO_FALLBACK_ENABLED = process.env.TNG_AUDIO_FALLBACK !== "0";
+
 const AUDIO_RESOLVE_TIMEOUT_MS = 30_000;
 const AUDIO_URL_FALLBACK_TTL_MS = 4 * 60 * 60_000;
 const audioUrls = new Map<string, { promise: Promise<string>; expiresAt: number }>();
@@ -196,6 +201,7 @@ function prewarmAudio(videoId: string) {
 export async function decorateYoutubeProps(
   props: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
+  if (!AUDIO_FALLBACK_ENABLED) return props;
   const videoId = props.videoId;
   if (typeof videoId !== "string" || props.audioOnly === true) {
     if (typeof videoId === "string" && props.audioOnly === true) prewarmAudio(videoId);
@@ -429,6 +435,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // bound to the resolving IP, and proxying keeps retries/fixes server-only.
   // Range passthrough is what makes seeking (startSeconds) work.
   app.get<{ Params: { videoId: string } }>("/api/console/audio/:videoId", async (req, reply) => {
+    if (!AUDIO_FALLBACK_ENABLED) {
+      return reply.code(404).send({ error: "audio fallback disabled (TNG_AUDIO_FALLBACK=0)" });
+    }
     const { videoId } = req.params;
     if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
       return reply.code(400).send({ error: "bad video id" });
@@ -488,12 +497,13 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     void (async () => {
       // Guard on the playback record, not the visible panel (TNGC-26).
       if (hub.playbackVideoId !== videoId) return;
-      if (!audio) {
+      if (!audio) rememberEmbeddable(videoId, false);
+      if (!audio && AUDIO_FALLBACK_ENABLED) {
         // The iframe failed but the media almost certainly exists — flip to
         // the audio path and remember the verdict so the next play of this
         // video skips the embed entirely. playTrack keeps a backgrounded
-        // flip invisible.
-        rememberEmbeddable(videoId, false);
+        // flip invisible. With the fallback disabled (distributed builds,
+        // TNGC-30) an embed error falls straight to substitution below.
         await playTrack({ ...(hub.playbackProps ?? { videoId }), audioOnly: true, autoplay: true });
         return;
       }
