@@ -220,6 +220,43 @@ app.get("/api/status", async (c) => {
   return hub(c, c.get("session").tenantId).fetch(new Request("https://hub/status"));
 });
 
+// ---- the command queue (TNGC-22) ------------------------------------------------
+
+app.get("/api/queue", async (c) => {
+  const s = c.get("session");
+  const res = await hub(c, s.tenantId).fetch(new Request("https://hub/queue"));
+  const data = (await res.json()) as { online: boolean; items: Array<{ user: string }> };
+  return c.json({
+    online: data.online,
+    role: s.role,
+    items: data.items.map((item) => ({ ...item, mine: item.user === s.userHandle })),
+  });
+});
+
+// Withdraw a queued command / cancel the active one. Own commands only —
+// unless you hold the admin role, which can clear anyone's.
+app.post("/api/queue/:id/withdraw", async (c) => {
+  const s = c.get("session");
+  const id = c.req.param("id");
+  const h = hub(c, s.tenantId);
+  const snap = (await (await h.fetch(new Request("https://hub/queue"))).json()) as {
+    items: Array<{ id: string; user: string }>;
+  };
+  const item = snap.items.find((i) => i.id === id);
+  if (!item) return c.json({ error: "no such command (already finished?)" }, 404);
+  if (item.user !== s.userHandle && s.role !== "admin") {
+    return c.json({ error: "you can only withdraw your own commands" }, 403);
+  }
+  const res = await h.fetch(
+    new Request("https://hub/withdraw", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, by: s.userHandle }),
+    }),
+  );
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
 // ---- admin console (admin-role sessions only) ----------------------------------
 
 app.use("/api/admin/*", async (c, next) => {

@@ -20,18 +20,40 @@ export interface CloudMessage extends TngMessage {
   id: string;
 }
 
+/** One row of the bridge's dispatcher queue as published to the cloud
+    (TNGC-22). `active` marks the command the session is working right now;
+    `cancelling` means its abort flag is armed. Transcripts are truncated by
+    the bridge before framing. */
+export interface QueueItem {
+  id: string;
+  user: string;
+  device: string;
+  transcript: string;
+  ts: number;
+  active?: boolean;
+  cancelling?: boolean;
+}
+
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
     text "ping"/"pong" outside this framing (DO auto-response, never wakes
-    the hub). */
-export type LinkDownFrame = { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage };
+    the hub).
+    - msg: a phone command to enqueue.
+    - withdraw: remove a queued command / cancel the active one (TNGC-22);
+      `id` is the QueueItem id, `by` the requesting user handle. Additive
+      in v1 — both ends ignore unknown frame types. */
+export type LinkDownFrame =
+  | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
+  | { v: typeof CONTRACT_VERSION; type: "withdraw"; id: string; by?: string };
 
 /** Frames sent up the /link socket (bridge → cloud).
-    - ack: the message was handed to the session; the hub deletes it and
-      will never replay it.
-    - pending: how many delivered commands the session hasn't absorbed yet
-      (TNGC-21) — the hub stores the latest and serves it on /status so the
-      Tricorder app can badge it. Additive in v1: both ends ignore unknown
-      frame types, so a version bump is not required. */
+    - ack: the message was dispatched to the session OR withdrawn; the hub
+      deletes it and will never replay it.
+    - pending: legacy count-only badge frame (TNGC-21) — superseded by
+      `queue`, still accepted by the hub for old bridges.
+    - queue: the full dispatcher snapshot (TNGC-22) — the hub stores the
+      latest and serves it on /queue + counts it on /status. Additive in
+      v1: both ends ignore unknown frame types. */
 export type LinkUpFrame =
   | { v: typeof CONTRACT_VERSION; type: "ack"; id: string }
-  | { v: typeof CONTRACT_VERSION; type: "pending"; count: number };
+  | { v: typeof CONTRACT_VERSION; type: "pending"; count: number }
+  | { v: typeof CONTRACT_VERSION; type: "queue"; items: QueueItem[] };

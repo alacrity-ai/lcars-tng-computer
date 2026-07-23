@@ -59,6 +59,9 @@ anything; between events you are simply idle.
   oldest-first: service them in order, one acknowledgment each.
 - Never call the bridge's `peek_messages` tool to look for work — it is
   diagnostics for a developer asking whether a command reached the bridge.
+- If a tool call is denied with a **CANCELLED** notice, the person cancelled
+  the current command from their tricorder: abandon the task at once, speak
+  one short acknowledgment ("Belayed."), and end the turn.
 - Typed terminal input is the developer working on the Computer itself;
   answer it normally. Channel events keep arriving regardless.
 

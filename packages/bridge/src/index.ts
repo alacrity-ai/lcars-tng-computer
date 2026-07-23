@@ -1,24 +1,39 @@
 #!/usr/bin/env node
 /**
  * Bridge MCP server — channel delivery into the Computer session (TNGC-18)
- * + Tricorder cloud link (TNGC-14).
+ * + Tricorder cloud link (TNGC-14) + THE command queue (TNGC-22).
  *
  * Delivery model: the bridge declares the experimental `claude/channel`
- * capability and PUSHES each message into the running session as a channel
- * notification the moment it arrives — idle sessions start a turn
- * immediately, busy sessions receive queued events as a group on the next
- * turn (Claude Code owns that queueing). There is no blocking tool and no
- * re-arm discipline: the v1 await-loop (TNGC-13) died at timeout boundaries,
- * where every {timeout:true} return was a fresh model-discipline decision.
+ * capability and owns a dispatcher queue. While the session is idle, an
+ * arriving command is pushed immediately as a channel notification; while a
+ * turn is running (known from hooks — UserPromptSubmit posts /turn-start,
+ * Stop posts /turn-end), commands are HELD HERE, visible and withdrawable,
+ * and the next one dispatches on turn end. Holding the queue bridge-side —
+ * instead of letting events pile up invisibly inside the harness — is what
+ * makes "show me the queue", "withdraw that", and "cancel the running one"
+ * possible at all. There is still no blocking tool and no re-arm discipline:
+ * the v1 await-loop (TNGC-13) died at timeout boundaries, and every queue
+ * transition here is hook- or message-driven.
  *
- * Two producers feed the same delivery path:
+ * Cancellation: a channel event cannot interrupt a running turn (mid-turn
+ * events deliver NEXT turn, by design), so cancel rides hooks instead: a
+ * withdraw aimed at the ACTIVE command arms an abort flag; the session's
+ * PreToolUse hook (claude/hooks/pretool-abort.sh) polls /abort-check and
+ * denies every non-console tool with a CANCELLED notice until the turn ends.
+ * An already-executing tool call runs out — the axe falls at the next one.
+ *
+ * Two producers feed the same queue:
  *  - local HTTP POST /message (office push-to-talk via scripts/say.sh)
  *  - an OUTBOUND WebSocket to the Tricorder Durable Object (phones anywhere).
  *    Outbound-only: nothing on the internet can reach into the house.
  *
  * Cloud contract (see @tng/contract): the hub persists every message and
- * replays unacked ones on reconnect; we ack once the channel notification is
- * written to the session transport. Replays are deduped by cloud id.
+ * replays unacked ones on reconnect; we ack at DISPATCH (or withdrawal), so
+ * commands still queued here survive a bridge restart via replay + dedupe.
+ * The TTL is an ARRIVAL check — once a command is visibly queued (and
+ * withdrawable), waiting out a long turn is legitimate, not staleness.
+ * Every queue change is published: count to the wall's badge, full snapshot
+ * to the cloud (`queue` up-frame → the PWA's queue screen).
  *
  * Requires the session to be launched with:
  *   claude --dangerously-load-development-channels server:bridge
@@ -26,29 +41,35 @@
  * — the peek_messages tool and /health exist to diagnose exactly that.
  */
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import WebSocket from "ws";
-import type { LinkDownFrame, LinkUpFrame, TngMessage } from "@tng/contract";
+import type { LinkDownFrame, LinkUpFrame, QueueItem, TngMessage } from "@tng/contract";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
-/** Voice commands are ephemeral speech: anything older than this at delivery
-    time is dropped, not executed ("play jazz" from 20 minutes ago must never
-    fire after a stall). Applies to cloud replays; local posts are born fresh. */
+/** Voice commands are ephemeral speech: anything older than this ON ARRIVAL
+    (fresh post or cloud replay) is dropped, not executed. Deliberately-held
+    queue time does NOT count — a visible queue makes waiting legitimate. */
 const TTL_MS = Number(process.env.TNG_MESSAGE_TTL_MS ?? 60_000);
+/** If a turn runs longer than this without a Stop, assume the hook was lost
+    and fall back to immediate dispatch (harness-side queueing — the pre-22
+    behavior). Degrades, never wedges. */
+const BUSY_FAILSAFE_MS = Number(process.env.TNG_BUSY_FAILSAFE_MS ?? 10 * 60_000);
 const CLOUD_URL = process.env.TNG_TRICORDER_URL;
 const CLOUD_TOKEN = process.env.TNG_TRICORDER_TOKEN;
+const SERVER_URL = process.env.TNG_SERVER_URL ?? "http://127.0.0.1:3789";
 
-interface InboundMessage extends TngMessage {
-  /** Present on cloud-delivered messages; acked once pushed to the session. */
+interface QueuedCommand extends TngMessage {
+  /** Queue identity: the cloud id for phone commands, `loc_…` for local. */
+  id: string;
   cloudId?: string;
 }
 
 // ---- MCP server (channel capability) ----------------------------------------
 
 const server = new McpServer(
-  { name: "tng-bridge", version: "0.4.0" },
+  { name: "tng-bridge", version: "0.5.0" },
   {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
@@ -56,83 +77,164 @@ const server = new McpServer(
       '<channel source="bridge" user="..." device="...">transcript</channel>. ' +
       "They are one-way spoken requests — service each exactly like a spoken command per " +
       "CLAUDE.md (instant spoken acknowledgment, display-before-speak), addressing the " +
-      'user named on the event and resolving "my"/"me" against that user. Multiple events ' +
-      "in one turn arrive oldest-first; service them in order.",
+      'user named on the event and resolving "my"/"me" against that user. The bridge ' +
+      "dispatches one command per turn; the rest wait in a visible queue. If a tool call " +
+      "is denied with a CANCELLED notice, the person cancelled the current command from " +
+      "their tricorder: abandon the task at once, speak one short acknowledgment " +
+      "('Belayed.'), and end the turn.",
   },
 );
 
+// ---- queue state (TNGC-22) ----------------------------------------------------
+
 let delivered = 0;
 let deliveryFailures = 0;
+const queue: QueuedCommand[] = [];
+let active: QueuedCommand | null = null;
+let abortRequest: { by: string; at: number } | null = null;
+let busy = false;
+let busySince = 0;
 
-// ---- pending-commands badge (TNGC-21) ----------------------------------------
-// Counts commands pushed into the session since its last turn ended: while the
-// session is mid-turn, new commands queue in the harness and this is their
-// count; the Stop hook POSTs /turn-end and the badge clears as the queued
-// group is absorbed into the next turn. A command delivered while idle shows
-// briefly as 1 — "command in flight" — until its turn's own Stop.
-// Two sinks, both fire-and-forget: the console server (wall badge widget) and
-// the Tricorder cloud (a "pending" up-frame, surfaced to phones via /status).
-const SERVER_URL = process.env.TNG_SERVER_URL ?? "http://127.0.0.1:3789";
-let pendingCommands = 0;
+/** Ring buffer of recent messages for diagnostics (peek_messages / debugging
+    silent channel drops). NOT the delivery path. */
+const recent: Array<QueuedCommand & { deliveredAt: number; pushed: boolean }> = [];
 
-function pushPending(count: number): void {
-  pendingCommands = count;
+function snapshot(): QueueItem[] {
+  const pub = (c: QueuedCommand, isActive: boolean): QueueItem => ({
+    id: c.id,
+    user: c.user,
+    device: c.device,
+    transcript: c.transcript.length > 140 ? c.transcript.slice(0, 139) + "…" : c.transcript,
+    ts: c.ts,
+    ...(isActive ? { active: true } : {}),
+    ...(isActive && abortRequest ? { cancelling: true } : {}),
+  });
+  return [...(active ? [pub(active, true)] : []), ...queue.map((c) => pub(c, false))];
+}
+
+/** Publish every queue change: count → wall badge, snapshot → cloud/PWA. */
+function pushState(): void {
+  const items = snapshot();
   void fetch(`${SERVER_URL}/api/console/command-pending`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ count }),
+    body: JSON.stringify({ count: items.length }),
     signal: AbortSignal.timeout(2_000),
   }).catch(() => {
     // wall badge is best-effort; the count re-syncs on the next change
   });
   if (cloudSocket?.readyState === WebSocket.OPEN) {
-    const frame: LinkUpFrame = { v: 1, type: "pending", count };
+    const frame: LinkUpFrame = { v: 1, type: "queue", items };
     try {
       cloudSocket.send(JSON.stringify(frame));
     } catch {
-      // link recycling — the next change re-syncs
+      // link recycling — the open handler re-syncs
     }
   }
 }
-/** Ring buffer of recent messages for diagnostics (peek_messages / debugging
-    silent channel drops). NOT the delivery path. */
-const recent: Array<InboundMessage & { deliveredAt: number; pushed: boolean }> = [];
 
-async function deliver(msg: InboundMessage): Promise<void> {
+function ackCloud(cloudId: string | undefined): void {
+  if (!cloudId || cloudSocket?.readyState !== WebSocket.OPEN) return;
+  const frame: LinkUpFrame = { v: 1, type: "ack", id: cloudId };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // hub replays, dedupe eats it
+  }
+}
+
+function enqueue(msg: TngMessage & { cloudId?: string }): void {
   const age = Date.now() - msg.ts;
   if (age > TTL_MS) {
     console.error(
-      `[bridge] dropped stale message (${Math.round(age / 1000)}s old): "${msg.transcript.slice(0, 60)}"`,
+      `[bridge] dropped stale message on arrival (${Math.round(age / 1000)}s old): "${msg.transcript.slice(0, 60)}"`,
     );
+    ackCloud(msg.cloudId); // stale: never execute, never replay
     return;
   }
-  let pushed = false;
-  try {
-    await server.server.notification({
-      method: "notifications/claude/channel",
-      params: {
-        content: msg.transcript,
-        // meta keys must be plain identifiers; values must be strings.
-        meta: { user: msg.user, device: msg.device, ts: String(msg.ts) },
-      },
-    });
-    pushed = true;
-    delivered++;
-    pushPending(pendingCommands + 1);
-    if (msg.cloudId && cloudSocket?.readyState === WebSocket.OPEN) {
-      const frame: LinkUpFrame = { v: 1, type: "ack", id: msg.cloudId };
-      cloudSocket.send(JSON.stringify(frame));
-    }
-    // Ack skipped when the socket is down: the hub replays, dedupe eats it.
-  } catch (err) {
-    deliveryFailures++;
-    console.error(`[bridge] channel notification failed: ${(err as Error).message}`);
-  }
-  recent.push({ ...msg, deliveredAt: Date.now(), pushed });
-  while (recent.length > 20) recent.shift();
+  queue.push({ ...msg, id: msg.cloudId ?? `loc_${randomUUID()}` });
+  dispatch();
+  pushState();
 }
 
-// Replay dedupe: ids already pushed to the session (ack may have been lost).
+/** Push the next command into the session if it's idle. One per turn. */
+function dispatch(): void {
+  if (busy || queue.length === 0) return;
+  const cmd = queue.shift()!;
+  busy = true;
+  busySince = Date.now();
+  active = cmd;
+  void (async () => {
+    let pushed = false;
+    try {
+      await server.server.notification({
+        method: "notifications/claude/channel",
+        params: {
+          content: cmd.transcript,
+          // meta keys must be plain identifiers; values must be strings.
+          meta: { user: cmd.user, device: cmd.device, ts: String(cmd.ts) },
+        },
+      });
+      pushed = true;
+      delivered++;
+      ackCloud(cmd.cloudId);
+    } catch (err) {
+      deliveryFailures++;
+      console.error(`[bridge] channel notification failed: ${(err as Error).message}`);
+      // transport is broken, not busy — let the next event try again
+      busy = false;
+      active = null;
+    }
+    recent.push({ ...cmd, deliveredAt: Date.now(), pushed });
+    while (recent.length > 20) recent.shift();
+    pushState();
+  })();
+}
+
+/** Withdraw a queued command, or arm cancellation of the active one. */
+function withdraw(id: string, by: string): { ok: boolean; state?: string; error?: string } {
+  const idx = queue.findIndex((c) => c.id === id);
+  if (idx >= 0) {
+    const [gone] = queue.splice(idx, 1);
+    ackCloud(gone.cloudId); // never executed — but never replay it either
+    console.error(`[bridge] "${gone.transcript.slice(0, 40)}" withdrawn by ${by}`);
+    pushState();
+    return { ok: true, state: "withdrawn" };
+  }
+  if (active?.id === id) {
+    abortRequest = { by, at: Date.now() };
+    console.error(`[bridge] active command cancel requested by ${by}`);
+    pushState();
+    return { ok: true, state: "cancelling" };
+  }
+  return { ok: false, error: "no such command (already finished?)" };
+}
+
+function onTurnStart(): void {
+  // A typed developer prompt started a turn — hold the queue for its duration.
+  busy = true;
+  busySince = Date.now();
+}
+
+function onTurnEnd(): void {
+  busy = false;
+  active = null;
+  abortRequest = null;
+  dispatch();
+  pushState();
+}
+
+// Failsafe: a lost Stop hook must degrade to pre-queue behavior, not wedge.
+setInterval(() => {
+  if (busy && Date.now() - busySince > BUSY_FAILSAFE_MS) {
+    console.error(
+      `[bridge] no turn-end for ${Math.round(BUSY_FAILSAFE_MS / 60000)}min — assuming the hook was lost, dispatching`,
+    );
+    onTurnEnd();
+  }
+}, 30_000).unref();
+
+// Replay dedupe: ids already enqueued once (ack may have been lost).
 const seenCloudIds = new Set<string>();
 const seenOrder: string[] = [];
 function firstSighting(id: string): boolean {
@@ -143,12 +245,23 @@ function firstSighting(id: string): boolean {
   return true;
 }
 
-// ---- local producer endpoint ------------------------------------------------
+// ---- local endpoints (producer + hooks + queue control) -----------------------
 
 const http = createServer((req, res) => {
   const respond = (code: number, body: unknown) => {
     res.writeHead(code, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
+  };
+  const readBody = (fn: (body: Record<string, unknown>) => void) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      try {
+        fn(raw ? (JSON.parse(raw) as Record<string, unknown>) : {});
+      } catch {
+        respond(400, { error: "invalid JSON body" });
+      }
+    });
   };
 
   if (req.method === "GET" && req.url === "/health") {
@@ -157,38 +270,52 @@ const http = createServer((req, res) => {
       mode: "channel-push",
       delivered,
       deliveryFailures,
-      pendingCommands,
+      busy,
+      active: active ? { id: active.id, user: active.user, cancelling: !!abortRequest } : null,
+      queued: queue.length,
       ttlMs: TTL_MS,
       cloud: cloudState,
     });
   }
-  // Hit by the session's Stop hook: the turn ended, so every command counted
-  // so far is serviced (or being absorbed into the next turn right now).
-  if (req.method === "POST" && req.url === "/turn-end") {
-    if (pendingCommands !== 0) pushPending(0);
+  if (req.method === "GET" && req.url === "/queue") {
+    return respond(200, { items: snapshot() });
+  }
+  // Polled by the session's PreToolUse hook: when a cancel is armed, the hook
+  // denies non-console tools until the turn ends.
+  if (req.method === "GET" && req.url === "/abort-check") {
+    return respond(200, { abort: !!abortRequest, by: abortRequest?.by ?? null });
+  }
+  // Hit by the session's UserPromptSubmit hook: a typed turn began.
+  if (req.method === "POST" && req.url === "/turn-start") {
+    onTurnStart();
     return respond(200, { ok: true });
   }
-  if (req.method === "POST" && req.url === "/message") {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      try {
-        const body = JSON.parse(raw) as Partial<TngMessage>;
-        if (typeof body.transcript !== "string" || body.transcript.trim() === "") {
-          return respond(400, { error: "transcript (non-empty string) is required" });
-        }
-        void deliver({
-          user: typeof body.user === "string" && body.user ? body.user : "leif",
-          device: typeof body.device === "string" && body.device ? body.device : "office",
-          transcript: body.transcript.trim(),
-          ts: Date.now(),
-        });
-        return respond(202, { ok: true, mode: "channel-push" });
-      } catch {
-        return respond(400, { error: "invalid JSON body" });
-      }
+  // Hit by the session's Stop hook: the turn ended — dispatch the next command.
+  if (req.method === "POST" && req.url === "/turn-end") {
+    onTurnEnd();
+    return respond(200, { ok: true });
+  }
+  if (req.method === "POST" && req.url === "/withdraw") {
+    return readBody((body) => {
+      if (typeof body.id !== "string") return respond(400, { error: "id is required" });
+      const by = typeof body.by === "string" && body.by ? body.by : "local";
+      const result = withdraw(body.id, by);
+      respond(result.ok ? 202 : 404, result);
     });
-    return;
+  }
+  if (req.method === "POST" && req.url === "/message") {
+    return readBody((body) => {
+      if (typeof body.transcript !== "string" || body.transcript.trim() === "") {
+        return respond(400, { error: "transcript (non-empty string) is required" });
+      }
+      enqueue({
+        user: typeof body.user === "string" && body.user ? body.user : "leif",
+        device: typeof body.device === "string" && body.device ? body.device : "office",
+        transcript: body.transcript.trim(),
+        ts: Date.now(),
+      });
+      respond(202, { ok: true, mode: "channel-push", busy, queued: queue.length });
+    });
   }
   respond(404, { error: "not found" });
 });
@@ -252,10 +379,9 @@ function startCloudLink() {
       cloudState = "up";
       lastActivity = Date.now();
       console.error("[bridge] tricorder link up");
-      // Re-sync the pending badge after a link blip (frames sent while down
-      // are lost — the count, unlike messages, has no replay).
-      const frame: LinkUpFrame = { v: 1, type: "pending", count: pendingCommands };
-      ws.send(JSON.stringify(frame));
+      // Re-sync queue state after a link blip (frames sent while down are
+      // lost — the snapshot, unlike messages, has no replay).
+      pushState();
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {
         if (Date.now() - lastActivity > 90_000) {
@@ -275,7 +401,9 @@ function startCloudLink() {
         const frame = JSON.parse(text) as LinkDownFrame;
         if (frame.type === "msg" && firstSighting(frame.msg.id)) {
           const { id, ...msg } = frame.msg;
-          void deliver({ ...msg, cloudId: id });
+          enqueue({ ...msg, cloudId: id });
+        } else if (frame.type === "withdraw" && typeof frame.id === "string") {
+          withdraw(frame.id, typeof frame.by === "string" ? frame.by : "tricorder");
         }
       } catch {
         // unknown frame — ignore (forward compatibility)
@@ -300,17 +428,24 @@ server.registerTool(
   "peek_messages",
   {
     description:
-      "Read-only diagnostics for the voice-command pipeline. Returns link state and the last " +
-      "20 messages the bridge received, with whether each was pushed as a channel event. Use " +
-      "ONLY when debugging ('did my command reach the bridge?') — never to receive commands; " +
-      "commands arrive on their own as channel events.",
+      "Read-only diagnostics for the voice-command pipeline. Returns link state, the current " +
+      "queue, and the last 20 messages the bridge received, with whether each was pushed as a " +
+      "channel event. Use ONLY when debugging ('did my command reach the bridge?') — never to " +
+      "receive commands; commands arrive on their own as channel events.",
     inputSchema: {},
   },
   async () => ({
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({ cloud: cloudState, delivered, deliveryFailures, recent }),
+        text: JSON.stringify({
+          cloud: cloudState,
+          delivered,
+          deliveryFailures,
+          busy,
+          queue: snapshot(),
+          recent,
+        }),
       },
     ],
   }),

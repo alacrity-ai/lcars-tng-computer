@@ -29,7 +29,9 @@ house.
 | `POST /api/logout` | session | revoke own session |
 | `GET /api/me` | session | who am I on this device |
 | `POST /api/message` `{transcript}` | session | enqueue an utterance (attribution = session's user + device label) |
-| `GET /api/status` | session | `{online, queued}` — is the Computer connected |
+| `GET /api/status` | session | `{online, queued, pending}` — is the Computer connected, how deep is its queue |
+| `GET /api/queue` | session | the bridge's dispatcher snapshot: every waiting command (+ the active one), `mine` flagged |
+| `POST /api/queue/:id/withdraw` | session | withdraw a queued command / cancel the active one — own commands only, admin can clear anyone's |
 | `GET /api/admin/overview` | admin session | users + their active sessions |
 | `POST /api/admin/users` `{handle,name,role,password}` | admin | create user |
 | `POST /api/admin/users/:id/password` `{password}` | admin | set password + **revoke all that user's sessions atomically** |

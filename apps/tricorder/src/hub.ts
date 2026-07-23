@@ -5,13 +5,20 @@
  *
  * Queue semantics (the contract that matters):
  *  - every message is persisted to DO storage, then pushed down the socket
- *  - the bridge acks when the message is handed to the session → delete
+ *  - the bridge acks when the message is DISPATCHED to the session (or
+ *    withdrawn) → delete; until then it sits in the bridge's visible
+ *    dispatcher queue (TNGC-22)
  *  - unacked messages replay on (re)connect
  *  - at replay, messages older than the TTL are dropped and logged — voice
  *    is ephemeral; durability is for blips, not time-shifting speech
+ *  - the bridge publishes its dispatcher snapshot (`queue` up-frames); the
+ *    hub stores the latest and serves it to phones (/queue, counted on
+ *    /status) — meaningless without a live link, so offline reads as empty
+ *  - `withdraw` down-frames carry phone-side withdrawals/cancels to the
+ *    bridge; permissions are enforced in the Worker before they get here
  */
 import { DurableObject } from "cloudflare:workers";
-import type { CloudMessage, LinkDownFrame, LinkUpFrame, TngMessage } from "@tng/contract";
+import type { CloudMessage, LinkDownFrame, LinkUpFrame, QueueItem, TngMessage } from "@tng/contract";
 
 export interface Env {
   DB: D1Database;
@@ -41,12 +48,12 @@ export class TenantHub extends DurableObject<Env> {
     return (await this.ctx.storage.list({ prefix: "msg:" })).size;
   }
 
-  /** Session-pending count as last reported by the bridge (TNGC-21).
-      Meaningless without a live link — report 0 when the bridge is offline
-      rather than a stale number. */
-  private async pending(): Promise<number> {
-    if (!this.online()) return 0;
-    return (await this.ctx.storage.get<number>("pending")) ?? 0;
+  /** The bridge's dispatcher snapshot as last published (TNGC-22).
+      Meaningless without a live link — report empty when offline rather
+      than a stale queue. */
+  private async queueItems(): Promise<QueueItem[]> {
+    if (!this.online()) return [];
+    return (await this.ctx.storage.get<QueueItem[]>("queue")) ?? [];
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -60,6 +67,9 @@ export class TenantHub extends DurableObject<Env> {
       // Exactly one bridge per tenant: a new link replaces any stale ghost
       // (half-dead NAT sockets linger; the newest connection wins).
       for (const ws of this.ctx.getWebSockets()) ws.close(1012, "replaced by new link");
+      // A fresh bridge starts with an empty queue; drop the old snapshot so
+      // a crashed bridge's queue can't haunt the PWA until the first push.
+      await this.ctx.storage.delete("queue");
       this.ctx.acceptWebSocket(pair[1]);
       await this.replay(pair[1]);
       return new Response(null, { status: 101, webSocket: pair[0] });
@@ -81,7 +91,7 @@ export class TenantHub extends DurableObject<Env> {
         ok: true,
         online: this.online(),
         queued: await this.depth(),
-        pending: await this.pending(),
+        pending: (await this.queueItems()).length,
       });
     }
 
@@ -89,8 +99,28 @@ export class TenantHub extends DurableObject<Env> {
       return json({
         online: this.online(),
         queued: await this.depth(),
-        pending: await this.pending(),
+        pending: (await this.queueItems()).length,
       });
+    }
+
+    if (url.pathname === "/queue") {
+      return json({ online: this.online(), items: await this.queueItems() });
+    }
+
+    if (url.pathname === "/withdraw" && req.method === "POST") {
+      const { id, by } = (await req.json()) as { id?: string; by?: string };
+      if (typeof id !== "string" || !id) return json({ error: "id is required" }, 400);
+      if (!this.online()) return json({ error: "Computer offline — nothing to withdraw" }, 409);
+      const frame: LinkDownFrame = { v: 1, type: "withdraw", id, by };
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(JSON.stringify(frame));
+        } catch {
+          // dead socket — the withdraw is lost, which the PWA's fast
+          // re-poll makes visible (the item is still listed)
+        }
+      }
+      return json({ ok: true }, 202);
     }
 
     return json({ error: "not found" }, 404);
@@ -121,8 +151,21 @@ export class TenantHub extends DurableObject<Env> {
       const frame = JSON.parse(data) as LinkUpFrame;
       if (frame.type === "ack" && typeof frame.id === "string") {
         await this.ctx.storage.delete(`msg:${frame.id}`);
+      } else if (frame.type === "queue" && Array.isArray(frame.items)) {
+        await this.ctx.storage.put("queue", frame.items.slice(0, 50));
       } else if (frame.type === "pending" && typeof frame.count === "number") {
-        await this.ctx.storage.put("pending", Math.max(0, Math.trunc(frame.count)));
+        // Legacy count-only frame from a pre-TNGC-22 bridge: synthesize a
+        // faceless snapshot so /status still counts something sensible.
+        await this.ctx.storage.put(
+          "queue",
+          Array.from({ length: Math.min(50, Math.max(0, Math.trunc(frame.count))) }, (_, i) => ({
+            id: `legacy_${i}`,
+            user: "unknown",
+            device: "unknown",
+            transcript: "(pre-queue bridge — restart the session to see commands)",
+            ts: Date.now(),
+          })),
+        );
       }
     } catch {
       // not a frame we know — ignore (forward compatibility)

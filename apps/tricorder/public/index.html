@@ -88,7 +88,19 @@
   .pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 12px; color: var(--ink); background: #555; text-transform: uppercase; transition: background .25s; }
   .pill.on  { background: var(--gold); }
   .pill.off { background: var(--red); }
-  .pill.q   { background: var(--lav); }
+  .pill.q   { background: var(--lav); cursor: pointer; border: 0; font-family: inherit; letter-spacing: inherit; }
+  .pill.q:active { filter: brightness(1.15); }
+
+  /* queue screen (TNGC-22) */
+  .qitem { border: 1px solid #2a2a2a; border-radius: 12px; padding: 10px 12px; margin-top: 10px; background: var(--panel); }
+  .qitem.mine { border-color: var(--gold); }
+  .qitem .qt { color: #fff; font-size: 15px; overflow-wrap: break-word; }
+  .qitem .qmeta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 7px; color: #999; font-size: 12px; text-transform: uppercase; }
+  .chip { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 9px; color: var(--ink); }
+  .chip.active { background: var(--gold); }
+  .chip.cancelling { background: var(--red); animation: caret-blink 1s steps(1) infinite; }
+  .qbtn { background: none; border: 1px solid var(--red); color: var(--red); border-radius: 10px; font: inherit; font-size: 11px; padding: 2px 10px; cursor: pointer; text-transform: uppercase; }
+  .qbtn[disabled] { opacity: .4; }
   @keyframes pill-pop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
 
   /* push to talk — the instrument */
@@ -243,7 +255,7 @@
         <div class="strip">
           <div class="who" id="who"></div>
           <div class="pills">
-            <div class="pill q" id="qpill" hidden></div>
+            <button class="pill q" id="qpill" hidden></button>
             <div class="pill" id="pill">…</div>
           </div>
         </div>
@@ -273,6 +285,14 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- QUEUE -->
+  <div class="view" id="view-queue">
+    <button class="link" id="btn-qback" style="text-align:left">&#9664; Back</button>
+    <label>Command queue</label>
+    <div id="queue-list"></div>
+    <div class="err" id="queue-err"></div>
   </div>
 
   <!-- ADMIN -->
@@ -338,6 +358,7 @@ function logout() {
   store.token = null; store.user = null; me = null;
   stopPolling();
   stopReadouts();
+  stopQueuePoll();
   show("login");
 }
 
@@ -663,6 +684,79 @@ sw.addEventListener("click", () => {
   renderSwitch();
 });
 renderSwitch();
+
+// ---- queue screen (TNGC-22) -----------------------------------------------------
+let qTimer = null, lastQueueJson = "";
+function openQueue() {
+  show("queue");
+  lastQueueJson = "";
+  renderQueue();
+  qTimer = setInterval(renderQueue, 2000);
+}
+function stopQueuePoll() { if (qTimer) { clearInterval(qTimer); qTimer = null; } }
+$("qpill").addEventListener("click", openQueue);
+$("btn-qback").onclick = () => { stopQueuePoll(); show("main"); };
+
+async function renderQueue() {
+  let data;
+  try { data = await api("/api/queue"); }
+  catch (e) { $("queue-err").textContent = e.message; return; }
+  $("queue-err").textContent = "";
+  const key = JSON.stringify(data);
+  if (key === lastQueueJson) return; // no churn, no flicker
+  lastQueueJson = key;
+  const wrap = $("queue-list");
+  wrap.innerHTML = "";
+  if (!data.items.length) {
+    const d = document.createElement("div");
+    d.className = "muted";
+    d.textContent = data.online ? "Queue is clear." : "Computer offline.";
+    wrap.appendChild(d);
+    return;
+  }
+  for (const it of data.items) {
+    const card = document.createElement("div");
+    card.className = "qitem" + (it.mine ? " mine" : "");
+    const t = document.createElement("div");
+    t.className = "qt";
+    t.textContent = it.transcript;
+    card.appendChild(t);
+    const meta = document.createElement("div");
+    meta.className = "qmeta";
+    const left = document.createElement("span");
+    left.textContent = it.user + " @ " + it.device + " · " + fmtAgo(it.ts);
+    meta.appendChild(left);
+    const right = document.createElement("span");
+    if (it.cancelling) {
+      const c = document.createElement("span");
+      c.className = "chip cancelling";
+      c.textContent = "Cancelling…";
+      right.appendChild(c);
+    } else if (it.active) {
+      const c = document.createElement("span");
+      c.className = "chip active";
+      c.textContent = "Active";
+      right.appendChild(c);
+    }
+    if ((it.mine || data.role === "admin") && !it.cancelling) {
+      const b = document.createElement("button");
+      b.className = "qbtn";
+      b.textContent = it.active ? "Cancel" : "Withdraw";
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await api("/api/queue/" + it.id + "/withdraw", { method: "POST", body: "{}" }); }
+        catch (e) { $("queue-err").textContent = e.message; }
+        lastQueueJson = "";
+        renderQueue();
+      };
+      right.appendChild(document.createTextNode(" "));
+      right.appendChild(b);
+    }
+    meta.appendChild(right);
+    card.appendChild(meta);
+    wrap.appendChild(card);
+  }
+}
 
 // ---- admin --------------------------------------------------------------------
 function fmtAgo(ts) {

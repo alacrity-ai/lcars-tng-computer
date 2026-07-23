@@ -74,12 +74,22 @@ Key properties:
 
 ## 3. Queue semantics (the contract that matters)
 
-- Every transcript is **persisted** in the DO/D1 queue, then pushed down the socket.
-- The bridge **acks** once the channel notification is written to the session
-  transport; unacked messages **replay** on reconnect.
-- Voice commands **expire 60s** after enqueue when replayed — durability is for Wi-Fi
-  blips, not for time-shifting speech ("queue Madonna" from 20 minutes ago must not
-  fire on reboot). Expired drops are logged, not silent.
+- Every transcript is **persisted** in the DO queue, then pushed down the socket.
+- **The bridge owns the dispatcher queue** (TNGC-22): while a turn is running
+  (known from the session's UserPromptSubmit/Stop hooks), arriving commands are
+  held bridge-side — visible, ordered, withdrawable — and dispatch one per turn.
+  A lost Stop hook degrades to harness-side queueing after 10min; never wedges.
+- The bridge **acks at dispatch or withdrawal** (not arrival); unacked messages
+  **replay** on reconnect, so a held queue survives a bridge restart.
+- Voice commands **expire 60s** after enqueue **on arrival/replay** — durability
+  is for Wi-Fi blips, not time-shifting speech. Deliberately-held queue time
+  doesn't count: a visible, withdrawable queue makes waiting legitimate.
+- Every queue change publishes a **snapshot** (`queue` up-frame → DO → PWA queue
+  screen) and a count (wall badge). **Withdraw/cancel** flows back as a
+  `withdraw` down-frame; own commands only, admin overrides — enforced in the
+  Worker. Cancelling the ACTIVE command arms the session's PreToolUse gate:
+  every non-console tool call is denied with a CANCELLED notice until the turn
+  ends (an already-executing tool call runs out — the axe falls at the next one).
 - The DO's socket state is the **Computer online/offline** signal surfaced in the PWA.
 - The message shape `{user, device, transcript, ts}` is a tiny versioned contract in a
   shared monorepo package — the only coupling between cloud and home.
