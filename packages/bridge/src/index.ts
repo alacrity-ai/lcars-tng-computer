@@ -100,6 +100,8 @@ let deliveryFailures = 0;
 // accepted climbing while delivered stays 0 means commands reach this box
 // but never reach the session (TNGC-31).
 let accepted = 0;
+/** deliveryFailures high-water mark at the last wall alert (one per streak). */
+let deliveredAtLastAlert = 0;
 const queue: QueuedCommand[] = [];
 let active: QueuedCommand | null = null;
 let abortRequest: { by: string; at: number } | null = null;
@@ -227,6 +229,24 @@ function dispatch(): void {
       // transport is broken, not busy — let the next event try again
       busy = false;
       active = null;
+      // Never a silent hang (TNGC-31): after a streak of failures, say so ON
+      // THE WALL — the classic cause is a Claude CLI that lost the
+      // research-preview channels flag. One panel per streak.
+      if (deliveryFailures - deliveredAtLastAlert >= 3) {
+        deliveredAtLastAlert = deliveryFailures;
+        void fetch(`${SERVER_URL}/api/console/display`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            view: "alert",
+            props: {
+              level: "yellow",
+              title: "VOICE LINK FAULT",
+              message: "Commands are reaching this Computer but cannot reach the session. Run: docker compose exec computer tng doctor",
+            },
+          }),
+        }).catch(() => {});
+      }
     }
     recent.push({ ...cmd, deliveredAt: Date.now(), pushed });
     while (recent.length > 20) recent.shift();
