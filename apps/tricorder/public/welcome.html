@@ -391,9 +391,7 @@ async function copyText(text) {
 }
 for (const el of document.querySelectorAll(".cmd")) {
   el.addEventListener("click", async () => {
-    const cmd = Array.from(el.childNodes)
-      .filter((n) => n.nodeType === Node.TEXT_NODE)
-      .map((n) => n.textContent).join("").trim();
+    const cmd = el.textContent.trim();
     showToast((await copyText(cmd)) ? "Copied to clipboard" : "Copy failed — select it manually");
   });
 }
