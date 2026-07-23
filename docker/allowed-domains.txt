@@ -20,6 +20,11 @@ api.weather.gov
 nominatim.openstreetmap.org
 router.project-osrm.org
 www.ncei.noaa.gov
+# Overpass mirrors — "what is that on the map?" feature lookups (maps skill);
+# their absence once masqueraded as an Overpass outage (see 2026-07-23 incident)
+overpass-api.de
+overpass.kumi.systems
+overpass.private.coffee
 
 # Reference reading (WebFetch; WebSearch is server-side and unaffected)
 en.wikipedia.org

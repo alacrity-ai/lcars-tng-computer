@@ -57,6 +57,11 @@ if [[ -z "$SUBNET" ]]; then
 fi
 iptables -A OUTPUT -d "$SUBNET" -p tcp --dport "$HOST_API_PORT" -j ACCEPT
 iptables -A OUTPUT -m set --match-set tng-allowed dst -j ACCEPT
+# REJECT (not silent DROP): a blocked call must fail in milliseconds with a
+# legible "prohibited" error, not hang to curl's timeout looking like a slow
+# endpoint — a 120s DROP-hang once cost a whole debugging incident. The DROP
+# policy below remains as backstop only.
+iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 iptables -P OUTPUT DROP
 
 # IPv6: no allowlist, no exceptions — REJECT (not DROP) so dual-stack clients
