@@ -290,8 +290,10 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && me
 // rewound per play; both plays happen inside user gestures, so iOS allows them.
 const sndPress = new Audio("/sounds/comp_beep.mp3");
 const sndSend = new Audio("/sounds/comp_beep_2.mp3");
+const sndCancel = new Audio("/sounds/cancel_sound.mp3");
 sndPress.preload = "auto";
 sndSend.preload = "auto";
+sndCancel.preload = "auto";
 function chirp(a) {
   try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
 }
@@ -431,7 +433,7 @@ ptt.addEventListener("pointerup", () => {
 });
 ptt.addEventListener("pointercancel", () => { if (!pendingText) endPTT(); });
 ptt.addEventListener("contextmenu", (e) => e.preventDefault());
-$("ptt-cancel").addEventListener("click", resetIdle);
+$("ptt-cancel").addEventListener("click", () => { chirp(sndCancel); resetIdle(); });
 
 // ---- admin --------------------------------------------------------------------
 function fmtAgo(ts) {
