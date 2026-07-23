@@ -149,13 +149,39 @@
   .step h3 { margin: 0; color: #fff; text-transform: uppercase; font-size: 17px; }
   .step p { color: var(--dim); font-family: Georgia, serif; font-size: 14.5px; line-height: 1.65; letter-spacing: .02em; margin: 8px 0 0; max-width: 660px; }
   .step p b { color: var(--peach); font-weight: 600; }
-  .step pre {
-    background: #000; border: 1px solid #2a2416; border-left: 4px solid var(--blue);
-    color: #cfe3ff; font-size: 13px; line-height: 1.7; padding: 12px 14px;
-    margin: 12px 0 0; overflow-x: auto;
+  /* one command per box; click anywhere to copy */
+  .cmd {
+    position: relative; display: block; background: #000;
+    border: 1px solid #2a2416; border-left: 4px solid var(--blue);
+    color: #cfe3ff; font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 13px; letter-spacing: 0; line-height: 1.5;
+    padding: 11px 96px 11px 14px; margin: 12px 0 0;
+    white-space: nowrap; overflow-x: auto; cursor: pointer;
+    transition: border-color .15s, background .15s;
+    scrollbar-width: thin; scrollbar-color: var(--blue) #14100a;
   }
-  .step pre .c { color: #6d7a66; }
+  .cmd::-webkit-scrollbar { height: 6px; }
+  .cmd::-webkit-scrollbar-track { background: #14100a; }
+  .cmd::-webkit-scrollbar-thumb { background: var(--blue); border-radius: 3px; }
+  .cmd::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+  .cmd:hover { border-left-color: var(--gold); background: #0a0803; }
+  .cmd .hint {
+    position: sticky; right: 0; float: right; margin: -11px -96px 0 0;
+    padding: 11px 12px; background: linear-gradient(90deg, transparent, #000 22%);
+    color: var(--blue); font-family: inherit;
+    font-size: 10px; letter-spacing: .12em; pointer-events: none;
+  }
+  .cmd:hover .hint { color: var(--gold); }
   .fine { color: #777; font-size: 12.5px; margin-top: 10px; letter-spacing: .03em; text-transform: uppercase; }
+
+  /* copy toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 20px);
+    background: var(--gold); color: var(--ink); font-weight: 700; text-transform: uppercase;
+    font-size: 14px; padding: 11px 26px; border-radius: 20px; opacity: 0;
+    pointer-events: none; transition: opacity .2s, transform .2s; z-index: 10;
+  }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
 
   /* ---- footer --------------------------------------------------------------------- */
   .frame-bottom { display: flex; gap: 6px; margin-top: 70px; height: 30px; }
@@ -289,11 +315,11 @@
     <div class="num"><span class="n">02</span><span class="l">Launch</span></div>
     <div class="body">
       <h3>Start the appliance</h3>
-      <p>On the box that will run the Computer:</p>
-      <pre>mkdir tng-computer &amp;&amp; cd tng-computer
-curl -O https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/.env.example
-docker compose up -d</pre>
+      <p>On the box that will run the Computer, one command at a time:</p>
+      <code class="cmd">mkdir tng-computer &amp;&amp; cd tng-computer<span class="hint">TAP TO COPY</span></code>
+      <code class="cmd">curl -O https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/docker-compose.yml<span class="hint">TAP TO COPY</span></code>
+      <code class="cmd">curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/.env.example<span class="hint">TAP TO COPY</span></code>
+      <code class="cmd">docker compose up -d<span class="hint">TAP TO COPY</span></code>
       <p>Two containers come up: the wall + speech, and the fenced brain. The
          wall will say <b>NOT PAIRED</b> and wait for you.</p>
     </div>
@@ -304,10 +330,12 @@ docker compose up -d</pre>
     <div class="body">
       <h3>Pair it, then log the brain in</h3>
       <p>In the tricorder's <b>Admin console</b>, tap <b>Pair your Computer</b> —
-         you get a short code. Then, on the box:</p>
-      <pre>docker compose exec computer tng pair ABCD-EFGH
-docker compose attach computer   <span class="c"># follow the Claude login link once, then Ctrl-P Ctrl-Q</span></pre>
-      <p>The login and the pairing both persist — these are one-time steps.</p>
+         you get a short code. Then, on the box (with your code):</p>
+      <code class="cmd">docker compose exec computer tng pair ABCD-EFGH<span class="hint">TAP TO COPY</span></code>
+      <code class="cmd">docker compose attach computer<span class="hint">TAP TO COPY</span></code>
+      <p>The attach shows a <b>Claude login link</b> — follow it once, then
+         detach with Ctrl-P Ctrl-Q. The login and the pairing both persist —
+         these are one-time steps.</p>
     </div>
   </div>
 
@@ -317,8 +345,9 @@ docker compose attach computer   <span class="c"># follow the Claude login link 
       <h3>Put it on the TV</h3>
       <p>Open <code>http://&lt;box-ip&gt;:5173</code> in the TV's browser, press
          F11, tap <b>ENGAGE</b>. Hold the button on your phone and say:
-         <b>&ldquo;Computer, what can you do?&rdquo;</b></p>
-      <pre>docker compose exec computer tng doctor   <span class="c"># anything wrong? this names it</span></pre>
+         <b>&ldquo;Computer, what can you do?&rdquo;</b> Anything wrong? This
+         names it:</p>
+      <code class="cmd">docker compose exec computer tng doctor<span class="hint">TAP TO COPY</span></code>
       <div class="fine">TV can't reach the wall? Allow inbound port 5173 through the box's firewall — the one common snag. Full guide: <a href="https://github.com/alacrity-ai/lcars-tng-computer/blob/main/docs/APPLIANCE.md" rel="noopener">docs/APPLIANCE.md</a>.</div>
     </div>
   </div>
@@ -335,5 +364,43 @@ docker compose attach computer   <span class="c"># follow the Claude login link 
     <span>Free beta for invited households</span>
   </footer>
 </div>
+
+<div id="toast" role="status">Copied to clipboard</div>
+<script>
+"use strict";
+// Click a command box → the command (never the hint text) lands on the
+// clipboard, and the toast confirms it.
+const toast = document.getElementById("toast");
+let toastTimer = null;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add("on");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("on"), 1800);
+}
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // clipboard API needs a secure context / permission — fall back
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+    return ok;
+  }
+}
+for (const el of document.querySelectorAll(".cmd")) {
+  el.addEventListener("click", async () => {
+    const cmd = Array.from(el.childNodes)
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent).join("").trim();
+    showToast((await copyText(cmd)) ? "Copied to clipboard" : "Copy failed — select it manually");
+  });
+}
+</script>
 </body>
 </html>
