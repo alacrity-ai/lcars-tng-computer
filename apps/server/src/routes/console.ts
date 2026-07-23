@@ -27,7 +27,7 @@ import { cancelActiveReading, startReading } from "../reading.js";
 import { getArticle, parseArticleUrl } from "./article.js";
 import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
-import { PanelHistory } from "../history.js";
+import { PanelHistory, summarize } from "../history.js";
 import { getQueue } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
@@ -111,6 +111,18 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   });
   const history = new PanelHistory();
   hub.setDisplayObserver((view, props) => history.record(view, props));
+
+  // Full (view, title, props) of what the wall shows RIGHT NOW — the library
+  // save path (TNGC-23). Called by console-mcp, never the model: the props
+  // (30 KB diagram SVGs, full article paragraphs) flow server → MCP → cloud
+  // without touching model context. Navigation views have nothing to save.
+  app.get("/api/console/history/current", async (_req, reply) => {
+    const { view, props } = hub.state;
+    if (view === "status" || view === "blank" || view === "boot") {
+      return reply.code(409).send({ error: "nothing savable on screen (idle board)" });
+    }
+    return { ok: true, view, title: summarize(view, props), props };
+  });
 
   app.post<{ Body: DisplayHistoryRequest }>("/api/console/display-history", async (req) => {
     const body: DisplayHistoryResponse = { ok: true, entries: history.list(req.body?.limit) };

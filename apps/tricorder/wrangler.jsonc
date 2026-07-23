@@ -13,6 +13,9 @@
       "database_id": "85a923ef-9f5d-4bc1-b9e0-fc5514512201"
     }
   ],
+  // Library payloads (TNGC-23): props JSON, one object per saved item. Fronted
+  // exclusively by this Worker — the bucket is never exposed directly.
+  "r2_buckets": [{ "binding": "LIBRARY", "bucket_name": "tricorder-library" }],
   "durable_objects": {
     "bindings": [{ "name": "TENANT_HUB", "class_name": "TenantHub" }]
   },

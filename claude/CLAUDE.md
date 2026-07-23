@@ -115,6 +115,7 @@ and don't inline their contents here.
 | "Price of X", stocks & crypto | `quotes` |
 | "Quiz me on X", trivia, "test my knowledge" | `quiz` |
 | "Show that again", "back to X", any return to earlier content — even content from moments ago | `recall` |
+| "Save to my tricorder", "my saved X", "send this to Ariel", personal saved items | `library` |
 | "Set a timer/alarm", clear it, time left | `timers` |
 | "Play X", music & video, pause/stop | `media` |
 | "What's the news", headlines | `news` |

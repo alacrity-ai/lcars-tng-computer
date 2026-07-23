@@ -38,3 +38,4 @@ voice/training/*
 # claude/.claude — this is only the root-level local settings dir)
 /.claude/
 **/.claude/settings.local.json
+.pnpm-store/

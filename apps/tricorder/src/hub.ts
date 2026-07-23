@@ -18,11 +18,29 @@
  *    bridge; permissions are enforced in the Worker before they get here
  */
 import { DurableObject } from "cloudflare:workers";
-import type { CloudMessage, LinkDownFrame, LinkUpFrame, QueueItem, TngMessage } from "@tng/contract";
+import type {
+  CloudDisplayCommand,
+  CloudMessage,
+  LinkDownFrame,
+  LinkUpFrame,
+  QueueItem,
+  TngMessage,
+} from "@tng/contract";
+
+/** What lives under a `msg:` storage key: a transcript, or (TNGC-23) a
+    library display command tagged with kind so replay re-frames it right.
+    Sharing the prefix keeps ack/replay/depth one code path. */
+type StoredCommand = CloudMessage | (CloudDisplayCommand & { kind: "display" });
+
+function isDisplayCommand(c: StoredCommand): c is CloudDisplayCommand & { kind: "display" } {
+  return "kind" in c && c.kind === "display";
+}
 
 export interface Env {
   DB: D1Database;
   TENANT_HUB: DurableObjectNamespace;
+  /** Library payloads (TNGC-23) — props JSON, one object per saved item. */
+  LIBRARY: R2Bucket;
   MESSAGE_TTL_MS?: string;
 }
 
@@ -95,6 +113,24 @@ export class TenantHub extends DurableObject<Env> {
       });
     }
 
+    // Put a saved library item on the wall (TNGC-23). Metadata only — the
+    // bridge fetches the payload at dispatch time. Same persistence/replay/
+    // ack lifecycle as messages; permissions were enforced in the Worker.
+    if (url.pathname === "/display-item" && req.method === "POST") {
+      if (!this.online()) return json({ error: "Computer offline" }, 409);
+      const cmd = (await req.json()) as CloudDisplayCommand;
+      await this.ctx.storage.put(`msg:${cmd.id}`, { ...cmd, kind: "display" });
+      const frame: LinkDownFrame = { v: 1, type: "display", cmd };
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(JSON.stringify(frame));
+        } catch {
+          // dead socket — the command stays stored; replay covers it
+        }
+      }
+      return json({ ok: true, online: true, pending: (await this.queueItems()).length }, 202);
+    }
+
     if (url.pathname === "/status") {
       return json({
         online: this.online(),
@@ -126,21 +162,24 @@ export class TenantHub extends DurableObject<Env> {
     return json({ error: "not found" }, 404);
   }
 
-  /** Send every stored (= unacked) fresh message; drop and log the stale. */
+  /** Send every stored (= unacked) fresh command; drop and log the stale. */
   private async replay(ws: WebSocket): Promise<void> {
-    const stored = await this.ctx.storage.list<CloudMessage>({ prefix: "msg:" });
+    const stored = await this.ctx.storage.list<StoredCommand>({ prefix: "msg:" });
     const cutoff = Date.now() - this.ttlMs;
     const ordered = [...stored.values()].sort((a, b) => a.ts - b.ts);
-    for (const msg of ordered) {
-      if (msg.ts < cutoff) {
+    for (const cmd of ordered) {
+      const label = isDisplayCommand(cmd) ? cmd.title : cmd.transcript;
+      if (cmd.ts < cutoff) {
         console.log(
-          `[hub] dropped stale message at replay (${Math.round((Date.now() - msg.ts) / 1000)}s old): ` +
-            `"${msg.transcript.slice(0, 60)}" from ${msg.user}/${msg.device}`,
+          `[hub] dropped stale command at replay (${Math.round((Date.now() - cmd.ts) / 1000)}s old): ` +
+            `"${label.slice(0, 60)}" from ${cmd.user}/${cmd.device}`,
         );
-        await this.ctx.storage.delete(`msg:${msg.id}`);
+        await this.ctx.storage.delete(`msg:${cmd.id}`);
         continue;
       }
-      const frame: LinkDownFrame = { v: 1, type: "msg", msg };
+      const frame: LinkDownFrame = isDisplayCommand(cmd)
+        ? { v: 1, type: "display", cmd: { ...cmd, kind: undefined } as CloudDisplayCommand }
+        : { v: 1, type: "msg", msg: cmd };
       ws.send(JSON.stringify(frame));
     }
   }

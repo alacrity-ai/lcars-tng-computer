@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import { CONTRACT_VERSION, type TngMessage } from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
+import { libraryRoutes } from "./library";
 
 export { TenantHub } from "./hub";
 
@@ -144,13 +145,13 @@ app.post("/api/login", async (c) => {
   });
 });
 
-// ---- session gate for everything else under /api/ ----------------------------
+// ---- session resolution (shared by the /api/* gate and the library plane) ----
 
-app.use("/api/*", async (c, next) => {
-  const token = bearerToken(c.req.raw);
-  if (!token) return c.json({ error: "unauthorized" }, 401);
+async function lookupSession(env: Env, req: Request): Promise<SessionIdentity | null> {
+  const token = bearerToken(req);
+  if (!token) return null;
   const hash = await sha256Hex(token);
-  const row = await c.env.DB.prepare(
+  const row = await env.DB.prepare(
     `SELECT s.id AS sessionId, s.tenant_id AS tenantId, s.user_id AS userId, s.device_label AS deviceLabel,
             s.expires_at AS expiresAt, u.handle AS userHandle, u.name AS userName, u.role, u.disabled
        FROM sessions s JOIN users u ON u.id = s.user_id
@@ -158,11 +159,24 @@ app.use("/api/*", async (c, next) => {
   )
     .bind(hash)
     .first<SessionIdentity & { expiresAt: number | null; disabled: number }>();
-  if (!row || row.disabled) return c.json({ error: "unauthorized" }, 401);
+  if (!row || row.disabled) return null;
   if (row.expiresAt && row.expiresAt <= Date.now()) {
-    await c.env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(row.sessionId).run();
-    return c.json({ error: "session expired" }, 401);
+    await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(row.sessionId).run();
+    return null;
   }
+  return row;
+}
+
+// ---- the library (TNGC-23) — registered BEFORE the session gate because it
+// speaks two auth planes (service token OR session); see library.ts ----------
+
+app.route("/api/library", libraryRoutes(lookupSession, hub));
+
+// ---- session gate for everything else under /api/ ----------------------------
+
+app.use("/api/*", async (c, next) => {
+  const row = await lookupSession(c.env, c.req.raw);
+  if (!row) return c.json({ error: "unauthorized" }, 401);
   c.set("session", row);
   c.executionCtx.waitUntil(
     c.env.DB.prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?").bind(Date.now(), row.sessionId).run(),
@@ -176,6 +190,22 @@ app.get("/api/me", (c) => {
     user: { handle: s.userHandle, name: s.userName, role: s.role },
     deviceLabel: s.deviceLabel,
   });
+});
+
+// Household members for the Library's send picker (TNGC-23): everyone who can
+// receive — no guests, no disabled users, not yourself. Deliberately thin
+// (handle + name only); the admin overview stays admin-gated.
+app.get("/api/users", async (c) => {
+  const s = c.get("session");
+  if (s.role === "guest") return c.json({ error: "the guest account has no library" }, 403);
+  const rows = await c.env.DB.prepare(
+    `SELECT handle, name FROM users
+      WHERE tenant_id = ? AND role != 'guest' AND disabled = 0 AND id != ?
+      ORDER BY name`,
+  )
+    .bind(s.tenantId, s.userId)
+    .all<{ handle: string; name: string }>();
+  return c.json({ users: rows.results });
 });
 
 app.post("/api/logout", async (c) => {

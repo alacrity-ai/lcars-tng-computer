@@ -1,11 +1,14 @@
 # Tricorder cloud (TNGC-14/15)
 
 The public face at **tricorder.lalalimited.com**: Cloudflare Worker (Hono) +
-one **TenantHub** Durable Object per tenant + D1 identity, serving the
-**Tricorder PWA** (`./public` — login, hold-to-talk, type mode, admin
-console). Phones POST transcripts in; the home bridge holds an **outbound**
-WebSocket and receives them — nothing on the internet ever connects into the
-house.
+one **TenantHub** Durable Object per tenant + D1 identity + the **Library**
+(TNGC-23: D1 metadata index + R2 `tricorder-library` payload bucket, fronted
+exclusively by the Worker), serving the **Tricorder PWA** (`./public` —
+login, hold-to-talk, type mode, Library screen, admin console). Phones POST
+transcripts in; the home bridge holds an **outbound** WebSocket and receives
+them — nothing on the internet ever connects into the house. Design docs:
+`docs/TRICORDER_LIBRARY_IMPLEMENTATION_DESIGN.md` (architecture) +
+`docs/TRICORDER_LIBRARY_PWA_UX_DESIGN.md` (phone UX).
 
 - Contract (the only cloud↔home coupling): `packages/contract`
 - Queue semantics: persist in DO storage → push → bridge acks at
@@ -32,6 +35,13 @@ house.
 | `GET /api/status` | session | `{online, queued, pending}` — is the Computer connected, how deep is its queue |
 | `GET /api/queue` | session | the bridge's dispatcher snapshot: every waiting command (+ the active one), `mine` flagged |
 | `POST /api/queue/:id/withdraw` | session | withdraw a queued command / cancel the active one — own commands only, admin can clear anyone's |
+| `GET /api/users` | session (no guest) | handles + names for the Library send picker (everyone but guests, disabled, self) |
+| `POST /api/library` `{owner,view,title,props}` | **service token** | ingest a save from the house — derives family, writes R2 + D1; 413 > 256 KB, 409 at 500 items/user |
+| `GET /api/library?q=&family=&received=&before=&limit=` | session or service (+`owner=`) | metadata list, newest first, cursor-paged (`before` = created_at) |
+| `GET /api/library/:id` | session (own) or service (any) | metadata + payload (streamed from R2) |
+| `DELETE /api/library/:id` | session (own/admin) or service | delete row + R2 object |
+| `POST /api/library/:id/send` `{to}` | session (own) or service | copy to `to`'s library, `from_user` = source owner; immutable snapshot |
+| `POST /api/library/:id/display` | session | put a saved item on the wall via the dispatcher queue — 202 (queued/instant) or 409 wall-offline |
 | `GET /api/admin/overview` | admin session | users + their active sessions |
 | `POST /api/admin/users` `{handle,name,role,password}` | admin | create user |
 | `POST /api/admin/users/:id/password` `{password}` | admin | set password + **revoke all that user's sessions atomically** |

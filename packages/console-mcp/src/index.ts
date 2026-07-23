@@ -11,6 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DEFAULT_SERVER_PORT, PANEL_VIEWS } from "@tng/shared";
+import { deleteItem, getItem, saveItem, searchItems, sendItem } from "@tng/library-client";
 
 const BASE = process.env.TNG_SERVER_URL ?? `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
 
@@ -437,6 +438,86 @@ server.registerTool(
     },
   },
   async ({ id }) => textResult(await call("/api/console/timer-clear", { id })),
+);
+
+server.registerTool(
+  "library",
+  {
+    description:
+      "Each household member's personal Tricorder library — saved wall primitives (diagrams, " +
+      "recipes, tables, articles…) that persist in the cloud and appear in their phone app. " +
+      "IRON RULE: payloads never pass through you — save captures what's on the wall " +
+      "server-side, display resolves by id server-side. Never Read a saved payload or " +
+      "reconstruct one from memory. Actions: " +
+      "save {owner} — capture the CURRENT wall panel to owner's library ('save to my " +
+      "tricorder' → owner is the channel event's user; typed input with no user → the " +
+      "session owner). Returns {id, title}; confirm briefly ('Saved to your tricorder.'). " +
+      "search {owner, q?, family?} — list owner's items, metadata only ('what's in my " +
+      "library', 'show my saved diagrams'). Speak titles, never ids. family: prose | data | " +
+      "visual | procedure | notation | media. " +
+      "display {id} — put a saved item back on the wall ('show my saved warp core diagram' " +
+      "→ search first, pick the match, display its id). Instant, nothing regenerated. " +
+      "send {id, to} — copy an item to another member's library ('send this to Ariel'; if " +
+      "the panel isn't saved yet, save {owner: speaker} first, then send). " +
+      "remove {id} — delete from owner's library (search first to get the right id). " +
+      "Saved items are FROZEN copies: data-family items (quotes, weather, scores) show " +
+      "their capture time, not live data.",
+    inputSchema: {
+      action: z.enum(["save", "search", "display", "send", "remove"]),
+      owner: z.string().optional(),
+      id: z.string().optional(),
+      to: z.string().optional(),
+      q: z.string().optional(),
+      family: z.enum(["prose", "data", "visual", "procedure", "notation", "media"]).optional(),
+    },
+  },
+  async ({ action, owner, id, to, q, family }) => {
+    switch (action) {
+      case "save": {
+        if (!owner) throw new Error("save needs owner (the speaking user's handle)");
+        // Props flow server → here → cloud; the model only ever sees id+title.
+        const current = JSON.parse(await call("/api/console/history/current")) as {
+          view: string;
+          title: string;
+          props: Record<string, unknown>;
+        };
+        const saved = await saveItem({ owner, view: current.view, title: current.title, props: current.props });
+        return textResult(JSON.stringify({ id: saved.id, title: saved.title, family: saved.family }));
+      }
+      case "search": {
+        if (!owner) throw new Error("search needs owner (whose library to search)");
+        const { items, total } = await searchItems({ owner, q, family, limit: 20 });
+        return textResult(
+          JSON.stringify({
+            total,
+            items: items.map((i) => ({
+              id: i.id,
+              title: i.title,
+              family: i.family,
+              view: i.view,
+              ...(i.fromUser ? { from: i.fromUser } : {}),
+              savedAt: new Date(i.createdAt).toISOString().slice(0, 16).replace("T", " "),
+            })),
+          }),
+        );
+      }
+      case "display": {
+        if (!id) throw new Error("display needs id (from search)");
+        const { item, props } = await getItem(id);
+        await call("/api/console/display", { view: item.view, props });
+        return textResult(JSON.stringify({ ok: true, title: item.title, view: item.view }));
+      }
+      case "send": {
+        if (!id || !to) throw new Error("send needs id and to (recipient handle)");
+        const sent = await sendItem(id, to);
+        return textResult(JSON.stringify(sent));
+      }
+      case "remove": {
+        if (!id) throw new Error("remove needs id (from search)");
+        return textResult(JSON.stringify(await deleteItem(id)));
+      }
+    }
+  },
 );
 
 server.registerTool(

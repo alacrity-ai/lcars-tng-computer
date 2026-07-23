@@ -46,6 +46,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
 import type { LinkDownFrame, LinkUpFrame, QueueItem, TngMessage } from "@tng/contract";
+import { getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
 /** Voice commands are ephemeral speech: anything older than this ON ARRIVAL
@@ -64,12 +65,17 @@ interface QueuedCommand extends TngMessage {
   /** Queue identity: the cloud id for phone commands, `loc_…` for local. */
   id: string;
   cloudId?: string;
+  /** TNGC-23: a library display command — deterministic, no session turn.
+      `transcript` carries the item title; the payload is fetched from the
+      cloud only at dispatch time. */
+  kind?: "transcript" | "display";
+  itemId?: string;
 }
 
 // ---- MCP server (channel capability) ----------------------------------------
 
 const server = new McpServer(
-  { name: "tng-bridge", version: "0.5.0" },
+  { name: "tng-bridge", version: "0.6.0" },
   {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
@@ -108,6 +114,7 @@ function snapshot(): QueueItem[] {
     ts: c.ts,
     ...(isActive ? { active: true } : {}),
     ...(isActive && abortRequest ? { cancelling: true } : {}),
+    ...(c.kind === "display" ? { kind: "display" as const, itemId: c.itemId } : {}),
   });
   return [...(active ? [pub(active, true)] : []), ...queue.map((c) => pub(c, false))];
 }
@@ -143,7 +150,7 @@ function ackCloud(cloudId: string | undefined): void {
   }
 }
 
-function enqueue(msg: TngMessage & { cloudId?: string }): void {
+function enqueue(msg: TngMessage & { cloudId?: string; kind?: "transcript" | "display"; itemId?: string }): void {
   const age = Date.now() - msg.ts;
   if (age > TTL_MS) {
     console.error(
@@ -157,8 +164,38 @@ function enqueue(msg: TngMessage & { cloudId?: string }): void {
   pushState();
 }
 
-/** Push the next command into the session if it's idle. One per turn. */
+/** A library display command (TNGC-23): fetch the payload from the cloud and
+    POST it straight to the console server — deterministic, no channel event,
+    no session turn, no LLM tokens. Payload bytes flow cloud → here → wall
+    server; never near model context. Failures are logged and acked (the
+    user retries from the phone; a failed display must never replay). */
+async function executeDisplay(cmd: QueuedCommand): Promise<void> {
+  try {
+    const { item, props } = await getItem(cmd.itemId!);
+    const res = await fetch(`${SERVER_URL}/api/console/display`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ view: item.view, props }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`console server ${res.status}`);
+    console.error(`[bridge] displayed library item "${cmd.transcript}" for ${cmd.user}`);
+  } catch (err) {
+    console.error(`[bridge] library display failed (${cmd.itemId}): ${(err as Error).message}`);
+  } finally {
+    ackCloud(cmd.cloudId);
+    pushState();
+  }
+}
+
+/** Push the next command into the session if it's idle. One TRANSCRIPT per
+    turn; display commands at the head run immediately (they don't consume a
+    turn or set busy) but still wait their turn behind a queued transcript —
+    the queue is strictly ordered. */
 function dispatch(): void {
+  while (!busy && queue.length > 0 && queue[0].kind === "display") {
+    void executeDisplay(queue.shift()!);
+  }
   if (busy || queue.length === 0) return;
   const cmd = queue.shift()!;
   busy = true;
@@ -404,6 +441,17 @@ function startCloudLink() {
           enqueue({ ...msg, cloudId: id });
         } else if (frame.type === "withdraw" && typeof frame.id === "string") {
           withdraw(frame.id, typeof frame.by === "string" ? frame.by : "tricorder");
+        } else if (frame.type === "display" && firstSighting(frame.cmd.id)) {
+          const cmd = frame.cmd;
+          enqueue({
+            user: cmd.user,
+            device: cmd.device,
+            transcript: `Display: ${cmd.title}`,
+            ts: cmd.ts,
+            cloudId: cmd.id,
+            kind: "display",
+            itemId: cmd.itemId,
+          });
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

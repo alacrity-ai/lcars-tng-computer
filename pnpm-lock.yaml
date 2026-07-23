@@ -112,6 +112,9 @@ importers:
       '@tng/contract':
         specifier: workspace:*
         version: link:../contract
+      '@tng/library-client':
+        specifier: workspace:*
+        version: link:../library-client
       ws:
         specifier: ^8.18.0
         version: 8.21.1
@@ -137,6 +140,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.29.0(zod@3.25.76)
+      '@tng/library-client':
+        specifier: workspace:*
+        version: link:../library-client
       '@tng/shared':
         specifier: workspace:*
         version: link:../shared
@@ -156,6 +162,15 @@ importers:
 
   packages/contract:
     devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+  packages/library-client:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

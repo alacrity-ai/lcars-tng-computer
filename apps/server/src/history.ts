@@ -7,8 +7,10 @@ const DEFAULT_CAPACITY = 50;
 /** Navigation, not content — recording these would bury the real entries. */
 const SKIP_VIEWS: PanelView[] = ["status", "blank", "boot"];
 
-/** One-line human handle for an entry, from whichever prop names the content. */
-function summarize(view: PanelView, props: PanelProps): string {
+/** One-line human handle for an entry, from whichever prop names the content.
+    Exported for the library save path (TNGC-23): the saved item's title is
+    the same summary line the history shows. */
+export function summarize(view: PanelView, props: PanelProps): string {
   const p = props as Record<string, unknown>;
   for (const key of ["title", "subject", "query", "location", "question", "caption"]) {
     const v = p[key];

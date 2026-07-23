@@ -1,0 +1,18 @@
+{
+  "name": "@tng/library-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "House-side client for the Tricorder cloud library (TNGC-23) — shared by console-mcp (voice save/search/display) and the bridge (fetch-at-dispatch). Lives in the fenced computer container, where the service token already is.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.6.0"
+  }
+}

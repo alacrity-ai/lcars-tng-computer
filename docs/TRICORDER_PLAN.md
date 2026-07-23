@@ -91,6 +91,12 @@ Key properties:
   every non-console tool call is denied with a CANCELLED notice until the turn
   ends (an already-executing tool call runs out — the axe falls at the next one).
 - The DO's socket state is the **Computer online/offline** signal surfaced in the PWA.
+- **Library display commands** (TNGC-23) ride the SAME queue as first-class items
+  (`kind: "display"` — visible, ordered, withdrawable, same persist/ack/replay/TTL),
+  but dispatch **deterministically**: the bridge fetches the payload from the cloud
+  (fetch-at-dispatch — frames and snapshots stay metadata-sized) and POSTs it to the
+  console server. No channel event, no session turn, no LLM tokens; displays at the
+  head of the queue run immediately when idle and never set `busy`.
 - The message shape `{user, device, transcript, ts}` is a tiny versioned contract in a
   shared monorepo package — the only coupling between cloud and home.
 
@@ -108,7 +114,7 @@ proven with zero infrastructure in Phase 2 (and its v1 failed honestly there, he
 | **2b — Event loop v2** | TNGC-18 | channels push delivery; remove re-arm/Stop-hook machinery; `--dangerously-load-development-channels server:bridge` | say.sh → channel event → wall; terminal free; zero timeout cycles |
 | **3 — Tricorder backend** | TNGC-14 | `apps/tricorder`: Worker + per-tenant DO + D1; device auth; ack/replay/TTL; bridge outbound WSS; deploy to tricorder.lalalimited.com | Off-LAN curl → wall responds; replay/TTL verified by killing the bridge |
 | **4 — Tricorder PWA v1** | TNGC-15 | User login (password; leif/ariel/guest, roles); hold-to-talk via native speech + first-class type mode; admin console (create/disable users, rotate-guest); online/offline indicator; installable | Guest picks up TV-room iPad: "tell me about bees" → wall answers |
-| **5 — Personal data plane** | TNGC-16 | `saved_items` schema; `tricorder.*` MCP toolset on the brain; speaker-resolved "save to my tricorder"; PWA list+search; shared-entities design note | Mom saves the bees article; it appears on Mom's phone only |
+| **5 — Personal data plane** | TNGC-16 → **delivered by TNGC-23** | The Library: D1 index + R2 payloads; `library` MCP tool; speaker-resolved "save to my tricorder"; PWA Library screen (search/browse/send/display-on-wall). Design: `TRICORDER_LIBRARY_IMPLEMENTATION_DESIGN.md` + `TRICORDER_LIBRARY_PWA_UX_DESIGN.md` | Ariel saves the bees article; it appears on Ariel's phone only — and goes back on the wall from the phone |
 | **6 — Appliance hardening** | TNGC-17 | Delete `apps/ear` + await-loop leftovers; supervisor/autostart; nightly session rotation; reconnect torture tests; SOPs | Pull the plug mid-interaction; everything returns unattended |
 
 Not in this epic: **TNGC-4** (Majel voice — shelved, Piper stays), **TNGC-9**
