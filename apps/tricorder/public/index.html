@@ -313,6 +313,7 @@
     <button class="btn" id="btn-login">Log in</button>
     <div class="err" id="login-err"></div>
     <button class="link" id="btn-to-register" style="margin-top:18px">New here? Create a household</button>
+    <a class="link" href="/welcome" style="text-decoration:none;display:block">What is this? Setup guide</a>
   </div>
 
   <!-- REGISTER (TNGC-29) -->
@@ -1448,8 +1449,22 @@ $("in-device").value = guessDevice();
 const savedHousehold = localStorage.getItem("tricorder.household");
 if (savedHousehold) { $("in-household").value = savedHousehold; $("household-row").hidden = false; }
 (async () => {
+  const params = new URLSearchParams(location.search);
+  const deepLink = params.has("register") || params.has("login");
+  // Brand-new visitors land on the welcome page, not a cold login form.
+  // Anyone who has been here (or arrives via a welcome CTA / verify link)
+  // goes straight to the app.
+  if (!store.token && !deepLink && !params.has("verify") && !localStorage.getItem("tricorder.seen")) {
+    location.replace("/welcome");
+    return;
+  }
+  localStorage.setItem("tricorder.seen", "1");
+  if (deepLink) history.replaceState(null, "", location.pathname);
   await handleVerifyParam();
-  if (!store.token) { show("login"); return; }
+  if (!store.token) {
+    show(params.has("register") ? "register" : "login");
+    return;
+  }
   try {
     const identity = await api("/api/me");
     enterMain(identity);
