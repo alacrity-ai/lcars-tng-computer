@@ -18,6 +18,13 @@ RUN npm install -g pnpm@10
 # uv (standalone binary) builds/runs the TTS sidecar's env
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
+# yt-dlp for the YouTube subsystem (standalone zipapp, runs on the image's
+# python3). The server can also self-provision a copy at runtime
+# (apps/server/.cache) — this bake makes that a rarely-needed fallback.
+RUN curl -LsSf -o /usr/local/bin/yt-dlp \
+      https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+    && chmod 755 /usr/local/bin/yt-dlp
+
 # venv + cache volume mount point, owned by the runtime user
 RUN mkdir -p /opt/venvs && chown node:node /opt/venvs
 

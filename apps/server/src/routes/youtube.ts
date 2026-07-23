@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
+import { access, chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import type {
@@ -24,9 +27,63 @@ export function getQueue(): QueueItem[] {
 
 const execFileAsync = promisify(execFile);
 
-const YTDLP = process.env.TNG_YTDLP_PATH ?? "yt-dlp";
 const SEARCH_TIMEOUT_MS = 25_000;
 const UA = "tng-computer/0.1 (home LCARS wall)";
+
+// The stack image ships without yt-dlp. Rather than requiring an image
+// rebuild (the fence: docker/ is host-owned), the server self-provisions:
+// on ENOENT it downloads the standalone zipapp once into apps/server/.cache
+// (gitignored) and uses that. The zipapp's shebang wants python3, which the
+// stack image has; egress from the stack container is unrestricted.
+const YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+const YTDLP_CACHE = path.join(import.meta.dirname, "..", "..", ".cache", "yt-dlp");
+
+let ytdlpPath = process.env.TNG_YTDLP_PATH ?? "yt-dlp";
+let ytdlpDownload: Promise<string> | null = null;
+
+/** Resolve a runnable yt-dlp, downloading the standalone zipapp on first
+    need. Memoized so concurrent searches share one download; reset on
+    failure so a transient network error doesn't wedge the route. */
+function ensureYtdlp(): Promise<string> {
+  ytdlpDownload ??= (async () => {
+    try {
+      await access(YTDLP_CACHE, constants.X_OK);
+      return YTDLP_CACHE;
+    } catch {
+      // not cached yet — download below
+    }
+    const res = await fetch(YTDLP_URL, {
+      headers: { "user-agent": UA },
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`yt-dlp download failed: HTTP ${res.status}`);
+    await mkdir(path.dirname(YTDLP_CACHE), { recursive: true });
+    const tmp = `${YTDLP_CACHE}.tmp`;
+    await writeFile(tmp, Buffer.from(await res.arrayBuffer()));
+    await chmod(tmp, 0o755);
+    await rename(tmp, YTDLP_CACHE);
+    return YTDLP_CACHE;
+  })();
+  ytdlpDownload.catch(() => {
+    ytdlpDownload = null;
+  });
+  return ytdlpDownload;
+}
+
+/** execFile yt-dlp, self-provisioning the binary when it's absent. An
+    explicit TNG_YTDLP_PATH is authoritative — never overridden by a
+    download. */
+async function runYtdlp(args: string[]) {
+  const opts = { timeout: SEARCH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 };
+  try {
+    return await execFileAsync(ytdlpPath, args, opts);
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === "ENOENT";
+    if (!missing || process.env.TNG_YTDLP_PATH) throw err;
+    ytdlpPath = await ensureYtdlp();
+    return await execFileAsync(ytdlpPath, args, opts);
+  }
+}
 
 /** Embed-disabled videos 401 on YouTube's oEmbed endpoint — a cheap keyless
     pre-check that keeps "Playback on other websites has been disabled" off
@@ -56,11 +113,12 @@ export async function searchYoutube(
   query: string,
   limit: number,
 ): Promise<YoutubeSearchResult[]> {
-  const { stdout } = await execFileAsync(
-    YTDLP,
-    [`ytsearch${limit}:${query}`, "--flat-playlist", "--dump-single-json", "--no-warnings"],
-    { timeout: SEARCH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
-  );
+  const { stdout } = await runYtdlp([
+    `ytsearch${limit}:${query}`,
+    "--flat-playlist",
+    "--dump-single-json",
+    "--no-warnings",
+  ]);
   const parsed = JSON.parse(stdout) as { entries?: Array<Record<string, unknown>> };
   return (parsed.entries ?? [])
     .filter((e) => typeof e.id === "string" && typeof e.title === "string")
