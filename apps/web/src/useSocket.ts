@@ -6,7 +6,7 @@ import type {
   ServerMessage,
   Widget,
 } from "@tng/shared";
-import { playChime } from "./audio";
+import { playChime, voiceAudio } from "./audio";
 import { videoFullscreen } from "./videoFullscreen";
 
 export interface ScreenState {
@@ -38,6 +38,9 @@ export function useSocket() {
   const [working, setWorking] = useState(false);
   /** Overlay widgets (timers, alarms) — full list, server is authoritative. */
   const [widgets, setWidgets] = useState<Widget[]>([]);
+  /** TNGC-26: what the persistent PlaybackLayer is playing — set by youtube
+      displays and `playback track` messages, cleared by stop. */
+  const [playback, setPlayback] = useState<PanelProps | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const workingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Kills in-flight speech (audio or caption timer) and reports speak_done. */
@@ -111,16 +114,29 @@ export function useSocket() {
           // other panel taking the screen exits it. Queue advances re-display
           // youtube, so they sail through with the flag intact.
           if (msg.view !== "youtube") videoFullscreen.value = false;
+          // A youtube display IS the playback session (TNGC-26); any other
+          // panel merely backgrounds it — the PlaybackLayer keeps going.
+          if (msg.view === "youtube") setPlayback(msg.props);
           screenRef.current = { view: msg.view, props: msg.props };
           setScreen({ view: msg.view, props: msg.props });
           send({ type: "screen_state", view: msg.view, props: msg.props });
+        } else if (msg.type === "playback") {
+          // Background track swap / session teardown — panel untouched.
+          setPlayback(msg.action === "track" ? (msg.props ?? null) : null);
+        } else if (msg.type === "voice_state") {
+          voiceAudio.volume = msg.volume;
+          voiceAudio.muted = msg.muted;
         } else if (msg.type === "widgets") {
           setWidgets(msg.widgets);
         } else if (msg.type === "chime") {
           void playChime(msg.name);
         } else if (msg.type === "media") {
-          // "stop" also halts any in-flight speech; pause/play stay panel-scoped.
-          if (msg.action === "stop") stopSpeechRef.current?.();
+          // "stop" also halts any in-flight speech AND ends the playback
+          // session (the server clears its record in the same stroke).
+          if (msg.action === "stop") {
+            stopSpeechRef.current?.();
+            setPlayback(null);
+          }
           // Record full-bleed transitions before the event fires so a panel
           // mounting later (queue advance, error swap) adopts the right mode.
           if (msg.action === "fullscreen") videoFullscreen.value = true;
@@ -148,11 +164,14 @@ export function useSocket() {
           const { type: _type, ...detail } = msg;
           window.dispatchEvent(new CustomEvent("tng-sky-control", { detail }));
         } else if (msg.type === "speak") {
-          const { utteranceId, text, audioUrl, caption = true, timing, highlightBase = 0 } = msg;
+          const { utteranceId, text, audioUrl, caption = true, timing, highlightBase = 0, alarm } = msg;
           // A new utterance supersedes any still-playing one.
           stopSpeechRef.current?.();
           readingAloud = !caption;
           setVoice({ utteranceId, text, caption });
+          // TNGC-27: muted voice = captions are the channel. Alarms bypass
+          // mute (their job is noise) but still respect the volume setting.
+          const silenced = voiceAudio.muted && !alarm;
 
           // Karaoke: when reading on-screen content (caption off) with timing
           // data, animate the current panel's highlightIndex locally — the
@@ -196,13 +215,19 @@ export function useSocket() {
           const done = () => {
             if (finished) return;
             finished = true;
+            // restore any speech-ducked background playback (TNGC-26)
+            window.dispatchEvent(new CustomEvent("tng-duck", { detail: { on: false } }));
             clearHighlight();
             stopSpeechRef.current = null;
             setVoice((v) => (v?.utteranceId === utteranceId ? null : v));
             send({ type: "speak_done", utteranceId });
           };
-          if (audioUrl) {
+          if (audioUrl && !silenced) {
             const audio = new Audio(audioUrl);
+            // voice volume (TNGC-27) + duck any background music under the
+            // utterance (TNGC-26) — restored in done()
+            audio.volume = voiceAudio.volume / 100;
+            window.dispatchEvent(new CustomEvent("tng-duck", { detail: { on: true } }));
             const unlock = () => {
               void audio.play().then(() => setAudioLocked(false)).catch(() => {});
             };
@@ -242,8 +267,16 @@ export function useSocket() {
               }
             });
           } else {
-            // TTS offline: caption only, report done after a reading-time estimate
-            const timer = setTimeout(done, captionMs(text));
+            // TTS offline OR voice muted (TNGC-27): caption-only. With timing
+            // data the dwell is the real utterance length and the karaoke
+            // sweep runs on wall clock — muted article reading still turns
+            // its pages on schedule.
+            const ms = timing?.length
+              ? timing.reduce((total, t) => total + t.duration_ms, 0) + 300
+              : captionMs(text);
+            const t0 = performance.now();
+            startHighlight(() => performance.now() - t0);
+            const timer = setTimeout(done, ms);
             stopSpeechRef.current = () => {
               clearTimeout(timer);
               done();
@@ -329,5 +362,5 @@ export function useSocket() {
     };
   }, []);
 
-  return { screen, voice, connected, audioLocked, working, widgets };
+  return { screen, voice, connected, audioLocked, working, widgets, playback };
 }

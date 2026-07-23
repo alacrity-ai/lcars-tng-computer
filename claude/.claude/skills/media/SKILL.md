@@ -46,6 +46,34 @@ For "play some X" the user wants sound, not a decision. Pick and play.
 Then `display` before `speak`, as always, and keep the confirmation to one
 short line — the audio is already starting.
 
+## Playback survives other panels — set the mode
+
+Displaying another panel does NOT kill playback (a ♫ badge shows it's
+alive): ambient tracks keep playing invisibly; watched video shrinks to a
+corner thumbnail. Answer questions, show diagrams, check weather freely
+mid-music — never warn that music "will stop", it won't.
+
+- **Set `mode: "ambient"`** on the youtube display for listening requests
+  ("play some jazz", any music). Default for plain video is `watch`.
+- "Back to the video" / "show the video again" → `recall` + redisplay — it
+  re-docks WITHOUT restarting, position intact.
+- Only `media stop` ends playback (this includes invisible background
+  music — it's what "stop the music" means while a diagram is up).
+- `screen_state`'s `playback` field tells you what's playing and whether
+  it's backgrounded — check it before assuming silence.
+- The Computer's speech automatically ducks background music; no action.
+
+## The Computer's voice — the `voice` tool
+
+"Lower your voice" / "speak up" / "voice at fifty percent" / "mute your
+voice" / "unmute" → the `voice` tool, NEVER `media`. It is a persistent
+setting (a whispered household stays whispered tomorrow). While muted,
+answers land as panels + captions — prefer `display` over long speech, and
+confirm mute visually ("Voice muted." as a text panel or brief caption).
+Disambiguation: "turn it down" while media plays = media volume; explicit
+"voice"/"your voice" = voice; "quieter" with nothing playing = voice.
+Alarms and red alerts sound regardless of voice mute.
+
 ## Play now vs. queue — the intent call
 
 The queue is **opt-in**. Something already playing does NOT mean a new

@@ -5,7 +5,6 @@ import { StatusPanel } from "./StatusPanel";
 import { TextPanel } from "./TextPanel";
 import { AlertPanel } from "./AlertPanel";
 import { WeatherPanel } from "./WeatherPanel";
-import { YouTubePanel } from "./YouTubePanel";
 import { ResultsPanel } from "./ResultsPanel";
 import { ArticlePanel } from "./ArticlePanel";
 import { NewsPanel } from "./NewsPanel";
@@ -27,6 +26,13 @@ function BlankPanel() {
   return null;
 }
 
+/** TNGC-26: the actual player lives in PlaybackLayer (it must survive panel
+    churn); the youtube "panel" is just the docking signal — the layer sees
+    view === "youtube" and fills the content area itself. */
+function YouTubeDock() {
+  return null;
+}
+
 function UnknownPanel({ view }: { view: string }) {
   return <div className="text-panel-body">Panel “{view}” is not yet installed.</div>;
 }
@@ -41,7 +47,7 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   alert: AlertPanel,
   blank: BlankPanel,
   weather: WeatherPanel,
-  youtube: YouTubePanel,
+  youtube: YouTubeDock,
   results: ResultsPanel,
   article: ArticlePanel,
   news: NewsPanel,

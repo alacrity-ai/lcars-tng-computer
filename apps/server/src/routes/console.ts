@@ -28,6 +28,7 @@ import { getArticle, parseArticleUrl } from "./article.js";
 import { getAudio, hasSynthCached, splitFastStart, synthesize, synthesizeSegments, ttsHealth } from "../tts.js";
 import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
+import { loadSettings, saveSettings } from "../settings.js";
 import { decorateYoutubeProps, getQueue, restorePlaylist } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
@@ -103,14 +104,55 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
         audioUrl: synth.audioUrl,
         caption: true,
         timing: synth.timing,
+        // an alarm's job is noise — it sounds even when the voice is muted
+        alarm: true,
       });
     } else {
       // TTS offline — caption-only, same degradation as the speak route.
-      hub.broadcast({ type: "speak", utteranceId: randomUUID(), text, caption: true });
+      hub.broadcast({ type: "speak", utteranceId: randomUUID(), text, caption: true, alarm: true });
     }
   });
   const history = new PanelHistory();
   hub.setDisplayObserver((view, props) => history.record(view, props));
+
+  // TNGC-27: the voice setting survives everything — load at boot, persist
+  // on every change. hub.setVoice broadcasts voice_state to the wall(s).
+  void loadSettings().then((s) => {
+    if (s.voiceVolume !== undefined || s.voiceMuted !== undefined) {
+      hub.setVoice(s.voiceVolume ?? 100, s.voiceMuted ?? false);
+    }
+  });
+
+  app.post<{ Body: { action?: string; level?: number } }>("/api/console/voice", async (req, reply) => {
+    const { action, level } = req.body ?? {};
+    const actions = ["volume", "volume_up", "volume_down", "mute", "unmute"];
+    if (!action || !actions.includes(action)) {
+      return reply.code(400).send({ error: `action must be one of: ${actions.join(", ")}` });
+    }
+    const cur = hub.voice;
+    let volume = cur.volume;
+    let muted = cur.muted;
+    if (action === "volume") {
+      if (typeof level !== "number" || level < 0 || level > 100) {
+        return reply.code(400).send({ error: "volume requires level between 0 and 100" });
+      }
+      volume = Math.round(level);
+      muted = false; // setting a level implies wanting to hear it
+    } else if (action === "volume_up") {
+      volume = Math.min(100, volume + 15);
+      muted = false;
+    } else if (action === "volume_down") {
+      // nudges floor at 10 — only explicit mute or level 0 silences
+      volume = Math.max(10, volume - 15);
+    } else if (action === "mute") {
+      muted = true; // volume kept, so unmute restores the prior level
+    } else if (action === "unmute") {
+      muted = false;
+    }
+    hub.setVoice(volume, muted);
+    saveSettings({ voiceVolume: volume, voiceMuted: muted });
+    return { ok: true, volume, muted };
+  });
 
   // Full (view, title, props) of what the wall shows RIGHT NOW — the library
   // save path (TNGC-23). Called by console-mcp, never the model: the props
@@ -343,6 +385,9 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (action === "stop") {
       cancelActiveReading();
       speechGeneration++;
+      // TNGC-26: stop ends the playback SESSION (foreground or background) —
+      // the persistent player tears down, the ♫ badge clears.
+      hub.clearPlayback();
     }
     hub.broadcast({ type: "media", action });
     return { ok: true, action };
@@ -434,6 +479,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   // current page's text.
   app.get("/api/console/screen", async (): Promise<ScreenStateResponse> => {
     const s = hub.state;
+    const extras = { voice: hub.voice, playback: hub.playbackState };
     if (s.view === "article" && Array.isArray(s.props.paragraphs)) {
       const pages = paginateArticle(s.props.paragraphs as string[]);
       const page = Math.min(Math.max(Number(s.props.page ?? 1), 1), pages.length);
@@ -444,9 +490,10 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
         connectedDisplays: s.connectedDisplays,
         widgets: s.widgets,
         queue: getQueue(),
+        ...extras,
       };
     }
-    return { ...s, queue: getQueue() };
+    return { ...s, queue: getQueue(), ...extras };
   });
 
   app.get("/api/console/tts", async () => (await ttsHealth()) ?? { engine: "offline" });

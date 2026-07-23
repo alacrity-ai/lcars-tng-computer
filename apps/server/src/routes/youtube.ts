@@ -318,11 +318,22 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     hub.broadcast({ type: "display", view: "youtube", props: await decorateYoutubeProps(props) });
   }
 
-  /** Pop the head of the queue onto the wall. Returns what started, if anything. */
+  /** Start a track wherever the playback session lives (TNGC-26): a display
+      broadcast when the player has the screen, a `playback track` message
+      when it's backgrounded — so a queue advance under a diagram never
+      steals the panel. Decoration (TNGC-24) applies on both paths. */
+  async function playTrack(props: Record<string, unknown>): Promise<void> {
+    const decorated = await decorateYoutubeProps(props);
+    if (hub.playbackBackgrounded) hub.playbackTrack(decorated);
+    else hub.broadcast({ type: "display", view: "youtube", props: decorated });
+  }
+
+  /** Pop the head of the queue into the playback session. Returns what
+      started, if anything. */
   function playNext(): QueueItem | undefined {
     const next = queue.shift();
     if (!next) return undefined;
-    void broadcastYoutube({
+    void playTrack({
       videoId: next.videoId,
       title: next.title,
       channel: next.channel,
@@ -340,9 +351,10 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
         return reply.code(409).send({ error: `queue is full (${MAX_QUEUE})` });
       }
       queue.push({ videoId, title, channel, durationSeconds });
-      // Nothing playing to wait for → start it immediately rather than
-      // stranding the queue until some future video ends.
-      if (hub.state.view !== "youtube") {
+      // Nothing playing ANYWHERE to wait for → start it immediately rather
+      // than stranding the queue. A backgrounded track counts as playing
+      // (TNGC-26) — adding while music runs under a diagram just queues.
+      if (hub.state.view !== "youtube" && !hub.playbackState) {
         const started = playNext();
         const body: QueueResponse = { ok: true, queue: getQueue(), nowPlaying: started };
         return body;
@@ -453,13 +465,18 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
   });
 
-  // Natural end of a video → seamless advance to the next queued one. Guarded
-  // against stale reports: only advance if the ended video is still the one
-  // on screen (a panel change or manual "play X" makes old ENDED events moot).
+  // Natural end of a video → seamless advance to the next queued one.
+  // Guarded against stale reports via the PLAYBACK record, not the visible
+  // panel (TNGC-26): with music backgrounded under a diagram, the old
+  // state.view guard silently dropped the event and stranded the queue.
   hub.setVideoEndedHandler((videoId) => {
-    const s = hub.state;
-    if (s.view !== "youtube" || s.props.videoId !== videoId) return;
-    playNext();
+    if (hub.playbackVideoId !== videoId) return;
+    if (!playNext() && hub.playbackBackgrounded) {
+      // Nothing next and nobody watching — end the session so the ♫ badge
+      // doesn't advertise a dead track. Foregrounded keeps today's behavior
+      // (the ended player stays on screen).
+      hub.clearPlayback();
+    }
   });
 
   // Backstop for failures oEmbed can't see (region locks, age restriction).
@@ -469,40 +486,41 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   //   candidate plays as audio) → queue → yellow alert.
   hub.setVideoErrorHandler((videoId, _code, audio) => {
     void (async () => {
-      const s = hub.state;
-      if (s.view !== "youtube" || s.props.videoId !== videoId) return;
+      // Guard on the playback record, not the visible panel (TNGC-26).
+      if (hub.playbackVideoId !== videoId) return;
       if (!audio) {
         // The iframe failed but the media almost certainly exists — flip to
         // the audio path and remember the verdict so the next play of this
-        // video skips the embed entirely.
+        // video skips the embed entirely. playTrack keeps a backgrounded
+        // flip invisible.
         rememberEmbeddable(videoId, false);
-        prewarmAudio(videoId);
-        hub.broadcast({
-          type: "display",
-          view: "youtube",
-          props: { ...s.props, audioOnly: true, autoplay: true },
-        });
+        await playTrack({ ...(hub.playbackProps ?? { videoId }), audioOnly: true, autoplay: true });
         return;
       }
       // The AUDIO path failed — this video is genuinely unplayable.
       failedIds.add(videoId);
       for (const cand of lastResults) {
         if (failedIds.has(cand.videoId)) continue;
-        await broadcastYoutube({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true });
+        await playTrack({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true });
         return;
       }
       // No search-result substitute — fall through to the queue before
       // giving up (the errored video may itself have been queued).
       if (playNext()) return;
-      hub.broadcast({
-        type: "display",
-        view: "alert",
-        props: {
-          level: "yellow",
-          title: "Video unavailable",
-          message: "No playable version found — try a different search",
-        },
-      });
+      hub.clearPlayback();
+      // Only take the screen for the failure if the player HAD the screen —
+      // backgrounded music dying must not yank the visible panel.
+      if (hub.state.view === "youtube") {
+        hub.broadcast({
+          type: "display",
+          view: "alert",
+          props: {
+            level: "yellow",
+            title: "Video unavailable",
+            message: "No playable version found — try a different search",
+          },
+        });
+      }
     })();
   });
 }

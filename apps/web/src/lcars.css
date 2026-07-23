@@ -186,6 +186,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* anchor for the docked playback layer (TNGC-26) */
+  position: relative;
 }
 
 /* Fast businesslike sweep-in when the active panel changes */
@@ -646,6 +648,67 @@ body {
   border-radius: 0;
   border: 0;
 }
+
+/* Playback layer (TNGC-26): the persistent player, rendered in one of three
+   modes. Docked = the classic youtube panel look, overlaid on the content
+   area (matches .lcars-content padding). */
+.playback-docked {
+  position: absolute;
+  top: 24px;
+  right: 12px;
+  bottom: 24px;
+  left: 28px;
+  z-index: 20;
+}
+/* Backgrounded ambient audio: kept alive but invisible. NOT display:none —
+   the media pipeline must keep running. */
+.playback-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* Backgrounded watch-mode video: corner thumbnail over whatever panel is up;
+   below widgets (1050) so timers stay readable. */
+.playback-pip {
+  position: fixed;
+  right: 28px;
+  bottom: 96px;
+  width: 24vw;
+  min-width: 280px;
+  aspect-ratio: 16 / 9;
+  z-index: 1040;
+  border: 3px solid var(--lcars-gold);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
+  animation: pip-in 0.25s ease-out;
+}
+@keyframes pip-in {
+  from { transform: translateY(12px) scale(0.9); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.playback-pip .youtube-frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.playback-pip .audio-card {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 14px;
+  gap: 16px;
+}
+.playback-pip .audio-eq { height: 55%; }
+.playback-pip .audio-title { font-size: 16px; -webkit-line-clamp: 1; }
+.playback-pip .audio-channel { font-size: 12px; }
+.playback-pip .audio-clock { font-size: 11px; }
+
+.widget-nowplaying .widget-label { color: var(--lcars-lavender); }
 
 /* ---------- Results panel ---------- */
 

@@ -46,6 +46,14 @@ export function WidgetLayer({ widgets }: { widgets: Widget[] }) {
             </div>
           );
         }
+        if (w.kind === "nowplaying") {
+          return (
+            <div key={w.id} className="widget-badge widget-nowplaying">
+              <span className="widget-label">&#9835; Playing</span>
+              <span className="widget-queue-title">{w.title}</span>
+            </div>
+          );
+        }
         if (w.kind === "queue") {
           return (
             <div key={w.id} className="widget-badge widget-queue">

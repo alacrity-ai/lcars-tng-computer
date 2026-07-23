@@ -31,7 +31,10 @@ a diagram's SVG, an article's text, a video's id all replay in one round trip.
 - Two plausible matches ("the Ohm's law diagram" when there are two) → pick
   the newest when the phrasing implies recency, otherwise ask one short
   question.
-- A replayed `youtube` panel restarts the video from the beginning.
+- A replayed `youtube` panel restarts the video from the beginning — UNLESS
+  it is the track still playing in the background ("back to the video" while
+  a PiP thumbnail or ♫ badge shows): then redisplay re-docks it in place,
+  position intact, nothing restarts.
 - History outlives context compaction — trust it over your memory of what
   props you composed earlier in a long session.
 - Redisplaying re-records the entry as newest; that's correct — it IS the

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LcarsFrame } from "./components/LcarsFrame";
 import { WidgetLayer } from "./components/WidgetLayer";
 import { Panel } from "./panels/registry";
+import { PlaybackLayer } from "./PlaybackLayer";
 import { useSocket } from "./useSocket";
 import { EngageOverlay, useEngage } from "./engage";
 
@@ -27,7 +28,7 @@ function useDuplicateInstanceCheck(): boolean {
 }
 
 export function App() {
-  const { screen, voice, connected, audioLocked, working, widgets } = useSocket();
+  const { screen, voice, connected, audioLocked, working, widgets, playback } = useSocket();
   const duplicated = useDuplicateInstanceCheck();
   const { needsEngage, engage } = useEngage();
 
@@ -42,6 +43,8 @@ export function App() {
           props={screen.view === "status" ? { ...screen.props, working } : screen.props}
         />
       </div>
+      {/* persists across panel changes — music survives multitasking (TNGC-26) */}
+      <PlaybackLayer playback={playback} view={screen.view} />
       <WidgetLayer widgets={widgets} />
       {voice && (
         <div className={voice.caption ? "voice-caption" : "voice-caption voice-caption-quiet"}>

@@ -62,10 +62,14 @@ server.registerTool(
       "Render a panel on the LCARS display. Views: status (idle board), text {title?, body}, " +
       "alert {level: yellow|red, title?, message?}, blank, " +
       "weather {location, days: [{name, high, low?, conditions, precip?}], units?}, " +
-      "youtube {videoId, title?, channel?, autoplay?, startSeconds?, audioOnly?} — audioOnly " +
-      "plays the extracted audio stream with a now-playing card; you almost never set it " +
-      "yourself (embed-blocked videos flip to audio automatically, server-side) — pass it only " +
-      "when the user explicitly asks for audio-only playback, " +
+      "youtube {videoId, title?, channel?, autoplay?, startSeconds?, audioOnly?, mode?} — " +
+      "audioOnly plays the extracted audio stream with a now-playing card; you almost never " +
+      "set it yourself (embed-blocked videos flip to audio automatically, server-side) — pass " +
+      "it only when the user explicitly asks for audio-only playback. mode: 'ambient' " +
+      "(background listening — set it for music/'play some X' requests) or 'watch' (they're " +
+      "watching; default for video). Playback SURVIVES later panels: displaying anything else " +
+      "backgrounds it (ambient → invisible + badge, watch → corner thumbnail) — only media " +
+      "stop ends it, so you can answer questions mid-music freely, " +
       "results {query, results: [{title, url, snippet?}]} (numbered — user picks by number), " +
       "article {title, paragraphs, page?, url?, byline?, siteName?} (usually via open_url instead), " +
       "chart {title, kind: line|bar|pie, series: [{name?, points: [{label, value}]}], unit?, " +
@@ -222,9 +226,11 @@ server.registerTool(
   "media",
   {
     description:
-      "Control playback: pause or play (resume) the youtube panel, or stop — which also " +
-      "halts any in-progress speech immediately. Use 'stop' when the user says 'stop', " +
-      "'that's enough', 'be quiet', etc. while the Computer is reading or media is playing. " +
+      "Control playback: pause or play (resume) the playing video/track — including one " +
+      "backgrounded under another panel — or stop, which ENDS the playback session (background " +
+      "music included) and also halts any in-progress speech immediately. Use 'stop' when the " +
+      "user says 'stop', 'that's enough', 'be quiet', etc. while the Computer is reading or " +
+      "media is playing (even invisibly — check the ♫ state in screen_state's playback field). " +
       "'speed' sets the video playback rate (rate required, 0.25–2; 1 = normal — 'faster' → " +
       "1.5, 'double speed' → 2, 'normal speed' → 1). The rate resets whenever a new video " +
       "or panel is displayed. 'fullscreen' expands the video to fill the entire wall; " +
@@ -243,6 +249,28 @@ server.registerTool(
     },
   },
   async ({ action, rate, level }) => textResult(await call("/api/console/media", { action, rate, level })),
+);
+
+server.registerTool(
+  "voice",
+  {
+    description:
+      "Control the Computer's OWN voice — completely separate from media volume. Use when " +
+      "the request targets the voice: 'lower your voice'/'speak more quietly' → volume_down; " +
+      "'speak up'/'raise your voice' → volume_up (±15, nudges never mute); 'voice at fifty " +
+      "percent' → volume with level 0–100 (implicitly unmutes); 'mute your voice'/'silent " +
+      "mode' → mute (you keep working — answers land as panels and captions; prefer display " +
+      "over long speech while muted); 'unmute'/'voice back on' → unmute (restores the prior " +
+      "level). This is a PERSISTENT setting (survives restarts) unlike per-video media " +
+      "volume. Disambiguation: 'turn it down' while media plays = the media tool; explicit " +
+      "'voice'/'your voice' = this tool; 'quieter' with nothing playing = this tool. " +
+      "Alarms and red alerts sound even when the voice is muted.",
+    inputSchema: {
+      action: z.enum(["volume", "volume_up", "volume_down", "mute", "unmute"]),
+      level: z.number().min(0).max(100).optional(),
+    },
+  },
+  async ({ action, level }) => textResult(await call("/api/console/voice", { action, level })),
 );
 
 server.registerTool(

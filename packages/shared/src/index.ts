@@ -128,6 +128,10 @@ export interface YouTubePanelProps {
   audioOnly?: boolean;
   /** Uploader name for the audio now-playing card. */
   channel?: string;
+  /** TNGC-26: what backgrounding does when another panel takes the screen —
+      ambient hides (music keeps playing, badge only), watch shrinks to a
+      corner PiP. Default: ambient when audioOnly, else watch. */
+  mode?: "ambient" | "watch";
 }
 
 export interface SearchResult {
@@ -567,8 +571,16 @@ export interface CommandsWidget {
   count: number;
 }
 
-/** Union grows as new widget kinds land (weather badge, now-playing, …). */
-export type Widget = TimerWidget | QueueWidget | CommandsWidget;
+/** TNGC-26: shown while playback continues under another panel — the ♫
+    reminder that the music is alive and "stop" has a target. */
+export interface NowPlayingWidget {
+  id: string;
+  kind: "nowplaying";
+  title: string;
+}
+
+/** Union grows as new widget kinds land (weather badge, …). */
+export type Widget = TimerWidget | QueueWidget | CommandsWidget | NowPlayingWidget;
 
 // ---------- Server → webapp ----------
 
@@ -594,11 +606,34 @@ export interface SpeakMessage {
       spoken as several consecutive utterances (fast-start first sentence, then
       the rest) while highlight positions stay page-relative. */
   highlightBase?: number;
+  /** TNGC-27: server-fired timer/alarm announcement — plays at the set voice
+      volume even when the voice is muted (an alarm's job is to make noise). */
+  alarm?: boolean;
 }
 
 export interface ChimeMessage {
   type: "chime";
   name: ChimeName;
+}
+
+/** TNGC-27: the Computer's own voice level — a persistent SETTING (unlike
+    per-video media volume). Broadcast on change and to late joiners. */
+export interface VoiceStateMessage {
+  type: "voice_state";
+  /** 0–100. */
+  volume: number;
+  muted: boolean;
+}
+
+/** TNGC-26: background-playback control. `track` swaps what the persistent
+    player is playing WITHOUT touching the visible panel (queue advance while
+    another panel is up); `stop` tears the player down. Starting playback in
+    the foreground remains a plain youtube display broadcast. */
+export interface PlaybackMessage {
+  type: "playback";
+  action: "track" | "stop";
+  /** YouTubePanelProps for action "track". */
+  props?: PanelProps;
 }
 
 /** Playback control: youtube panel ("computer, pause") and speech ("stop").
@@ -730,7 +765,9 @@ export type ServerMessage =
   | MapControlMessage
   | SkyControlMessage
   | WorkingMessage
-  | WidgetsMessage;
+  | WidgetsMessage
+  | VoiceStateMessage
+  | PlaybackMessage;
 
 // ---------- Webapp → server ----------
 
@@ -846,6 +883,12 @@ export interface ScreenStateResponse {
   widgets: Widget[];
   /** Videos waiting to play after the current one ends, in play order. */
   queue: QueueItem[];
+  /** TNGC-27: the Computer's voice setting — muted means answers land as
+      panels/captions; consider displaying rather than speaking long answers. */
+  voice?: { volume: number; muted: boolean };
+  /** TNGC-26: what the persistent player is playing, if anything.
+      `backgrounded` = another panel has the screen while this keeps going. */
+  playback?: { videoId: string; title?: string; audioOnly?: boolean; backgrounded: boolean } | null;
 }
 
 /** set_timer: create a countdown or wall-clock alarm widget. */
