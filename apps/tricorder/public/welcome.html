@@ -149,29 +149,25 @@
   .step h3 { margin: 0; color: #fff; text-transform: uppercase; font-size: 17px; }
   .step p { color: var(--dim); font-family: Georgia, serif; font-size: 14.5px; line-height: 1.65; letter-spacing: .02em; margin: 8px 0 0; max-width: 660px; }
   .step p b { color: var(--peach); font-weight: 600; }
-  /* one command per box; click anywhere to copy */
+  /* one command per box; click anywhere on it to copy (the toast confirms) */
   .cmd {
-    position: relative; display: block; background: #000;
+    display: block; background: #000;
     border: 1px solid #2a2416; border-left: 4px solid var(--blue);
-    color: #cfe3ff; font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
-    font-size: 13px; letter-spacing: 0; line-height: 1.5;
-    padding: 11px 96px 11px 14px; margin: 12px 0 0;
-    white-space: nowrap; overflow-x: auto; cursor: pointer;
+    margin: 12px 0 0; cursor: pointer;
     transition: border-color .15s, background .15s;
+  }
+  .cmd:hover { border-left-color: var(--gold); background: #0a0803; }
+  .cmd code {
+    display: block; color: #cfe3ff;
+    font-size: 13px; letter-spacing: 0; line-height: 1.5;
+    padding: 11px 14px;
+    white-space: nowrap; overflow-x: auto;
     scrollbar-width: thin; scrollbar-color: var(--blue) #14100a;
   }
-  .cmd::-webkit-scrollbar { height: 6px; }
-  .cmd::-webkit-scrollbar-track { background: #14100a; }
-  .cmd::-webkit-scrollbar-thumb { background: var(--blue); border-radius: 3px; }
-  .cmd::-webkit-scrollbar-thumb:hover { background: var(--gold); }
-  .cmd:hover { border-left-color: var(--gold); background: #0a0803; }
-  .cmd .hint {
-    position: sticky; right: 0; float: right; margin: -11px -96px 0 0;
-    padding: 11px 12px; background: linear-gradient(90deg, transparent, #000 22%);
-    color: var(--blue); font-family: inherit;
-    font-size: 10px; letter-spacing: .12em; pointer-events: none;
-  }
-  .cmd:hover .hint { color: var(--gold); }
+  .cmd code::-webkit-scrollbar { height: 6px; }
+  .cmd code::-webkit-scrollbar-track { background: #14100a; }
+  .cmd code::-webkit-scrollbar-thumb { background: var(--blue); border-radius: 3px; }
+  .cmd code::-webkit-scrollbar-thumb:hover { background: var(--gold); }
   .fine { color: #777; font-size: 12.5px; margin-top: 10px; letter-spacing: .03em; text-transform: uppercase; }
 
   /* copy toast */
@@ -316,10 +312,10 @@
     <div class="body">
       <h3>Start the appliance</h3>
       <p>On the box that will run the Computer, one command at a time:</p>
-      <code class="cmd">mkdir tng-computer &amp;&amp; cd tng-computer<span class="hint">TAP TO COPY</span></code>
-      <code class="cmd">curl -O https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/docker-compose.yml<span class="hint">TAP TO COPY</span></code>
-      <code class="cmd">curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/.env.example<span class="hint">TAP TO COPY</span></code>
-      <code class="cmd">docker compose up -d<span class="hint">TAP TO COPY</span></code>
+      <div class="cmd"><code>mkdir tng-computer &amp;&amp; cd tng-computer</code></div>
+      <div class="cmd"><code>curl -O https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/docker-compose.yml</code></div>
+      <div class="cmd"><code>curl -o .env https://raw.githubusercontent.com/alacrity-ai/lcars-tng-computer/main/appliance/.env.example</code></div>
+      <div class="cmd"><code>docker compose up -d</code></div>
       <p>Two containers come up: the wall + speech, and the fenced brain. The
          wall will say <b>NOT PAIRED</b> and wait for you.</p>
     </div>
@@ -331,8 +327,8 @@
       <h3>Pair it, then log the brain in</h3>
       <p>In the tricorder's <b>Admin console</b>, tap <b>Pair your Computer</b> —
          you get a short code. Then, on the box (with your code):</p>
-      <code class="cmd">docker compose exec computer tng pair ABCD-EFGH<span class="hint">TAP TO COPY</span></code>
-      <code class="cmd">docker compose attach computer<span class="hint">TAP TO COPY</span></code>
+      <div class="cmd"><code>docker compose exec computer tng pair ABCD-EFGH</code></div>
+      <div class="cmd"><code>docker compose attach computer</code></div>
       <p>The attach shows a <b>Claude login link</b> — follow it once, then
          detach with Ctrl-P Ctrl-Q. The login and the pairing both persist —
          these are one-time steps.</p>
@@ -347,7 +343,7 @@
          F11, tap <b>ENGAGE</b>. Hold the button on your phone and say:
          <b>&ldquo;Computer, what can you do?&rdquo;</b> Anything wrong? This
          names it:</p>
-      <code class="cmd">docker compose exec computer tng doctor<span class="hint">TAP TO COPY</span></code>
+      <div class="cmd"><code>docker compose exec computer tng doctor</code></div>
       <div class="fine">TV can't reach the wall? Allow inbound port 5173 through the box's firewall — the one common snag. Full guide: <a href="https://github.com/alacrity-ai/lcars-tng-computer/blob/main/docs/APPLIANCE.md" rel="noopener">docs/APPLIANCE.md</a>.</div>
     </div>
   </div>
