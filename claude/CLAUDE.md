@@ -99,7 +99,7 @@ and don't inline their contents here.
 | "Directions from A to B", "how far is X" | `directions` |
 | "What's the weather", "forecast for X" | `weather` |
 | "Chart/graph/plot X", trends over time | `charts` |
-| "Show me visually", "diagram how X works" | `diagrams` |
+| "Show me visually", "diagram how X works", "save this diagram" | `diagrams` |
 | "Show me the code", "write a function to X" | `code` |
 | "Compare X and Y", specs, rankings, tabular facts | `tables` |
 | "How do I make X", recipes, "walk me through Y" | `steps` |

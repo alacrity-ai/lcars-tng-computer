@@ -40,3 +40,38 @@ display({ view: "diagram", props: {
 
 Speak a 1–2 sentence walkthrough after displaying; let the diagram carry
 the detail.
+
+## Prebuilt assets — the diagram cache
+
+Some diagrams are big, deterministic, and asked for repeatedly. Their
+finished SVG lives under `assets/`. **Before building any diagram, check
+the library below** — if it's there, read the file and pass its contents
+verbatim as the `svg` prop; never rebuild it by hand.
+
+**When to save.** Two triggers, same procedure:
+- the user says so — "save this diagram", "keep that", "remember this one";
+- you just built something slow and deterministic that will plainly be
+  asked for again.
+
+Only cache **timeless** content (anatomy, orbits, the periodic table).
+Never cache anything that goes stale — prices, standings, weather,
+anything with a date on it. When in doubt, don't.
+
+**How to save:**
+1. Write the SVG to `assets/<kebab-slug>.svg` (the exact SVG you displayed).
+2. If a script generated it, save that too as `assets/<kebab-slug>.gen.*`
+   — future edits are edit-and-re-run, not redraw. Hand-built SVGs have no
+   generator; that's fine.
+3. Add a bullet to the library below: file, what it shows, the display
+   title to use, and the generator if one exists.
+4. Confirm to the user in one spoken sentence ("Saved — I can show that
+   instantly now.").
+
+### Library
+
+- **Periodic table** — `assets/periodic-table.svg`. All 118 elements, colored
+  by family, legend and f-block rows included. Title it "The Periodic Table
+  of the Elements". The generator that produced it is
+  `assets/periodic-table.gen.py` (data + layout, ~50px cells on a 950×498
+  canvas) — edit and re-run that if the table itself needs changing, then
+  overwrite the `.svg`.
