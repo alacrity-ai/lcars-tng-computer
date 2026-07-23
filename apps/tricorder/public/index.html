@@ -14,8 +14,8 @@
 <meta name="apple-mobile-web-app-title" content="Tricorder">
 <style>
   :root {
-    --gold: #FF9900; --lav: #CC99CC; --blue: #9999CC; --red: #CC6666;
-    --bg: #000; --ink: #000;
+    --gold: #FF9900; --peach: #FFCC99; --lav: #CC99CC; --blue: #9999CC; --red: #CC6666;
+    --bg: #000; --ink: #000; --panel: #0d0b07;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; }
@@ -28,59 +28,108 @@
   }
   #app { max-width: 480px; margin: 0 auto; padding: 12px 16px 24px; min-height: 100%; display: flex; flex-direction: column; }
 
-  /* LCARS header bar */
+  /* LCARS header bar — segments double as status lights */
   .lcars-bar { display: flex; align-items: stretch; gap: 6px; height: 44px; margin-bottom: 18px; }
   .lcars-cap { background: var(--gold); width: 56px; border-radius: 22px 0 0 22px; }
   .lcars-title { flex: 1; display: flex; align-items: center; justify-content: flex-end;
     background: var(--gold); color: var(--ink); padding: 0 14px; font-size: 22px; font-weight: 700; }
-  .lcars-seg { width: 34px; background: var(--lav); }
-  .lcars-seg2 { width: 18px; background: var(--blue); border-radius: 0 22px 22px 0; }
+  .lcars-seg { width: 34px; background: var(--lav); animation: statlight 5.2s steps(1) infinite; }
+  .lcars-seg2 { width: 18px; background: var(--blue); border-radius: 0 22px 22px 0; animation: statlight 7.6s steps(1) infinite reverse; }
+  @keyframes statlight {
+    0%, 34%, 41%, 100% { filter: brightness(1); }
+    35%, 40% { filter: brightness(.55); }
+    72%, 74% { filter: brightness(1.35); }
+  }
 
   .view { display: none; flex: 1; flex-direction: column; }
-  .view.active { display: flex; }
+  .view.active { display: flex; animation: fade-rise .26s ease-out; }
+  @keyframes fade-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
   label { display: block; color: var(--blue); font-size: 13px; margin: 12px 0 4px; text-transform: uppercase; }
   input, select {
     width: 100%; background: #111; border: 1px solid #333; border-radius: 8px;
     color: #fff; font: inherit; font-size: 17px; padding: 12px 14px; outline: none;
     user-select: text; -webkit-user-select: text;
+    transition: border-color .18s, box-shadow .18s;
   }
-  input:focus { border-color: var(--gold); }
+  input:focus { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
 
   .btn {
     display: block; width: 100%; border: 0; border-radius: 22px; padding: 13px;
     font: inherit; font-size: 17px; font-weight: 700; text-transform: uppercase;
     background: var(--gold); color: var(--ink); margin-top: 16px; cursor: pointer;
+    transition: transform .1s ease-out, filter .12s;
   }
-  .btn:active { filter: brightness(1.2); }
+  .btn:active { filter: brightness(1.15); transform: scale(.97); }
   .btn.small { width: auto; display: inline-block; padding: 7px 16px; font-size: 13px; margin: 4px 6px 0 0; border-radius: 14px; }
   .btn.lav { background: var(--lav); } .btn.blue { background: var(--blue); } .btn.red { background: var(--red); }
   .btn[disabled] { opacity: .4; }
 
   .err { color: var(--red); min-height: 20px; font-size: 15px; margin-top: 12px; }
 
+  /* main view: Okudagram data rail down the left edge */
+  .main-cols { flex: 1; display: flex; gap: 12px; min-height: 0; }
+  .rail { width: 46px; flex: none; display: flex; flex-direction: column; gap: 6px; padding-bottom: 4px; }
+  .rail-seg { border-radius: 10px; min-height: 22px; }
+  .rail-seg.gold { background: var(--gold); flex: 2; border-radius: 10px 10px 4px 4px; }
+  .rail-seg.lav { background: var(--lav); flex: 1; }
+  .rail-seg.blue { background: var(--blue); flex: 3; }
+  .rail-seg.peach { background: var(--peach); flex: 1; border-radius: 4px 4px 14px 14px; }
+  .rail-readout {
+    color: var(--peach); font-size: 10px; text-align: right; padding: 1px 3px;
+    font-variant-numeric: tabular-nums; letter-spacing: .08em; opacity: .8; min-height: 13px;
+  }
+  .main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
   /* status strip */
   .strip { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .who { color: var(--lav); font-size: 15px; text-transform: uppercase; }
   .pills { display: flex; gap: 8px; }
-  .pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 12px; color: var(--ink); background: #555; text-transform: uppercase; }
+  .pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 12px; color: var(--ink); background: #555; text-transform: uppercase; transition: background .25s; }
   .pill.on  { background: var(--gold); }
   .pill.off { background: var(--red); }
   .pill.q   { background: var(--lav); }
+  @keyframes pill-pop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
 
-  /* push to talk */
+  /* push to talk — the instrument */
   .ptt-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; }
+  .ptt-holder { position: relative; width: 190px; height: 190px; }
+  .ring {
+    position: absolute; inset: -16px; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(
+      var(--gold) 0 12deg, transparent 12deg 26deg,
+      var(--lav) 26deg 34deg, transparent 34deg 88deg,
+      var(--gold) 88deg 132deg, transparent 132deg 148deg,
+      var(--blue) 148deg 157deg, transparent 157deg 205deg,
+      var(--gold) 205deg 262deg, transparent 262deg 276deg,
+      var(--peach) 276deg 286deg, transparent 286deg 360deg);
+    -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+    mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+    animation: sweep 26s linear infinite; opacity: .45;
+    transition: opacity .3s;
+  }
+  .ptt-holder.listening .ring { animation-duration: 2.4s; opacity: 1; }
+  .ptt-holder.send .ring { opacity: .85; animation-play-state: paused; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .pulse {
+    position: absolute; inset: -16px; border-radius: 50%; pointer-events: none;
+    border: 2px solid var(--gold); opacity: 0;
+  }
+  .ptt-holder.listening .pulse { animation: pulse-out 1.8s ease-out infinite; }
+  .ptt-holder.listening .pulse.p2 { animation-delay: .9s; }
+  @keyframes pulse-out { 0% { transform: scale(.94); opacity: .65; } 100% { transform: scale(1.28); opacity: 0; } }
+
   #ptt {
     width: 190px; height: 190px; border-radius: 50%; border: 6px solid var(--gold);
     background: #180f00; color: var(--gold); font: inherit; font-size: 19px; font-weight: 700;
     text-transform: uppercase; cursor: pointer;
     touch-action: none; -webkit-touch-callout: none;
+    transition: background .15s, color .15s, border-color .15s, transform .1s ease-out;
   }
-  #ptt.listening { background: var(--gold); color: var(--ink); box-shadow: 0 0 40px rgba(255,153,0,.55); }
+  #ptt:active { transform: scale(.97); }
+  #ptt.listening { background: var(--gold); color: var(--ink); box-shadow: 0 0 44px rgba(255,153,0,.55); }
   #ptt.send { background: var(--gold); color: var(--ink); border-color: #fff; }
   #ptt[disabled] { border-color: #444; color: #666; background: #0a0a0a; }
-  .ptt-holder { position: relative; }
-  #ptt { transition: background .15s, color .15s, border-color .15s; }
   /* Cancel sits well clear of the SEND circle (diagonally out, top-right) and
      slides out from behind it LCARS-style: quick, with a slight overshoot. */
   #ptt-cancel {
@@ -95,8 +144,17 @@
     opacity: 1; pointer-events: auto;
     transform: translate(0, 0) scale(1);
   }
-  #live { min-height: 44px; margin-top: 14px; color: #fff; font-size: 16px; text-align: center; padding: 0 8px; }
-  #toast { min-height: 22px; font-size: 14px; text-align: center; color: var(--blue); }
+  #live { min-height: 44px; margin-top: 18px; color: #fff; font-size: 16px; text-align: center; padding: 0 8px; }
+  #live .caret {
+    display: inline-block; width: 3px; height: 1em; background: var(--gold);
+    margin-left: 4px; vertical-align: -2px; animation: caret-blink 1s steps(1) infinite;
+  }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+  #toast {
+    min-height: 22px; font-size: 14px; text-align: center; color: var(--blue);
+    opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s;
+  }
+  #toast.visible { opacity: 1; transform: none; }
   #toast.bad { color: var(--red); }
 
   /* instant-send toggle */
@@ -119,10 +177,11 @@
   .typerow .btn { width: auto; margin: 0; padding: 12px 20px; }
 
   .foot { display: flex; justify-content: space-between; margin-top: 22px; }
-  .link { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; text-transform: uppercase; cursor: pointer; padding: 6px 0; }
+  .link { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; text-transform: uppercase; cursor: pointer; padding: 6px 0; transition: color .15s; }
+  .link:active { color: var(--peach); }
 
   /* admin */
-  .card { border: 1px solid #2a2a2a; border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
+  .card { border: 1px solid #2a2a2a; border-radius: 12px; padding: 12px 14px; margin-top: 12px; background: var(--panel); animation: fade-rise .22s ease-out both; }
   .card h3 { margin: 0; font-size: 17px; color: var(--gold); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; }
   .card h3 .role { color: var(--lav); font-size: 12px; }
   .sess { font-size: 13px; color: #bbb; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -133,9 +192,18 @@
   /* modal */
   #modal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 24px; }
   #modal.open { display: flex; }
-  .modal-box { background: #120b00; border: 2px solid var(--gold); border-radius: 16px; padding: 24px; text-align: center; max-width: 340px; }
+  .modal-box {
+    background: #120b00; border: 2px solid var(--gold); border-radius: 16px; padding: 24px;
+    text-align: center; max-width: 340px;
+    animation: modal-pop .3s cubic-bezier(.2, 1.4, .4, 1);
+  }
+  @keyframes modal-pop { from { transform: scale(.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .modal-box .pw { font-size: 30px; color: #fff; margin: 16px 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
   .modal-box .note { color: var(--blue); font-size: 14px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -161,33 +229,49 @@
 
   <!-- MAIN -->
   <div class="view" id="view-main">
-    <div class="strip">
-      <div class="who" id="who"></div>
-      <div class="pills">
-        <div class="pill q" id="qpill" hidden></div>
-        <div class="pill" id="pill">…</div>
+    <div class="main-cols">
+      <aside class="rail" aria-hidden="true">
+        <div class="rail-seg gold"></div>
+        <div class="rail-readout" id="ro-1">47.2</div>
+        <div class="rail-seg lav"></div>
+        <div class="rail-readout" id="ro-2">1701</div>
+        <div class="rail-seg blue"></div>
+        <div class="rail-readout" id="ro-3">003.9</div>
+        <div class="rail-seg peach"></div>
+      </aside>
+      <div class="main-body">
+        <div class="strip">
+          <div class="who" id="who"></div>
+          <div class="pills">
+            <div class="pill q" id="qpill" hidden></div>
+            <div class="pill" id="pill">…</div>
+          </div>
+        </div>
+        <div class="ptt-wrap">
+          <div class="ptt-holder" id="holder">
+            <div class="ring"></div>
+            <div class="pulse p1"></div>
+            <div class="pulse p2"></div>
+            <button id="ptt">Hold<br>to talk</button>
+            <button id="ptt-cancel">&#10005;</button>
+          </div>
+          <div id="live"></div>
+          <div id="toast"></div>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Instant send on release</span>
+          <button class="switch" id="sw-instant" aria-label="Instant send on release"><span class="knob"></span></button>
+        </div>
+        <label>Or type a command</label>
+        <div class="typerow">
+          <input id="in-type" placeholder="Computer, …" autocapitalize="sentences">
+          <button class="btn" id="btn-send">Send</button>
+        </div>
+        <div class="foot">
+          <button class="link" id="btn-admin" hidden>Admin console</button>
+          <button class="link" id="btn-logout">Log out</button>
+        </div>
       </div>
-    </div>
-    <div class="ptt-wrap">
-      <div class="ptt-holder">
-        <button id="ptt">Hold<br>to talk</button>
-        <button id="ptt-cancel">&#10005;</button>
-      </div>
-      <div id="live"></div>
-      <div id="toast"></div>
-    </div>
-    <div class="toggle-row">
-      <span class="toggle-label">Instant send on release</span>
-      <button class="switch" id="sw-instant" aria-label="Instant send on release"><span class="knob"></span></button>
-    </div>
-    <label>Or type a command</label>
-    <div class="typerow">
-      <input id="in-type" placeholder="Computer, …" autocapitalize="sentences">
-      <button class="btn" id="btn-send">Send</button>
-    </div>
-    <div class="foot">
-      <button class="link" id="btn-admin" hidden>Admin console</button>
-      <button class="link" id="btn-logout">Log out</button>
     </div>
   </div>
 
@@ -253,6 +337,7 @@ async function api(path, opts = {}) {
 function logout() {
   store.token = null; store.user = null; me = null;
   stopPolling();
+  stopReadouts();
   show("login");
 }
 
@@ -292,11 +377,12 @@ function enterMain(identity) {
   $("btn-admin").hidden = identity.user.role !== "admin";
   show("main");
   startPolling();
+  startReadouts();
 }
 
 // Adaptive poll: 15s at rest, 2s while commands are pending on the Computer
 // (or just after a send, so the queue badge appears without waiting a cycle).
-let pollTimer = null, fastUntil = 0;
+let pollTimer = null, fastUntil = 0, lastPending = 0;
 async function pollStatus() {
   try {
     const s = await api("/api/status");
@@ -311,8 +397,14 @@ function setPill(online, pending) {
   q.hidden = !(pending > 0);
   if (pending > 0) {
     q.textContent = "Queue " + pending;
+    if (pending !== lastPending) {
+      q.style.animation = "none";
+      void q.offsetWidth;
+      q.style.animation = "pill-pop .3s cubic-bezier(.2,1.4,.4,1)";
+    }
     fastUntil = Math.max(fastUntil, Date.now() + 10000);
   }
+  lastPending = pending;
   schedulePoll();
 }
 function schedulePoll() {
@@ -325,8 +417,26 @@ function startPolling() { stopPolling(); pollStatus(); schedulePoll(); }
 function stopPolling() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && me) pollStatus(); });
 
-// Tricorder chirps: press-to-listen and transmit. Instantiated once and
-// rewound per play; both plays happen inside user gestures, so iOS allows them.
+// ---- Okudagram rail readouts ---------------------------------------------------
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let roTimer = null;
+const roFmt = [
+  () => (40 + Math.random() * 59).toFixed(1),
+  () => String(1000 + Math.floor(Math.random() * 9000)),
+  () => "0" + (Math.random() * 9).toFixed(1).padStart(4, "0"),
+];
+function startReadouts() {
+  if (roTimer || reducedMotion.matches) return;
+  roTimer = setInterval(() => {
+    if (document.hidden) return;
+    const i = Math.floor(Math.random() * 3);
+    $("ro-" + (i + 1)).textContent = roFmt[i]();
+  }, 1400);
+}
+function stopReadouts() { if (roTimer) { clearInterval(roTimer); roTimer = null; } }
+
+// Tricorder chirps: press-to-listen, transmit, discard. Instantiated once and
+// rewound per play; all plays happen inside user gestures, so iOS allows them.
 const sndPress = new Audio("/sounds/comp_beep.mp3");
 const sndSend = new Audio("/sounds/comp_beep_2.mp3");
 const sndCancel = new Audio("/sounds/cancel_sound.mp3");
@@ -337,11 +447,13 @@ function chirp(a) {
   try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
 }
 
+let toastTimer = null;
 function toast(text, bad) {
   const t = $("toast");
   t.textContent = text;
-  t.className = bad ? "bad" : "";
-  setTimeout(() => { if (t.textContent === text) t.textContent = ""; }, 4000);
+  t.className = bad ? "visible bad" : "visible";
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = t.className.replace("visible", "").trim(); }, 4000);
 }
 
 async function send(text) {
@@ -367,13 +479,21 @@ $("btn-admin").onclick = () => { renderAdmin(); show("admin"); };
 // ---- push to talk -------------------------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const ptt = $("ptt");
+const holder = $("holder");
 // `committed` carries text across engine auto-restarts while the button is
 // held; `runText` is ALWAYS rebuilt from the full result list of the current
 // run — some engines (iOS Safari) re-deliver grown copies of earlier results
 // on every event, so appending deltas duplicates every prefix.
-// Release doesn't send: it parks the transcript in `pendingText` for review —
-// the big button becomes SEND, the ✕ discards.
+// Release doesn't send (unless instant-send): it parks the transcript in
+// `pendingText` for review — the big button becomes SEND, the ✕ discards.
+// Long holds: engines self-terminate on their own schedule, and a reused
+// instance goes dead after enough restarts — every restart gets a FRESH
+// instance, restarts are slightly delayed, a hard cap parks the transcript
+// after 90s, and a safety timer guarantees the button never sticks on
+// LISTENING even if the engine swallows its final onend.
 let rec = null, held = false, committed = "", runText = "", pendingText = "";
+let holdTimer = null, restartTimer = null, safetyTimer = null, finishArmed = false;
+const MAX_HOLD_MS = 90_000;
 
 if (!SR) {
   ptt.disabled = true;
@@ -381,12 +501,17 @@ if (!SR) {
   $("live").textContent = "No speech recognition in this browser — type below.";
 }
 
-function beginPTT() {
-  if (!SR || held || pendingText) return;
-  held = true;
-  committed = ""; runText = "";
-  ptt.classList.add("listening");
-  ptt.innerHTML = "Listening";
+function setLive(text, listening) {
+  const live = $("live");
+  live.textContent = text;
+  if (listening) {
+    const c = document.createElement("span");
+    c.className = "caret";
+    live.appendChild(c);
+  }
+}
+
+function startRun() {
   rec = new SR();
   rec.lang = navigator.language || "en-US";
   rec.continuous = true;
@@ -407,42 +532,93 @@ function beginPTT() {
       else parts.push(t);
     }
     runText = parts.join(" ");
-    $("live").textContent = (committed + " " + runText).trim();
+    setLive((committed + " " + runText).trim(), true);
   };
   rec.onerror = (e) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       held = false;
+      clearHoldTimers();
       resetIdle();
       $("live").textContent = "Microphone permission denied — type below.";
     }
+    // everything else (no-speech, aborted, network) flows through onend
   };
-  // iOS ends recognition on its own schedule; while the button is held,
-  // bank this run's text and re-arm a fresh one. On release: instant-send
-  // fires immediately, otherwise the transcript parks for review.
   rec.onend = () => {
     committed = (committed + " " + runText).trim();
     runText = "";
-    if (held) { try { rec.start(); } catch {} return; }
-    const text = committed;
-    committed = "";
-    if (!text) { resetIdle(); return; }
-    if (instantSend) { resetIdle(); send(text); }
-    else enterPending(text);
+    if (held) {
+      // engine self-terminated mid-hold — re-arm a FRESH instance shortly
+      restartTimer = setTimeout(() => {
+        if (!held) return;
+        try { startRun(); } catch { held = false; armFinish(); finishHold(); }
+      }, 120);
+      return;
+    }
+    if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+    finishHold();
   };
-  try { rec.start(); } catch {}
+  rec.start();
+}
+
+function clearHoldTimers() {
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+}
+
+function armFinish() {
+  finishArmed = true;
+  if (rec) { try { rec.stop(); } catch {} }
+  // if the engine never fires its final onend, park anyway
+  safetyTimer = setTimeout(finishHold, 900);
+}
+
+function finishHold() {
+  if (!finishArmed) return;
+  finishArmed = false;
+  const text = (committed + " " + runText).trim();
+  committed = ""; runText = "";
+  if (!text) { resetIdle(); return; }
+  if (instantSend) { resetIdle(); send(text); }
+  else enterPending(text);
+}
+
+function beginPTT() {
+  if (!SR || held || pendingText) return;
+  held = true;
+  committed = ""; runText = ""; finishArmed = false;
+  holder.classList.add("listening");
+  ptt.classList.add("listening");
+  ptt.innerHTML = "Listening";
+  setLive("", true);
+  holdTimer = setTimeout(() => {
+    if (!held) return;
+    held = false;
+    holdTimer = null;
+    toast("Maximum hold reached — transcript parked");
+    armFinish();
+  }, MAX_HOLD_MS);
+  try { startRun(); } catch {
+    held = false;
+    clearHoldTimers();
+    resetIdle();
+  }
 }
 
 function enterPending(text) {
   pendingText = text;
+  holder.classList.remove("listening");
+  holder.classList.add("send");
   ptt.classList.remove("listening");
   ptt.classList.add("send");
   ptt.innerHTML = "Send";
   $("ptt-cancel").classList.add("show");
-  $("live").textContent = text;
+  setLive(text, false);
 }
 
 function resetIdle() {
   pendingText = "";
+  holder.classList.remove("listening", "send");
   ptt.classList.remove("listening", "send");
   ptt.innerHTML = "Hold<br>to talk";
   $("ptt-cancel").classList.remove("show");
@@ -452,8 +628,9 @@ function resetIdle() {
 function endPTT() {
   if (!held) return;
   held = false;
-  ptt.classList.remove("listening");
-  if (rec) { try { rec.stop(); } catch {} }
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  armFinish();
 }
 
 ptt.addEventListener("pointerdown", (e) => {
@@ -504,9 +681,10 @@ async function renderAdmin() {
   catch (e) { $("admin-err").textContent = e.message; return; }
   const wrap = $("admin-users");
   wrap.innerHTML = "";
-  for (const u of data.users) {
+  data.users.forEach((u, idx) => {
     const card = document.createElement("div");
     card.className = "card" + (u.disabled ? " dis" : "");
+    card.style.animationDelay = (idx * 40) + "ms";
     const h = document.createElement("h3");
     h.innerHTML = "<span>" + u.handle + (u.disabled ? " (disabled)" : "") + "</span><span class='role'>" + u.role +
       (u.hasPassword ? "" : " · no password") + "</span>";
@@ -551,7 +729,7 @@ async function renderAdmin() {
     }
     card.appendChild(actions);
     wrap.appendChild(card);
-  }
+  });
 }
 
 $("btn-back").onclick = () => show("main");
