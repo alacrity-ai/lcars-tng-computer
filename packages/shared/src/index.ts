@@ -599,14 +599,31 @@ export interface ChimeMessage {
     "speed" sets the video playback rate (rate required, YouTube's 0.25–2).
     "fullscreen" expands the youtube panel to cover the entire wall (CSS
     full-bleed, not the browser Fullscreen API — that needs a user gesture);
-    "windowed" restores the framed panel. */
-export type MediaAction = "pause" | "play" | "stop" | "speed" | "fullscreen" | "windowed";
+    "windowed" restores the framed panel. Volume (TNGC era, "louder!"):
+    "volume" sets an absolute level (level required, 0–100); "volume_up" /
+    "volume_down" nudge by 15 from the player's live level; "mute"/"unmute"
+    are separate from level. Setting any level implicitly unmutes. Volume is
+    per-player: a new video starts back at YouTube's default. */
+export type MediaAction =
+  | "pause"
+  | "play"
+  | "stop"
+  | "speed"
+  | "fullscreen"
+  | "windowed"
+  | "volume"
+  | "volume_up"
+  | "volume_down"
+  | "mute"
+  | "unmute";
 
 export interface MediaMessage {
   type: "media";
   action: MediaAction;
   /** speed only: playback rate multiplier. */
   rate?: number;
+  /** volume only: absolute level 0–100. */
+  level?: number;
 }
 
 /** Voice nudges for the live map panel ("zoom in", "go west", "go to
@@ -789,6 +806,8 @@ export interface MediaRequest {
   action: MediaAction;
   /** speed only: playback rate multiplier (YouTube honors 0.25–2). */
   rate?: number;
+  /** volume only: absolute level 0–100. */
+  level?: number;
 }
 
 export interface MapControlRequest {

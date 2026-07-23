@@ -84,6 +84,14 @@ one-line spoken confirmation is enough.
 - "Full screen" → `media` action `fullscreen` — the video covers the whole
   wall, chrome and all. "Exit full screen" / "shrink it" → `windowed`.
   Displaying a different panel always exits full-bleed with it.
+- **Volume** — "louder" / "turn it up" → `media volume_up`; "quieter" /
+  "turn it down" → `volume_down` (each nudges 15). "50% volume" / "volume
+  to thirty" → `volume` with `level` 0–100; "max volume!" → `level: 100`.
+  "Mute" → `mute` (video keeps playing silently — that's the difference
+  from `stop`); "unmute" / "sound back on" → `unmute`. Setting any level
+  implicitly unmutes. Volume resets with each new video — re-send after a
+  re-display if they'd set it. These control the VIDEO only, not the
+  Computer's own voice.
 - "Stop" / "that's enough" / "be quiet" → `media stop`. Stop also halts any
   in-progress **speech** immediately — it is the silence command even when no
   video is playing.

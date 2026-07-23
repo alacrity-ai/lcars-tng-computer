@@ -127,7 +127,7 @@ export function useSocket() {
           if (msg.action === "windowed") videoFullscreen.value = false;
           // Loose coupling: whichever panel is playing media listens for this.
           window.dispatchEvent(
-            new CustomEvent("tng-media", { detail: { action: msg.action, rate: msg.rate } }),
+            new CustomEvent("tng-media", { detail: { action: msg.action, rate: msg.rate, level: msg.level } }),
           );
         } else if (msg.type === "map_control") {
           // Same loose coupling: the live MapPanel animates in place.

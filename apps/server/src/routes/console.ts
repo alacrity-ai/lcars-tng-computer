@@ -289,8 +289,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   });
 
   app.post<{ Body: MediaRequest }>("/api/console/media", async (req, reply) => {
-    const { action, rate } = req.body ?? {};
-    const actions = ["pause", "play", "stop", "speed", "fullscreen", "windowed"];
+    const { action, rate, level } = req.body ?? {};
+    const actions = [
+      "pause", "play", "stop", "speed", "fullscreen", "windowed",
+      "volume", "volume_up", "volume_down", "mute", "unmute",
+    ];
     if (!actions.includes(action)) {
       return reply.code(400).send({ error: `action must be one of: ${actions.join(", ")}` });
     }
@@ -302,6 +305,13 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       }
       hub.broadcast({ type: "media", action, rate });
       return { ok: true, action, rate };
+    }
+    if (action === "volume") {
+      if (typeof level !== "number" || level < 0 || level > 100) {
+        return reply.code(400).send({ error: "volume requires level between 0 and 100" });
+      }
+      hub.broadcast({ type: "media", action, level: Math.round(level) });
+      return { ok: true, action, level: Math.round(level) };
     }
     if (action === "stop") {
       cancelActiveReading();

@@ -18,13 +18,46 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
   // needs a user gesture, and the wall has no pointing device. Seeded from
   // module scope so a remount mid-queue keeps the wall full screen.
   const [fullscreen, setFullscreen] = useState(videoFullscreen.value);
+  // Live volume as reported by the player's infoDelivery stream — the ground
+  // truth "louder"/"quieter" nudge from (starts at YouTube's default).
+  const volumeRef = useRef(100);
 
   useEffect(() => {
+    const send = (func: string, args: unknown[] = []) =>
+      frameRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "command", func, args }),
+        "https://www.youtube.com",
+      );
     function onMedia(ev: Event) {
-      const { action, rate } = (ev as CustomEvent<{ action: MediaAction; rate?: number }>)
-        .detail;
+      const { action, rate, level } = (
+        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number }>
+      ).detail;
       if (action === "fullscreen" || action === "windowed") {
         setFullscreen(action === "fullscreen");
+        return;
+      }
+      if (action === "mute") {
+        send("mute");
+        return;
+      }
+      if (action === "unmute") {
+        send("unMute");
+        return;
+      }
+      if (action === "volume" || action === "volume_up" || action === "volume_down") {
+        const target = Math.max(
+          0,
+          Math.min(
+            100,
+            action === "volume"
+              ? Math.round(level ?? volumeRef.current)
+              : volumeRef.current + (action === "volume_up" ? 15 : -15),
+          ),
+        );
+        // Setting a level implies wanting to hear it.
+        send("unMute");
+        send("setVolume", [target]);
+        volumeRef.current = target;
         return;
       }
       // "stop" pauses rather than resumes (it used to fall through to
@@ -103,11 +136,10 @@ export function YouTubePanel({ videoId, title, autoplay = true, startSeconds }: 
       // discrete ENDED state change is a single message that can be missed:
       // the periodic infoDelivery stream also carries playerState.
       if (data?.event === "onStateChange" && Number(data.info) === 0) reportEnded();
-      if (
-        data?.event === "infoDelivery" &&
-        (data.info as { playerState?: number } | undefined)?.playerState === 0
-      ) {
-        reportEnded();
+      if (data?.event === "infoDelivery") {
+        const info = data.info as { playerState?: number; volume?: number } | undefined;
+        if (typeof info?.volume === "number") volumeRef.current = info.volume;
+        if (info?.playerState === 0) reportEnded();
       }
     };
     window.addEventListener("message", onMessage);

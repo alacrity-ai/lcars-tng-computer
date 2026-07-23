@@ -222,13 +222,21 @@ server.registerTool(
       "'speed' sets the video playback rate (rate required, 0.25–2; 1 = normal — 'faster' → " +
       "1.5, 'double speed' → 2, 'normal speed' → 1). The rate resets whenever a new video " +
       "or panel is displayed. 'fullscreen' expands the video to fill the entire wall; " +
-      "'windowed' returns it to the framed panel.",
+      "'windowed' returns it to the framed panel. Volume: 'volume' sets an absolute level " +
+      "(level required, 0–100 — '50% volume' → 50, 'max volume' → 100); 'volume_up' / " +
+      "'volume_down' nudge by 15 ('louder', 'quieter'); 'mute' / 'unmute' are separate " +
+      "('mute' when they want silence but the video to keep going — 'stop' if they want it " +
+      "over). Setting a level implicitly unmutes. Volume resets with each new video.",
     inputSchema: {
-      action: z.enum(["pause", "play", "stop", "speed", "fullscreen", "windowed"]),
+      action: z.enum([
+        "pause", "play", "stop", "speed", "fullscreen", "windowed",
+        "volume", "volume_up", "volume_down", "mute", "unmute",
+      ]),
       rate: z.number().min(0.25).max(2).optional(),
+      level: z.number().min(0).max(100).optional(),
     },
   },
-  async ({ action, rate }) => textResult(await call("/api/console/media", { action, rate })),
+  async ({ action, rate, level }) => textResult(await call("/api/console/media", { action, rate, level })),
 );
 
 server.registerTool(
