@@ -95,6 +95,11 @@ const server = new McpServer(
 
 let delivered = 0;
 let deliveryFailures = 0;
+// Commands ACCEPTED into the dispatcher (fresh, non-stale). `tng doctor`
+// compares this with `delivered` to catch the silent-drop failure mode:
+// accepted climbing while delivered stays 0 means commands reach this box
+// but never reach the session (TNGC-31).
+let accepted = 0;
 const queue: QueuedCommand[] = [];
 let active: QueuedCommand | null = null;
 let abortRequest: { by: string; at: number } | null = null;
@@ -159,6 +164,7 @@ function enqueue(msg: TngMessage & { cloudId?: string; kind?: "transcript" | "di
     ackCloud(msg.cloudId); // stale: never execute, never replay
     return;
   }
+  accepted++;
   queue.push({ ...msg, id: msg.cloudId ?? `loc_${randomUUID()}` });
   dispatch();
   pushState();
@@ -305,6 +311,7 @@ const http = createServer((req, res) => {
     return respond(200, {
       ok: true,
       mode: "channel-push",
+      accepted,
       delivered,
       deliveryFailures,
       busy,
