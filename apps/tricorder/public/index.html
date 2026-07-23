@@ -286,6 +286,16 @@ function startPolling() { stopPolling(); pollStatus(); pollTimer = setInterval(p
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && me) pollStatus(); });
 
+// Tricorder chirps: press-to-listen and transmit. Instantiated once and
+// rewound per play; both plays happen inside user gestures, so iOS allows them.
+const sndPress = new Audio("/sounds/comp_beep.mp3");
+const sndSend = new Audio("/sounds/comp_beep_2.mp3");
+sndPress.preload = "auto";
+sndSend.preload = "auto";
+function chirp(a) {
+  try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
+}
+
 function toast(text, bad) {
   const t = $("toast");
   t.textContent = text;
@@ -296,6 +306,7 @@ function toast(text, bad) {
 async function send(text) {
   text = (text || "").trim();
   if (!text) return;
+  chirp(sndSend);
   try {
     const r = await api("/api/message", { method: "POST", body: JSON.stringify({ transcript: text }) });
     setPill(r.online);
@@ -405,6 +416,7 @@ function endPTT() {
 ptt.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   if (pendingText) return; // tap-to-send resolves on pointerup
+  chirp(sndPress);
   ptt.setPointerCapture(e.pointerId);
   beginPTT();
 });
