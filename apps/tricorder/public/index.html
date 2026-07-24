@@ -1151,7 +1151,7 @@ function vsFrame(msg) {
 }
 
 function vsClearMedia() {
-  if ($("vs-render").querySelector("iframe, video")) {
+  if ($("vs-render").querySelector("iframe")) {
     $("vs-render").innerHTML = "<div class='li-placard'>Standing by.</div>";
     $("vs-title").textContent = "PERSONAL VIEWSCREEN";
   }
@@ -1182,13 +1182,6 @@ function loadYT() {
 
 let vsPlayGen = 0;
 function vsPlayVideo(box, props) {
-  // Embed-blocked tracks (server marked audioOnly) play from the tunnel-audio
-  // cache — the phone can't reach the LAN extractor, so the house uploads a
-  // compact rendition to R2 once and we play THAT (video included — bonus).
-  if (props.audioOnly === true) {
-    vsTunnelPlay(box, props);
-    return;
-  }
   const gen = ++vsPlayGen;
   const videoId = props.videoId;
   const holder = document.createElement("div");
@@ -1211,78 +1204,20 @@ function vsPlayVideo(box, props) {
           if (e.data === YT.PlayerState.ENDED) vsSendUp({ type: "video_ended", videoId });
         },
         onError: (e) => {
-          // audio:false = "embed failed, fallback exists": the house flips
-          // this track to audioOnly and re-frames it, which lands us in
-          // vsTunnelPlay above — the same Layer-1 flow a room wall gets.
-          vsSendUp({ type: "video_error", videoId, code: e.data, audio: false });
+          // No LAN audio extractor on the phone, so every player error is
+          // terminal here: report audio:true and the house substitutes or
+          // advances the queue (a blocked playlist track skips to the next).
+          vsSendUp({ type: "video_error", videoId, code: e.data, audio: true });
           if (gen === vsPlayGen) {
             const note = document.createElement("div");
             note.className = "cap";
-            note.textContent = "Embed refused — switching to tunnel playback…";
+            note.textContent = "Unplayable here — skipping…";
             holder.after(note);
           }
         },
       },
     });
   });
-}
-
-// Tunnel playback: poll the worker cache (the first request triggers the
-// house-side fetch+upload), then play the cached rendition in a native
-// <video>. Ended/error events feed the queue exactly like the embed path.
-function vsTunnelPlay(box, props) {
-  const gen = ++vsPlayGen;
-  const videoId = props.videoId;
-  const url = "/api/tunnel-audio/" + encodeURIComponent(videoId) +
-    "?token=" + encodeURIComponent(store.token);
-  const note = document.createElement("div");
-  note.className = "li-placard";
-  note.textContent = "Preparing media — first play can take a minute…";
-  box.appendChild(note);
-  if (props.title) { const c = document.createElement("div"); c.className = "cap"; c.textContent = props.title; box.appendChild(c); }
-  let waited = 0;
-  const attempt = async () => {
-    if (gen !== vsPlayGen) return;
-    let status = 0;
-    try {
-      // 1-byte probe: 206 = cached and ready, 202 = house is fetching
-      const res = await fetch(url, { headers: { range: "bytes=0-0" } });
-      status = res.status;
-    } catch { /* network blip — poll on */ }
-    if (gen !== vsPlayGen) return;
-    if (status === 200 || status === 206) {
-      box.innerHTML = "";
-      const holder = document.createElement("div");
-      holder.className = "vs-player-box";
-      const v = document.createElement("video");
-      v.src = url;
-      v.controls = true;
-      v.autoplay = true;
-      v.playsInline = true;
-      v.setAttribute("playsinline", "");
-      holder.appendChild(v);
-      box.appendChild(holder);
-      if (props.title) { const c = document.createElement("div"); c.className = "cap"; c.textContent = props.title; box.appendChild(c); }
-      v.onended = () => vsSendUp({ type: "video_ended", videoId });
-      v.onerror = () => vsSendUp({ type: "video_error", videoId, audio: true });
-      return;
-    }
-    if (status === 403 || status === 400) {
-      // tunnel audio not enabled for this household — honest skip
-      note.textContent = "Unplayable here — skipping…";
-      vsSendUp({ type: "video_error", videoId, audio: true });
-      return;
-    }
-    waited += 3000;
-    if (waited >= 180000) {
-      note.textContent = "Media preparation timed out — skipping…";
-      vsSendUp({ type: "video_error", videoId, audio: true });
-      return;
-    }
-    note.textContent = "Preparing media… " + Math.round(waited / 1000) + "s (first play caches it)";
-    setTimeout(attempt, 3000);
-  };
-  attempt();
 }
 
 const VS_NATIVE = ["text", "article", "code", "table", "steps", "results", "image", "playlist"];

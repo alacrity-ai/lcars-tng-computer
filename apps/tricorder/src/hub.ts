@@ -43,11 +43,6 @@ export interface Env {
   /** Library payloads (TNGC-23) — props JSON, one object per saved item. */
   LIBRARY: R2Bucket;
   MESSAGE_TTL_MS?: string;
-  /** tunnel-audio gate (TNGC-36 follow-up): comma-separated tenant SLUGS
-      allowed to cache embed-blocked media in R2 for tricorder viewscreens.
-      Unset/empty = feature off. Deliberately not self-serve: at customer
-      scale this would balloon storage; it's a house-operator perk. */
-  TUNNEL_AUDIO_TENANTS?: string;
   /** Verification email plumbing (TNGC-29). Absent → mail is disabled and
       registration logs instead of sending (local dev). */
   MAILGUN_API_KEY?: string;
@@ -62,10 +57,6 @@ const json = (body: unknown, status = 200) =>
 
 export class TenantHub extends DurableObject<Env> {
   private enqueueTimes: number[] = [];
-  /** tunnel-audio trigger dedupe: last time we asked the bridge to fetch a
-      video. In-memory is fine — hibernation resetting it just re-sends one
-      frame, and the bridge dedupes in-flight fetches itself. */
-  private audioFetchAt = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -202,23 +193,6 @@ export class TenantHub extends DurableObject<Env> {
       await this.ctx.storage.put(`msg:${cmd.id}`, { ...cmd, kind: "display" });
       this.sendDown({ v: 1, type: "display", cmd });
       return json({ ok: true, online: true, pending: (await this.queueItems()).length }, 202);
-    }
-
-    // tunnel-audio (TNGC-36 follow-up): a phone wants an embed-blocked track
-    // that isn't in R2 yet — ask the house to fetch+upload it. Deduped so a
-    // polling phone doesn't hammer the bridge.
-    if (url.pathname === "/audio-fetch" && req.method === "POST") {
-      if (!this.online()) return json({ error: "Computer offline" }, 409);
-      const { videoId } = (await req.json()) as { videoId?: string };
-      if (typeof videoId !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
-        return json({ error: "bad video id" }, 400);
-      }
-      const last = this.audioFetchAt.get(videoId) ?? 0;
-      if (Date.now() - last > 60_000) {
-        this.audioFetchAt.set(videoId, Date.now());
-        this.sendDown({ v: 1, type: "audio_fetch", videoId });
-      }
-      return json({ ok: true, preparing: true }, 202);
     }
 
     if (url.pathname === "/status") {
