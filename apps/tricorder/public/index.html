@@ -79,6 +79,22 @@
   .ok { color: var(--gold); font-size: 15px; }
   .ok:not(:empty) { margin-bottom: 10px; }
 
+  /* auth screens (login/register): a centered card, not a bare form pinned
+     to the top — brand row up top, one aligned links row at the bottom */
+  .auth-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-bottom: 7vh; }
+  .auth-card {
+    background: #0d0c08; border: 1px solid #2a2416; border-radius: 16px;
+    padding: 22px 20px 16px;
+  }
+  .auth-brand { display: flex; align-items: center; gap: 10px; }
+  .auth-brand .cap { flex: none; width: 26px; height: 16px; border-radius: 8px 0 0 8px; background: var(--gold); }
+  .auth-brand .t { color: var(--gold); font-size: 21px; font-weight: 700; white-space: nowrap; }
+  .auth-brand .rule { flex: 1; height: 4px; background: var(--lav); border-radius: 2px; opacity: .8; }
+  .auth-sub { color: #877a63; font-size: 12px; margin: 6px 0 10px; text-transform: uppercase; letter-spacing: .1em; }
+  .auth-links { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 10px; }
+  .auth-links .link { padding: 8px 0; margin: 0; text-decoration: none; display: inline-block; text-align: left; }
+  .auth-links .link + .link { white-space: nowrap; flex: none; }
+
   /* main view: Okudagram data rail down the left edge */
   .main-cols { flex: 1; display: flex; gap: 12px; min-height: 0; }
   .rail { width: 46px; flex: none; display: flex; flex-direction: column; gap: 6px; padding-bottom: 4px; }
@@ -469,27 +485,37 @@
 
   <!-- LOGIN -->
   <div class="view" id="view-login">
-    <div class="ok" id="login-ok"></div>
-    <label>Handle or email</label>
-    <input id="in-handle" autocapitalize="none" autocomplete="username" spellcheck="false">
-    <div id="household-row" hidden>
-      <label>Household</label>
-      <input id="in-household" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="your household name">
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <div class="auth-brand" aria-hidden="true"><span class="cap"></span><span class="t">TNG&nbsp;Computer</span><span class="rule"></span></div>
+        <div class="auth-sub">The ship's computer, for your home</div>
+        <div class="ok" id="login-ok"></div>
+        <label>Handle or email</label>
+        <input id="in-handle" autocapitalize="none" autocomplete="username" spellcheck="false">
+        <div id="household-row" hidden>
+          <label>Household</label>
+          <input id="in-household" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="your household name">
+        </div>
+        <label>Password</label>
+        <input id="in-password" type="password" autocomplete="current-password">
+        <label>This device</label>
+        <input id="in-device" maxlength="40">
+        <button class="btn" id="btn-login">Log in</button>
+        <div class="err" id="login-err"></div>
+        <div class="auth-links">
+          <button class="link" id="btn-to-register">New here? Create a household</button>
+          <a class="link" href="/welcome">What is this?</a>
+        </div>
+      </div>
     </div>
-    <label>Password</label>
-    <input id="in-password" type="password" autocomplete="current-password">
-    <label>This device</label>
-    <input id="in-device" maxlength="40">
-    <button class="btn" id="btn-login">Log in</button>
-    <div class="err" id="login-err"></div>
-    <button class="link" id="btn-to-register" style="margin-top:18px">New here? Create a household</button>
-    <a class="link" href="/welcome" style="text-decoration:none;display:block">What is this? Setup guide</a>
   </div>
 
   <!-- REGISTER (TNGC-29) -->
   <div class="view" id="view-register">
-    <button class="link" id="btn-reg-back" style="text-align:left">&#9664; Back to log in</button>
-    <div id="reg-form">
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <button class="link" id="btn-reg-back" style="text-align:left">&#9664; Back to log in</button>
+        <div id="reg-form">
       <label>Household name</label>
       <input id="reg-household" autocomplete="off" placeholder="e.g. Taylor House" maxlength="40">
       <label>Email</label>
@@ -505,10 +531,12 @@
       </div>
     </div>
     <div id="reg-done" hidden>
-      <div class="li-placard" style="padding-top:60px">Check your email</div>
+      <div class="li-placard" style="padding-top:30px">Check your email</div>
       <div class="muted" style="text-align:center" id="reg-done-note"></div>
       <button class="btn lav" id="btn-resend" style="margin-top:24px">Resend the email</button>
       <div class="err" id="resend-err" style="text-align:center"></div>
+    </div>
+      </div>
     </div>
   </div>
 
