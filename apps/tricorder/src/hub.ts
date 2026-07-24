@@ -248,9 +248,28 @@ export class TenantHub extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, data: ArrayBuffer | string): Promise<void> {
     if (typeof data !== "string") return;
-    // Up-frames only come from the bridge link; phone screen sockets are
-    // receive-only (their keepalive is the ping/pong auto-response).
-    if (this.ctx.getTags(ws).includes("screen")) return;
+    // Phone screen sockets may report PLAYER EVENTS only (video_ended /
+    // video_error — what advances a playlist's queue on the phone); the
+    // whitelist keeps them from speaking as a wall in any other way.
+    // Everything else on a screen socket is dropped.
+    const tags = this.ctx.getTags(ws);
+    if (tags.includes("screen")) {
+      const user = tags.find((t) => t.startsWith("user:"))?.slice(5);
+      if (!user) return;
+      try {
+        const msg = JSON.parse(data) as { type?: unknown; videoId?: unknown };
+        if (
+          (msg.type === "video_ended" || msg.type === "video_error") &&
+          typeof msg.videoId === "string" &&
+          msg.videoId.length <= 16
+        ) {
+          this.sendDown({ v: 1, type: "display_client", name: `tricorder-${user}`, msg });
+        }
+      } catch {
+        // not JSON — ignore
+      }
+      return;
+    }
     try {
       const frame = JSON.parse(data) as LinkUpFrame;
       if (frame.type === "ack" && typeof frame.id === "string") {

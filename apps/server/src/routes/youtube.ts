@@ -526,10 +526,16 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       }
       // The AUDIO path failed — this video is genuinely unplayable.
       failedIds.add(videoId);
-      for (const cand of lastResults) {
-        if (failedIds.has(cand.videoId)) continue;
-        await playTrack({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true }, wall);
-        return;
+      // Search-result substitution only applies to videos that CAME from the
+      // last search: a dead playlist/queue track must advance the queue, not
+      // resurrect an unrelated stale result (bites hard on tricorder
+      // viewscreens, where embed-blocked tracks have no audio fallback).
+      if (lastResults.some((r) => r.videoId === videoId)) {
+        for (const cand of lastResults) {
+          if (failedIds.has(cand.videoId)) continue;
+          await playTrack({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true }, wall);
+          return;
+        }
       }
       // No search-result substitute — fall through to the queue before
       // giving up (the errored video may itself have been queued).

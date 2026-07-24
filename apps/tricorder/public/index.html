@@ -300,7 +300,13 @@
   /* Viewscreen mode (TNGC-36): top half = mini wall, controls condense below */
   #vs-top { display: none; flex-direction: column; min-height: 0; }
   body.vs-on #vs-top { display: flex; height: 44vh; margin-bottom: 10px; }
-  body.vs-on .rail, body.vs-on .toggle-row, body.vs-on #btn-library, body.vs-on .foot { display: none; }
+  /* Library stays reachable in Viewscreen mode — "show my saved playlist on
+     my tricorder" is half the point. Music keeps playing while browsing:
+     view-main is display:none'd, not unmounted. */
+  body.vs-on .rail, body.vs-on .toggle-row, body.vs-on .foot { display: none; }
+  body.vs-on #btn-library { margin-top: 10px; padding: 9px; font-size: 14px; }
+  #vs-render .vs-player-box { width: 100%; aspect-ratio: 16 / 9; }
+  #vs-render .vs-player-box iframe { width: 100%; height: 100%; border: 0; border-radius: 8px; }
   body.vs-on .ptt-wrap { min-height: 150px; }
   body.vs-on .ptt-holder { width: 120px; height: 120px; }
   body.vs-on #ptt { width: 120px; height: 120px; font-size: 14px; border-width: 4px; }
@@ -1135,6 +1141,69 @@ function vsClearMedia() {
   }
 }
 
+// Player events ride UP the screen socket (DO whitelists them, bridge relays
+// onto this display's house socket) — how the queue hears the phone.
+function vsSendUp(msg) {
+  if (vsWs && vsWs.readyState === 1) {
+    try { vsWs.send(JSON.stringify(msg)); } catch {}
+  }
+}
+
+// YouTube IFrame API, loaded once on first use.
+let ytReady = null;
+function loadYT() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (!ytReady) {
+    ytReady = new Promise((resolve) => {
+      window.onYouTubeIframeAPIReady = resolve;
+      const s = document.createElement("script");
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+    });
+  }
+  return ytReady;
+}
+
+let vsPlayGen = 0;
+function vsPlayVideo(box, props) {
+  const gen = ++vsPlayGen;
+  const videoId = props.videoId;
+  const holder = document.createElement("div");
+  holder.className = "vs-player-box";
+  const mount = document.createElement("div");
+  holder.appendChild(mount);
+  box.appendChild(holder);
+  if (props.title) { const c = document.createElement("div"); c.className = "cap"; c.textContent = props.title; box.appendChild(c); }
+  loadYT().then(() => {
+    if (gen !== vsPlayGen || !document.body.contains(mount)) return; // superseded
+    new YT.Player(mount, {
+      videoId,
+      playerVars: {
+        autoplay: 1,
+        playsinline: 1,
+        ...(typeof props.startSeconds === "number" ? { start: Math.floor(props.startSeconds) } : {}),
+      },
+      events: {
+        onStateChange: (e) => {
+          if (e.data === YT.PlayerState.ENDED) vsSendUp({ type: "video_ended", videoId });
+        },
+        onError: (e) => {
+          // No LAN audio extractor on the phone, so every player error is
+          // terminal here: report audio:true and the house substitutes or
+          // advances the queue (a blocked playlist track skips to the next).
+          vsSendUp({ type: "video_error", videoId, code: e.data, audio: true });
+          if (gen === vsPlayGen) {
+            const note = document.createElement("div");
+            note.className = "cap";
+            note.textContent = "Unplayable here — skipping…";
+            holder.after(note);
+          }
+        },
+      },
+    });
+  });
+}
+
 const VS_NATIVE = ["text", "article", "code", "table", "steps", "results", "image", "playlist"];
 function vsRenderView(view, props) {
   const box = $("vs-render");
@@ -1152,18 +1221,12 @@ function vsRenderView(view, props) {
     return;
   }
   if (view === "youtube") {
-    // Native embed — audio through the phone is the point (headphones win).
+    // Native playback — audio through the phone is the point (headphones
+    // win). Rendered through the YouTube IFrame API so ended/error events
+    // flow back up the screen socket and the per-wall queue advances —
+    // that's what makes a saved PLAYLIST work on the tricorder.
     box.innerHTML = "";
-    if (typeof props.videoId === "string") {
-      const f = document.createElement("iframe");
-      f.src = "https://www.youtube.com/embed/" + encodeURIComponent(props.videoId) +
-        "?autoplay=1&playsinline=1" +
-        (typeof props.startSeconds === "number" ? "&start=" + Math.floor(props.startSeconds) : "");
-      f.allow = "autoplay; encrypted-media; picture-in-picture";
-      f.allowFullscreen = true;
-      box.appendChild(f);
-      if (props.title) { const c = document.createElement("div"); c.className = "cap"; c.textContent = props.title; box.appendChild(c); }
-    }
+    if (typeof props.videoId === "string") vsPlayVideo(box, props);
     return;
   }
   if (view === "composite") {
@@ -1534,7 +1597,10 @@ function openLibItem(it) {
 }
 
 function resetLiButtons() {
-  $("li-display").textContent = "Display on wall";
+  $("li-display").textContent =
+    (vsOn && me && getWall() === "tricorder-" + me.user.handle)
+      ? "Display on my viewscreen"
+      : "Display on wall";
   $("li-send").textContent = "Send";
   $("li-display").disabled = $("li-send").disabled = $("li-delete").disabled = false;
 }
@@ -1666,11 +1732,17 @@ $("li-display").onclick = async () => {
   b.disabled = true;
   try {
     const wall = getWall();
+    const mine = vsOn && me && wall === "tricorder-" + me.user.handle;
     const r = await api("/api/library/" + libItem.id + "/display", {
       method: "POST",
       body: JSON.stringify(wall ? { wall } : {}),
     });
-    b.textContent = r.pending > 0 ? "Queued — Computer is busy" : "On the wall ✓";
+    b.textContent = r.pending > 0 ? "Queued — Computer is busy" :
+      mine ? "On your viewscreen ✓" : "On the wall ✓";
+    if (mine) {
+      // hop back to the mini wall to watch it land (libitem → library → main)
+      setTimeout(() => { history.back(); setTimeout(() => history.back(), 120); }, 700);
+    }
     setTimeout(resetLiButtons, 2500);
   } catch (e) {
     $("li-err").textContent = e.message;

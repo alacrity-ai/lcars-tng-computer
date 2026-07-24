@@ -78,13 +78,18 @@ export interface RosterDisplay {
     - display_open / display_close (TNGC-36): a tricorder entered/left
       Viewscreen mode — the bridge attaches/detaches a display client named
       `name` (tricorder-<user>) to the house hub and relays its frames up.
+    - display_client (TNGC-36 follow-up): a Viewscreen-mode phone reporting
+      player events (video_ended / video_error) — the bridge forwards `msg`
+      to the house hub over that display's socket, which is what advances a
+      playlist's per-wall queue on the phone. The DO whitelists the types.
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
   | { v: typeof CONTRACT_VERSION; type: "withdraw"; id: string; by?: string }
   | { v: typeof CONTRACT_VERSION; type: "display"; cmd: CloudDisplayCommand }
   | { v: typeof CONTRACT_VERSION; type: "display_open"; name: string }
-  | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string };
+  | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string }
+  | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub

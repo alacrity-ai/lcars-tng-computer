@@ -555,6 +555,32 @@ function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
   });
 }
 
+/** Phone-reported player events (video_ended / video_error) forwarded onto
+    the display's socket — the hub resolves the wall from the socket, so the
+    per-wall play queue advances exactly as it would for a room wall.
+    Whitelisted again here: a compromised cloud must not speak as a wall. */
+function forwardDisplayClient(name: string, msg: unknown): void {
+  const entry = tricorderDisplays.get(name);
+  if (!entry?.ws || entry.ws.readyState !== WebSocket.OPEN) return;
+  const m = msg as { type?: unknown; videoId?: unknown; code?: unknown; audio?: unknown };
+  if (m?.type !== "video_ended" && m?.type !== "video_error") return;
+  if (typeof m.videoId !== "string") return;
+  const clean =
+    m.type === "video_ended"
+      ? { type: "video_ended", videoId: m.videoId }
+      : {
+          type: "video_error",
+          videoId: m.videoId,
+          ...(typeof m.code === "number" ? { code: m.code } : {}),
+          ...(m.audio === true ? { audio: true } : {}),
+        };
+  try {
+    entry.ws.send(JSON.stringify(clean));
+  } catch {
+    // socket recycling — the retry loop will reattach
+  }
+}
+
 function closeTricorderDisplay(name: string): void {
   const entry = tricorderDisplays.get(name);
   if (!entry) return;
@@ -646,6 +672,8 @@ function startCloudLink() {
           openTricorderDisplay(frame.name);
         } else if (frame.type === "display_close" && typeof frame.name === "string") {
           closeTricorderDisplay(frame.name);
+        } else if (frame.type === "display_client" && typeof frame.name === "string") {
+          forwardDisplayClient(frame.name, frame.msg);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)
