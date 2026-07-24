@@ -27,7 +27,7 @@ plugins/<id>/
   "services": [
     { "name": "lighting", "internalEndpoints": [{ "host": "lighting", "port": 7101 }] }
   ],
-  "mcp": { "name": "lights", "command": "pnpm", "args": ["-C", "/opt/tng/plugins/lighting/mcp", "start"] },
+  "mcp": { "name": "lights", "command": "node", "args": ["../plugins/lighting/mcp/server.mjs"] },
   "skills": ["lighting"],
   "allowedDomains": []
 }

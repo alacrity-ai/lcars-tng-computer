@@ -1,0 +1,96 @@
+# Lighting plugin sidecars (TNGC-9) — chained after the core compose.yaml by
+# `TNG_PLUGINS=lighting make dev|computer` (dev) or COMPOSE_FILE (appliance).
+#
+#   mosquitto   — MQTT broker; compose-network only, no host port
+#   zigbee2mqtt — drives the Zigbee mesh through the SLZB-06U coordinator
+#                 over Ethernet; pairing frontend on host loopback :8092
+#   lighting    — the plugin service: fabric state cache, HTTP :7101 for the
+#                 lights MCP tool, LIGHTING composite panel on the wall
+#
+# All pairing/network state lives in the two named volumes — the fabric is
+# born plugin-owned and survives image updates. The brain never reaches the
+# broker or Z2M directly: its only fence hole is lighting:7101 (plugin.json).
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    init: true
+    # The stock image only listens on loopback without a config file; write
+    # the minimal one at boot. Anonymous is fine: the broker is reachable
+    # only on the compose network.
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >-
+        printf 'listener 1883\nallow_anonymous true\npersistence true\npersistence_location /mosquitto/data/\n'
+        > /mosquitto/config/mosquitto.conf &&
+        chown -R mosquitto:mosquitto /mosquitto/data &&
+        exec mosquitto -c /mosquitto/config/mosquitto.conf
+    volumes:
+      - lighting-mosquitto-data:/mosquitto/data
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:2.12.1
+    init: true
+    depends_on: [mosquitto]
+    # First boot seeds the config; after that Z2M owns the file (it appends
+    # devices/groups as they pair). channel 25 is FOREVER-ish: changing it
+    # forces a full re-pair of every device — it was chosen once, above the
+    # US WiFi 1–11 band, because consumer gateways channel-hop 2.4GHz.
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ ! -f /app/data/configuration.yaml ]; then
+          cat > /app/data/configuration.yaml <<EOF
+        version: 4
+        homeassistant:
+          enabled: false
+        frontend:
+          enabled: true
+          port: 8080
+        mqtt:
+          base_topic: zigbee2mqtt
+          server: mqtt://mosquitto:1883
+        serial:
+          port: $${SLZB_ENDPOINT}
+          adapter: zstack
+        advanced:
+          channel: 25
+          network_key: GENERATE
+          pan_id: GENERATE
+          ext_pan_id: GENERATE
+          transmit_power: 20
+        EOF
+          echo "[lighting] seeded zigbee2mqtt config: channel 25, coordinator $${SLZB_ENDPOINT}"
+        fi
+        exec node index.js
+    environment:
+      SLZB_ENDPOINT: ${LIGHTING_SLZB_ENDPOINT:-tcp://10.0.0.15:6638}
+      TZ: ${TZ:-America/New_York}
+    ports:
+      # pairing/ops frontend — host loopback ONLY, never the LAN
+      - "127.0.0.1:8092:8080"
+    volumes:
+      - lighting-z2m-data:/app/data
+
+  lighting:
+    build: ./plugins/lighting/service
+    image: tng-plugin-lighting
+    init: true
+    depends_on: [mosquitto]
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      STACK_URL: http://stack:3789
+      PORT: "7101"
+
+  # Ride the core lifecycle: `up stack` starts the fabric, and the computer's
+  # egress fence can resolve lighting:7101 at boot (the hole is pinpoint —
+  # resolution requires the sidecar to be up first).
+  stack:
+    depends_on: [zigbee2mqtt, lighting]
+  computer:
+    depends_on: [lighting]
+
+volumes:
+  lighting-mosquitto-data:
+  lighting-z2m-data:
