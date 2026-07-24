@@ -31,7 +31,13 @@ const COLOR_NAMES = {
 };
 
 export function normalize(s) {
-  return String(s ?? "").trim().toLowerCase().replace(/[\s_]+/g, "-");
+  // "Ariel's Studio" must find "ariels-studio": hyphenate whitespace, then
+  // drop punctuation entirely (keep / for fixtures, # for hex, * for all).
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9/#*-]/g, "");
 }
 
 export function miredsToKelvin(ct) {
