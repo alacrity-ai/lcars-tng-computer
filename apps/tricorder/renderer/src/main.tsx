@@ -27,11 +27,89 @@ interface ScreenState {
   props: PanelProps;
 }
 
+/** Pinch-zoom for the stage (TNGC-37 follow-up): two fingers zoom in on the
+    wall (anchored at the pinch midpoint), two-finger drag pans while zoomed,
+    double-tap resets. Touches over a live Leaflet map are left alone — there
+    the pinch should zoom the MAP, not the stage. Transform is mutated
+    directly (no React re-render per move). */
+function useStageZoom(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    let z = 1;
+    let tx = 0;
+    let ty = 0;
+    let pinch: { d0: number; z0: number; tx0: number; ty0: number; mx0: number; my0: number } | null = null;
+    let lastTap = 0;
+    const apply = () => {
+      // cover the viewport: never zoom below 1, never pan past an edge
+      z = Math.min(4, Math.max(1, z));
+      tx = Math.min(0, Math.max(1280 * (1 - z), tx));
+      ty = Math.min(0, Math.max(720 * (1 - z), ty));
+      if (ref.current) ref.current.style.transform = `translate(${tx}px, ${ty}px) scale(${z})`;
+    };
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      if (e.target instanceof Element && e.target.closest(".leaflet-container")) return;
+      e.preventDefault();
+      pinch = {
+        d0: dist(e.touches),
+        z0: z,
+        tx0: tx,
+        ty0: ty,
+        mx0: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        my0: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const d = dist(e.touches);
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      z = pinch.z0 * (d / pinch.d0);
+      z = Math.min(4, Math.max(1, z));
+      // keep the content under the fingers under the fingers, plus pan
+      const k = z / pinch.z0;
+      tx = mx - k * (pinch.mx0 - pinch.tx0);
+      ty = my - k * (pinch.my0 - pinch.ty0);
+      apply();
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+      // double-tap (while zoomed) snaps back to the full wall
+      if (e.touches.length === 0 && e.changedTouches.length === 1 && z > 1.01) {
+        const now = Date.now();
+        if (now - lastTap < 300) {
+          z = 1;
+          tx = 0;
+          ty = 0;
+          lastTap = 0;
+          apply();
+        } else {
+          lastTap = now;
+        }
+      }
+    };
+    document.addEventListener("touchstart", onStart, { passive: false });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+    };
+  }, [ref]);
+}
+
 function Stage() {
   const [screen, setScreen] = useState<ScreenState>({ view: "boot", props: {} });
   const [widgets, setWidgets] = useState<Widget[]>([]);
   const [working, setWorking] = useState(false);
   const workingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomRef = useRef<HTMLDivElement | null>(null);
+  useStageZoom(zoomRef);
 
   useEffect(() => {
     const clearWorking = () => {
@@ -112,23 +190,28 @@ function Stage() {
   }, []);
 
   return (
-    <LcarsFrame title="LCARS 40274">
-      <div key={screen.view} className="panel-wipe">
-        <Panel
-          view={screen.view}
-          props={screen.view === "status" ? { ...screen.props, working } : screen.props}
-        />
-      </div>
-      <WidgetLayer widgets={widgets} />
-      {working && (
-        <div className="working-badge">
-          <span className="working-sweep" aria-hidden>
-            <i /><i /><i /><i />
-          </span>
-          Processing
+    <div
+      ref={zoomRef}
+      style={{ width: "100%", height: "100%", transformOrigin: "0 0", willChange: "transform" }}
+    >
+      <LcarsFrame title="LCARS 40274">
+        <div key={screen.view} className="panel-wipe">
+          <Panel
+            view={screen.view}
+            props={screen.view === "status" ? { ...screen.props, working } : screen.props}
+          />
         </div>
-      )}
-    </LcarsFrame>
+        <WidgetLayer widgets={widgets} />
+        {working && (
+          <div className="working-badge">
+            <span className="working-sweep" aria-hidden>
+              <i /><i /><i /><i />
+            </span>
+            Processing
+          </div>
+        )}
+      </LcarsFrame>
+    </div>
   );
 }
 
