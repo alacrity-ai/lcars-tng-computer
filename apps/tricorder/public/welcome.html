@@ -107,6 +107,27 @@
   }
   a.key { text-decoration: none; display: inline-flex; align-items: center; }
 
+  /* the voice line: the spoken request that materialized the current screen
+     (greeting slideshow) — floats over the letterboxed wall */
+  #voiceline {
+    position: absolute; left: 50%; bottom: 3.5%; transform: translateX(-50%);
+    display: none; align-items: center; gap: 16px; z-index: 5;
+    max-width: min(88%, 980px); padding: 14px 30px;
+    background: rgba(0, 0, 0, .82); border: 2px solid var(--gold);
+    border-radius: 30px;
+  }
+  body.greet-live #voiceline { display: flex; }
+  #voiceline .dot {
+    flex: none; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--gold); animation: vpulse 1.6s ease-in-out infinite;
+  }
+  #voiceline-text {
+    color: var(--peach); font-size: clamp(18px, 1.8vw, 26px); font-weight: 700;
+    letter-spacing: .05em; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; transition: opacity .25s;
+  }
+  @keyframes vpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
   /* copy toast — same pattern the old page used */
   #toast {
     position: fixed; left: 50%; bottom: 150px; transform: translate(-50%, 16px);
@@ -274,7 +295,7 @@
     #mobile .flow .join { justify-content: center; transform: rotate(90deg); padding: 2px 0; }
   }
   @media (prefers-reduced-motion: reduce) {
-    * { transition: none !important; }
+    * { transition: none !important; animation: none !important; }
   }
 </style>
 </head>
@@ -292,6 +313,7 @@
 <div id="stagebox">
   <!-- src is set by JS only in console mode — phones never pay for the stage -->
   <iframe id="stage" data-src="/vs/?cursor=1" title="TNG Computer wall display"></iframe>
+  <div id="voiceline" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="voiceline-text"></span></div>
 </div>
 
 <noscript>
@@ -500,11 +522,6 @@ function post(msg) {
 function display(view, props) {
   post({ type: "display", view, props, seq: ++seq });
 }
-/* No seq → same-view updates swap in place instead of re-wiping the whole
-   panel. Used for slide ticks inside the greeting. */
-function displayRaw(view, props) {
-  post({ type: "display", view, props });
-}
 let pulseTimer = null;
 /** The processing beat a live wall shows while Claude thinks — then the
     answer lands (display clears the working badge, per the wall's own rule). */
@@ -534,10 +551,13 @@ function bootConsole() {
   if (consoleBooted) return;
   consoleBooted = true;
   stage.src = stage.dataset.src;
-  // Warm the HTTP cache so greeting slides swap without a flash. Deferred a
-  // tick: bootConsole can run before the SLIDES39 const below initializes.
+  // Warm the two image assets the greeting uses. Deferred a tick: bootConsole
+  // can run before the consts below initialize.
   setTimeout(() => {
-    for (const s of SLIDES39) { const im = new Image(); im.src = s.img; }
+    for (const src of ["/welcome-assets/panda.jpg", "/welcome-assets/video.jpg"]) {
+      const im = new Image();
+      im.src = src;
+    }
   }, 0);
   /* The stage's one-shot ready can beat our listener (the head stylesheet
      delays inline scripts), so ping until it answers — the stage re-posts
@@ -555,43 +575,85 @@ CONSOLE_MQ.addEventListener("change", (e) => { if (e.matches) bootConsole(); });
 const GITHUB = "https://github.com/alacrity-ai/lcars-tng-computer";
 const GUIDE = GITHUB + "/blob/main/docs/APPLIANCE.md";
 
-/* The greeting's left card is a slideshow of real panel renders (TNGC-39
-   follow-up): screencaps of the canonical renderer doing real-life work —
-   no LCARS scaffold in the slides, the stage already draws the frame. */
-const SLIDES39 = [
-  { img: "/welcome-assets/slides/timeline.png", cap: "“Computer, show me a timeline of Rome.”" },
-  { img: "/welcome-assets/slides/math.png", cap: "Homework help — rendered as real mathematics." },
-  { img: "/welcome-assets/slides/pandas.jpg", cap: "Any subject, illustrated. Pandas included." },
-  { img: "/welcome-assets/slides/video.jpg", cap: "Video on the wall — Big Buck Bunny © Blender Foundation (CC-BY)." },
-  { img: "/welcome-assets/slides/audio.png", cap: "Music keeps playing while you ask for other things." },
-  { img: "/welcome-assets/slides/lighting.png", cap: "“Movie mode.” Eight bulbs, three zones, one voice." },
-];
-function greetingProps(i) {
-  const s = SLIDES39[i % SLIDES39.length];
-  return {
-    title: "TNG Computer — the ship's computer, for your home",
-    accent: "gold",
-    columns: 2,
-    blocks: [
-      { type: "group", title: "Seen on the wall", accent: "gold", items: [
-        { type: "svg", assetUrl: s.img, caption: s.cap },
-      ]},
-      { type: "group", title: "System status", accent: "blue", items: [
-        { type: "status", label: "The wall", state: "on", detail: "any TV with a browser" },
-        { type: "status", label: "The tricorder", state: "on", detail: "push-to-talk on your phone" },
-        { type: "status", label: "The brain", state: "on", detail: "Claude, fenced in Docker" },
-        { type: "status", label: "This relay", state: "idle", detail: "outbound-only · keeps nothing" },
-        { type: "divider" },
-        { type: "keyvalue", pairs: [
-          { k: "Setup time", v: "About 15 minutes" },
-          { k: "Panel types", v: "24 and counting" },
-          { k: "Subscription", v: "Yours — Claude Pro or Max" },
-          { k: "Beta", v: "Free for invited households" },
-        ]},
-      ]},
+/* The greeting IS the demo: the wall renders each panel LIVE (the canonical
+   components, animations and all), and the voice line above the footer shows
+   the spoken request that materialized it. Only the video slide is a still —
+   protected-path video frames can't be captured, so that one is a composed
+   player lookalike (film frame © Blender Foundation, CC-BY). */
+const GREET_SLIDES = [
+  { req: "Computer, give me a timeline of Rome.", view: "timeline", props: {
+    title: "The Roman Empire",
+    events: [
+      { when: "753 BC", title: "Rome founded", detail: "The legend of Romulus" },
+      { when: "509 BC", title: "The Republic", detail: "Kings out, consuls in" },
+      { when: "49 BC", title: "The Rubicon", detail: "Caesar marches on Rome" },
+      { when: "27 BC", title: "Augustus", detail: "The Empire begins" },
+      { when: "117 AD", title: "Greatest extent", detail: "Trajan, Britain to Babylon" },
+      { when: "476 AD", title: "The fall", detail: "The West's last emperor deposed" },
     ],
-  };
-}
+  }},
+  { req: "Computer, explain why √2 is irrational.", view: "math", props: {
+    title: "Why √2 is irrational",
+    lines: [
+      { latex: "\\text{suppose } \\sqrt{2} = \\tfrac{p}{q} \\text{ in lowest terms}" },
+      { latex: "2q^2 = p^2", note: "square both sides" },
+      { latex: "p = 2k \\;\\Rightarrow\\; 2q^2 = 4k^2", note: "p² is even, so p is even" },
+      { latex: "q^2 = 2k^2", note: "then q is even too" },
+      { latex: "\\text{contradiction} \\; \\blacksquare", note: "p/q was in lowest terms" },
+    ],
+  }},
+  { req: "Computer, tell me about the giant panda.", view: "image", props: {
+    title: "The Giant Panda",
+    url: "/welcome-assets/panda.jpg",
+    body: "Ailuropoda melanoleuca. A bear that gave up hunting: 99% of its diet is bamboo, up to 12 kg a day, eaten sitting upright with a wrist bone repurposed as a thumb. Wild population about 1,900, up 17% in a decade.",
+    source: "Photo: US National Archives — public domain",
+  }},
+  { req: "Computer, play Big Buck Bunny.", view: "image", props: {
+    url: "/welcome-assets/video.jpg",
+  }},
+  { req: "Computer, play some jazz — and the week's weather.", view: "weather", props: {
+    location: "Home",
+    days: [
+      { name: "Today", high: 74, low: 58, conditions: "Clear skies", precip: 5 },
+      { name: "Tomorrow", high: 77, low: 60, conditions: "Sun, light breeze", precip: 10 },
+      { name: "Saturday", high: 71, low: 59, conditions: "Afternoon showers", precip: 60 },
+      { name: "Sunday", high: 68, low: 55, conditions: "Clearing late", precip: 30 },
+      { name: "Monday", high: 72, low: 56, conditions: "Bright and dry", precip: 5 },
+    ],
+  }, widgets: [
+    { id: "np", kind: "nowplaying", title: "Take Five — Dave Brubeck" },
+    { id: "queue", kind: "queue", count: 3, nextTitle: "So What — Miles Davis" },
+  ]},
+  { req: "Computer, show me my lighting dashboard.", view: "composite", props: {
+    title: "LIGHTING", accent: "gold", columns: 3, blocks: [
+      { type: "status", label: "ZIGBEE FABRIC", state: "on", detail: "CHANNEL 15 · 8 FIXTURES" },
+      { type: "status", label: "PAIRING", state: "idle", detail: "CLOSED" },
+      { type: "divider" },
+      { type: "group", title: "LIVING ROOM", accent: "gold", items: [
+        { type: "status", label: "FAN 1", state: "on", detail: "LQI 92" },
+        { type: "gauge", label: "BRIGHTNESS", value: 0.4, text: "40%", accent: "gold" },
+        { type: "swatch", label: "COLOR", color: "#ffb46b", detail: "2700 K" },
+        { type: "status", label: "FAN 2", state: "on", detail: "LQI 88" },
+        { type: "gauge", label: "BRIGHTNESS", value: 0.4, text: "40%", accent: "gold" },
+        { type: "status", label: "FAN 3", state: "on", detail: "LQI 90" },
+        { type: "status", label: "FAN 4", state: "on", detail: "LQI 85" },
+      ]},
+      { type: "group", title: "ARIELS STUDIO", accent: "gold", items: [
+        { type: "status", label: "DOME 1", state: "on", detail: "LQI 79" },
+        { type: "gauge", label: "BRIGHTNESS", value: 0.8, text: "80%", accent: "gold" },
+        { type: "swatch", label: "COLOR", color: "#cba8ff", detail: "LAVENDER" },
+        { type: "status", label: "DOME 2", state: "on", detail: "LQI 81" },
+      ]},
+      { type: "group", title: "OFFICE", accent: "gold", items: [
+        { type: "status", label: "DOME 1", state: "on", detail: "LQI 95" },
+        { type: "gauge", label: "BRIGHTNESS", value: 0.65, text: "65%", accent: "gold" },
+        { type: "swatch", label: "COLOR", color: "#fff3e0", detail: "4000 K" },
+        { type: "status", label: "LAMP", state: "off" },
+      ]},
+      { type: "text", role: "caption", body: "SCENES — EVENING · MOVIE · ALL OFF · RED ALERT · PARTY" },
+    ],
+  }},
+];
 
 const PARTS = ["composite", {
   title: "Three parts, one Computer",
@@ -745,9 +807,22 @@ let reelPaused = reduceMotion;
 let greetIndex = 0;
 let greetTimer = null;
 
-function showGreeting(pulse) {
-  const props = greetingProps(greetIndex);
-  if (pulse) answer("composite", props); else displayRaw("composite", props);
+const voicelineText = document.getElementById("voiceline-text");
+function setVoiceline(req) {
+  voicelineText.style.opacity = "0";
+  setTimeout(() => {
+    voicelineText.textContent = "“" + req + "”";
+    voicelineText.style.opacity = "1";
+  }, 250);
+}
+/* Each slide replays the product's rhythm: the request appears on the voice
+   line, the working sweep runs, then the panel wipes in — LIVE, through the
+   canonical renderer. */
+function showGreeting() {
+  const s = GREET_SLIDES[greetIndex];
+  setVoiceline(s.req);
+  post({ type: "widgets", widgets: s.widgets ?? [] });
+  answer(s.view, s.props);
   armGreet();
 }
 function armGreet() {
@@ -755,18 +830,18 @@ function armGreet() {
   greetTimer = null;
   if (!reduceMotion && current === "greeting") {
     greetTimer = setTimeout(() => {
-      greetIndex = (greetIndex + 1) % SLIDES39.length;
-      showGreeting(false);
-    }, 6000);
+      greetIndex = (greetIndex + 1) % GREET_SLIDES.length;
+      showGreeting();
+    }, 7000);
   }
 }
 function stepGreet(d) {
-  greetIndex = (greetIndex + d + SLIDES39.length) % SLIDES39.length;
-  showGreeting(false);
+  greetIndex = (greetIndex + d + GREET_SLIDES.length) % GREET_SLIDES.length;
+  showGreeting();
 }
 
 const SECTIONS = {
-  greeting: { label: "Greeting", show: () => { greetIndex = 0; showGreeting(true); },
+  greeting: { label: "Greeting", show: () => { greetIndex = 0; showGreeting(); },
     ctx: () => [
       key("◀", () => stepGreet(-1)),
       key("▶", () => stepGreet(1)),
@@ -871,6 +946,9 @@ function renderCtx() {
 function go(id) {
   if (reelTimer) { clearTimeout(reelTimer); reelTimer = null; }
   if (greetTimer) { clearTimeout(greetTimer); greetTimer = null; }
+  // leaving the greeting: drop its voice line and any demo widgets
+  if (current === "greeting" && id !== "greeting") post({ type: "widgets", widgets: [] });
+  document.body.classList.toggle("greet-live", id === "greeting");
   current = id;
   for (const b of navBank.children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   SECTIONS[id].show();
