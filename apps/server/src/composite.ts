@@ -68,6 +68,14 @@ export function validateComposite(props: Record<string, unknown>): string | null
           if ((block.points as number[]).length > 200) return "sparkline.points: max 200 points";
           break;
         }
+        case "swatch": {
+          // The color lands in an inline style on the wall — hex only, so a
+          // hostile value can never smuggle CSS past the renderer.
+          if (typeof block.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(block.color)) {
+            return 'swatch.color must be "#rrggbb"';
+          }
+          break;
+        }
         case "svg": {
           const url = block.assetUrl;
           // Same-origin PATH only: no scheme, no protocol-relative, no

@@ -142,6 +142,17 @@ function Block({ block }: { block: CompositeBlock }) {
           <Sparkline points={block.points} color={accent(block.accent, "var(--blue)")} />
         </div>
       );
+    case "swatch": {
+      // Validator guarantees #rrggbb; re-check anyway before it hits a style.
+      const chip = /^#[0-9a-fA-F]{6}$/.test(block.color) ? block.color : "#000000";
+      return (
+        <div className="cp-swatch">
+          <span className="cp-label">{block.label}</span>
+          <span className="cp-swatch-chip" style={{ background: chip }} />
+          {block.detail && <span className="cp-swatch-detail">{block.detail}</span>}
+        </div>
+      );
+    }
     case "svg":
       return (
         <figure className="cp-svg">

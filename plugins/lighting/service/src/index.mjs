@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import mqtt from "mqtt";
 import { composePanel, PANEL_TITLE } from "./panel.mjs";
 import { buildCommand, knownNames, miredsToKelvin, normalize, resolveTargets, SCENES } from "./control.mjs";
+import { currentColor } from "./color.mjs";
 
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://mosquitto:1883";
 const STACK_URL = process.env.STACK_URL ?? "http://stack:3789";
@@ -37,8 +38,25 @@ const client = mqtt.connect(MQTT_URL, { reconnectPeriod: 2000 });
 client.on("connect", () => {
   mqttConnected = true;
   client.subscribe(`${BASE}/#`);
+  probed.clear(); // broker may have restarted — cached states can be stale
+  probeStates();
   log(`mqtt connected: ${MQTT_URL}`);
 });
+
+// Z2M does NOT retain device state topics, so a fresh service (or broker)
+// start knows the roster (bridge/devices is retained) but not who's lit.
+// Ask each unknown device once — Z2M answers on its state topic and the
+// cache warms itself.
+const probed = new Set();
+function probeStates() {
+  if (!mqttConnected) return;
+  for (const d of cache.devices) {
+    const name = d.friendly_name;
+    if (!name || cache.states.has(name) || probed.has(name)) continue;
+    probed.add(name);
+    client.publish(`${BASE}/${name}/get`, JSON.stringify({ state: "" }));
+  }
+}
 client.on("close", () => {
   mqttConnected = false;
 });
@@ -67,6 +85,7 @@ client.on("message", (topic, buf) => {
   if (sub === "bridge/devices") {
     const list = json();
     if (Array.isArray(list)) cache.devices = list.filter((d) => d.type !== "Coordinator");
+    probeStates();
     scheduleRefresh();
     return;
   }
@@ -162,6 +181,9 @@ function stateSummary() {
         brightnessPct: typeof s.brightness === "number" ? Math.round((s.brightness / 254) * 100) : null,
         colorTempK: typeof s.color_temp === "number" ? miredsToKelvin(s.color_temp) : null,
         colorMode: s.color_mode ?? null,
+        // {hex, label} — label is the human name for it ("4000K", "#FF0000")
+        color: currentColor(s),
+        linkQuality: typeof s.linkquality === "number" ? s.linkquality : null,
       };
     }),
     groups: cache.groups.map((g) => ({

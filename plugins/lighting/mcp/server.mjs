@@ -71,7 +71,7 @@ function formatStatus(s) {
       const state = !d.available
         ? "UNREACHABLE"
         : d.on
-          ? `ON — ${d.brightnessPct ?? 100}%${d.colorTempK ? ` at ${d.colorTempK}K` : ""}${d.colorMode === "xy" || d.colorMode === "hs" ? " (color)" : ""}`
+          ? `ON — ${d.brightnessPct ?? 100}%${d.color ? `, ${d.color.label}` : ""}`
           : "off";
       lines.push(`- ${d.name}: ${state}`);
     }

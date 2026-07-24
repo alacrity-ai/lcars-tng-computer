@@ -116,6 +116,7 @@ server.registerTool(
       "[blocks]}, readout {label, value, unit?}, status {label, state: on|off|warn|alert|idle, " +
       "detail?}, gauge {label, value: 0..1, text?}, text {body, role?}, list {items: [{label, " +
       "detail?}]}, keyvalue {pairs: [{k, v}]}, sparkline {label, points: [numbers], unit?}, " +
+      "swatch {label, color: \"#rrggbb\", detail?} — a rendered color chip, " +
       "divider. Accents: gold|peach|lav|blue|red. Max 64 blocks, nesting ≤3 — load the " +
       "composite skill for guidance. " +
       "Props are view-specific.",

@@ -31,7 +31,9 @@ Blocks: `group` (titled section, nests once or twice — max depth 3),
 `readout` (label + big value), `status` (on|off|warn|alert|idle chip),
 `gauge` (0..1 bar, optional overlay text), `text` (body|caption),
 `list` ({label, detail?} rows), `keyvalue` (pairs table),
-`sparkline` (numeric trend, ≤200 points), `divider`.
+`sparkline` (numeric trend, ≤200 points), `swatch` (a rendered color chip —
+`{label, color: "#rrggbb", detail?}` — for showing an actual color, not
+naming one), `divider`.
 Accents: gold, peach, lav, blue, red.
 
 ## Judgment

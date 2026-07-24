@@ -571,6 +571,15 @@ export interface CompositeSparklineBlock {
   unit?: string;
   accent?: CompositeAccent;
 }
+export interface CompositeSwatchBlock {
+  type: "swatch";
+  label: string;
+  /** The shown color — "#rrggbb" only, enforced server-side. */
+  color: string;
+  /** Text beside the chip ("#FF0000", "4000K"). */
+  detail?: string;
+  accent?: CompositeAccent;
+}
 export interface CompositeSvgBlock {
   type: "svg";
   /** Same-origin path only ("/api/plugin/..."), enforced server-side. */
@@ -590,6 +599,7 @@ export type CompositeBlock =
   | CompositeListBlock
   | CompositeKeyValueBlock
   | CompositeSparklineBlock
+  | CompositeSwatchBlock
   | CompositeSvgBlock
   | CompositeDividerBlock;
 
