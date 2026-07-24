@@ -371,6 +371,37 @@
     body.vs-on #vs-exit-fab { display: flex; }
   }
 
+  /* Native landscape layout for the MAIN screen (TNGC-37 follow-up): a real
+     two-pane cockpit — controls on the left, the talk instrument on the
+     right — instead of stretched portrait. Nothing scrolls. Portrait and
+     every other view are untouched (`on-main` is set by show()). */
+  @media (orientation: landscape) {
+    body.on-main:not(.vs-on) #app { max-width: none; height: 100dvh; overflow: hidden; padding: 8px 18px 10px; }
+    body.on-main:not(.vs-on) .lcars-bar { height: 30px; margin-bottom: 10px; }
+    body.on-main:not(.vs-on) .lcars-title { font-size: 15px; }
+    body.on-main:not(.vs-on) .main-body {
+      display: grid;
+      grid-template-columns: minmax(0, 10fr) minmax(0, 9fr);
+      grid-template-rows: auto auto auto 1fr auto auto;
+      column-gap: 26px;
+      min-height: 0;
+    }
+    body.on-main:not(.vs-on) .strip { grid-column: 1; grid-row: 1; margin-bottom: 6px; }
+    body.on-main:not(.vs-on) .toggle-row { grid-column: 1; grid-row: 2; margin-top: 6px; }
+    body.on-main:not(.vs-on) .main-body > label { grid-column: 1; grid-row: 3; margin-top: 8px; }
+    body.on-main:not(.vs-on) .typerow { grid-column: 1; grid-row: 4; align-self: start; }
+    body.on-main:not(.vs-on) .action-row { grid-column: 1; grid-row: 5; display: flex; gap: 10px; align-self: end; }
+    body.on-main:not(.vs-on) .action-row .btn { margin-top: 0; padding: 10px; font-size: 15px; }
+    body.on-main:not(.vs-on) .foot { grid-column: 1; grid-row: 6; margin-top: 10px; }
+    body.on-main:not(.vs-on) .ptt-wrap { grid-column: 2; grid-row: 1 / -1; min-height: 0; }
+    /* the instrument shrinks to fit the short axis */
+    body.on-main:not(.vs-on) .ptt-holder { width: 148px; height: 148px; }
+    body.on-main:not(.vs-on) #ptt { width: 148px; height: 148px; font-size: 15px; border-width: 5px; }
+    body.on-main:not(.vs-on) .ring, body.on-main:not(.vs-on) .pulse { inset: -12px; }
+    body.on-main:not(.vs-on) #ptt-cancel { top: -18px; right: -40px; width: 52px; height: 52px; font-size: 22px; }
+    body.on-main:not(.vs-on) #live { min-height: 36px; margin-top: 12px; font-size: 15px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
@@ -596,6 +627,8 @@ let me = null; // {user:{handle,name,role}, deviceLabel}
 function show(view) {
   for (const v of document.querySelectorAll(".view")) v.classList.remove("active");
   $("view-" + view).classList.add("active");
+  // The landscape cockpit layout applies only to the main screen (TNGC-37).
+  document.body.classList.toggle("on-main", view === "main");
 }
 
 async function api(path, opts = {}) {
