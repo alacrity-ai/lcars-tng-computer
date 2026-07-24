@@ -717,9 +717,11 @@ let lastOnline = false;
 function renderWallPill() {
   const pill = $("pill");
   if (!lastOnline) { pill.textContent = "Computer offline"; return; }
+  // Viewscreen mode always targets THIS tricorder — no selection to show.
+  if (vsOn) { pill.textContent = "▸ this tricorder"; return; }
   const w = getWall();
   if (!w) { pill.textContent = "▸ primary wall"; return; }
-  const live = displays.some((d) => d.name === w) || (vsOn && w === "tricorder-" + me.user.handle);
+  const live = displays.some((d) => d.name === w);
   pill.textContent = "▸ " + w + (live ? "" : " (offline)");
 }
 function openWallSheet() {
@@ -734,7 +736,6 @@ function openWallSheet() {
   };
   mk("Auto — primary wall", "", "lav");
   const names = displays.map((d) => d.name);
-  if (vsOn && !names.includes("tricorder-" + me.user.handle)) names.push("tricorder-" + me.user.handle);
   for (const n of names) mk(n + (displays.find((d) => d.name === n && d.primary) ? " ◆" : ""), n);
   if (!names.length) {
     const d = document.createElement("div");
@@ -746,7 +747,12 @@ function openWallSheet() {
 }
 $("btn-wallsheet-close").onclick = () => { $("wallsheet").style.display = "none"; };
 $("pill").style.cursor = "pointer";
-$("pill").onclick = () => { if (me && lastOnline) openWallSheet(); };
+$("pill").onclick = () => {
+  if (!me || !lastOnline) return;
+  // Target selection is locked while in Viewscreen mode — it IS the target.
+  if (vsOn) { toast("Viewscreen mode targets this tricorder"); return; }
+  openWallSheet();
+};
 
 // ---- main -------------------------------------------------------------------
 function enterMain(identity) {
@@ -757,6 +763,11 @@ function enterMain(identity) {
   $("btn-library").hidden = identity.user.role === "guest";
   // …and no personal viewscreen either
   $("btn-viewscreen").hidden = identity.user.role === "guest";
+  // Heal a stale selection: the app killed mid-Viewscreen-mode leaves the
+  // tricorder targeted in normal mode — restore the remembered room wall.
+  if (!vsOn && getWall() === "tricorder-" + identity.user.handle) {
+    setWall(localStorage.getItem("tricorder.wallPrev." + identity.user.handle) || "");
+  }
   renderWallPill();
   show("main");
   startPolling();
@@ -846,7 +857,8 @@ async function send(text) {
   if (!text) return;
   chirp(sndSend);
   try {
-    const wall = getWall();
+    // Viewscreen mode is target-locked to this tricorder, whatever storage says.
+    const wall = vsOn && me ? "tricorder-" + me.user.handle : getWall();
     const r = await api("/api/message", {
       method: "POST",
       body: JSON.stringify({ transcript: text, ...(wall ? { wall } : {}) }),
@@ -1078,8 +1090,14 @@ function enterViewscreen() {
   document.body.classList.add("vs-on");
   $("btn-viewscreen").innerHTML = VS_EXIT_SVG;
   $("btn-viewscreen").setAttribute("aria-label", "Exit viewscreen mode");
-  localStorage.setItem("tricorder.wallPrev." + me.user.handle, getWall());
-  setWall("tricorder-" + me.user.handle);
+  // Remember the ROOM selection to restore on exit. Never remember the
+  // tricorder itself (a kill mid-mode leaves it selected; saving it here
+  // would make the restore circular and strand the target on the phone).
+  const own = "tricorder-" + me.user.handle;
+  if (getWall() !== own) {
+    localStorage.setItem("tricorder.wallPrev." + me.user.handle, getWall());
+  }
+  setWall(own);
   vsConnect();
 }
 
@@ -1660,10 +1678,7 @@ function openLibItem(it) {
 }
 
 function resetLiButtons() {
-  $("li-display").textContent =
-    (vsOn && me && getWall() === "tricorder-" + me.user.handle)
-      ? "Display on my viewscreen"
-      : "Display on wall";
+  $("li-display").textContent = vsOn ? "Display on my viewscreen" : "Display on wall";
   $("li-send").textContent = "Send";
   $("li-display").disabled = $("li-send").disabled = $("li-delete").disabled = false;
 }
@@ -1794,8 +1809,8 @@ $("li-display").onclick = async () => {
   const b = $("li-display");
   b.disabled = true;
   try {
-    const wall = getWall();
-    const mine = vsOn && me && wall === "tricorder-" + me.user.handle;
+    const wall = vsOn && me ? "tricorder-" + me.user.handle : getWall();
+    const mine = vsOn;
     const r = await api("/api/library/" + libItem.id + "/display", {
       method: "POST",
       body: JSON.stringify(wall ? { wall } : {}),
