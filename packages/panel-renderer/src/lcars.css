@@ -347,14 +347,17 @@ body {
   gap: calc(20px * var(--text-fit, 1));
   width: 100%;
   padding-right: 24px;
-  overflow: hidden;
+  overflow-y: auto;
+  /* The scroll state must never change the content width: a classic
+     scrollbar appearing re-wraps the text, re-fires the fit observer, and
+     the panel strobes between two layouts (the TextPanel flicker bug). */
+  scrollbar-gutter: stable;
 }
 /* Invariant: content is never cropped. TextPanel sets --text-fit to shrink
-   type until it fits; if even MIN_FIT overflows, this class top-aligns and
-   scrolls — centered overflow would push both ends past reach. */
+   type until it fits; if even MIN_FIT overflows, this class top-aligns so
+   the scroll can reach both ends — centered overflow pushes them past reach. */
 .text-panel-scroll {
   justify-content: flex-start;
-  overflow-y: auto;
 }
 .text-panel-title {
   font-size: calc(clamp(30px, 4vw, 56px) * var(--text-fit, 1));
