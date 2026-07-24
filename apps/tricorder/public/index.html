@@ -809,7 +809,12 @@ function openWallSheet() {
     wrap.appendChild(b);
   };
   mk("Auto — primary wall", "", "lav");
-  const names = displays.map((d) => d.name);
+  // Your own tricorder is never a manual target — Viewscreen mode IS that
+  // target (and picking it here would strand the selection). It also lingers
+  // in the roster ~10s after exiting vs mode (bridge poll cadence), which is
+  // exactly when this sheet would otherwise offer it.
+  const own = me ? "tricorder-" + me.user.handle : null;
+  const names = displays.map((d) => d.name).filter((n) => n !== own);
   for (const n of names) mk(n + (displays.find((d) => d.name === n && d.primary) ? " ◆" : ""), n);
   if (!names.length) {
     const d = document.createElement("div");
