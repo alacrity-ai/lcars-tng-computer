@@ -214,7 +214,16 @@ function readJson(req) {
 }
 
 function publishTo(targets, payload) {
-  for (const t of targets.topics) client.publish(`${BASE}/${t}/set`, JSON.stringify(payload));
+  // An active colorloop OVERRIDES color commands on these bulbs — Z2M would
+  // optimistically report the new color while the loop keeps spinning. So
+  // any command with explicit color intent kills a loop first (deactivate
+  // is a no-op when none is running). Brightness-only changes deliberately
+  // don't — "dim the party" should keep partying.
+  const colorIntent = (payload.color || payload.color_temp !== undefined) && !payload.effect;
+  for (const t of targets.topics) {
+    if (colorIntent) client.publish(`${BASE}/${t}/set`, JSON.stringify({ effect: "stop_colorloop" }));
+    client.publish(`${BASE}/${t}/set`, JSON.stringify(payload));
+  }
 }
 
 const server = createServer(async (req, res) => {

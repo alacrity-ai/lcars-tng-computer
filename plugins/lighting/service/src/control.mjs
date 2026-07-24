@@ -9,7 +9,7 @@
 export const SCENES = {
   evening: { state: "on", brightness: 40, colorTemp: 2700, transition: 2 },
   movie: { state: "on", brightness: 12, colorTemp: 2700, transition: 3 },
-  "all-off": { state: "off", transition: 2 },
+  "all-off": { state: "off", effect: "stop_colorloop", transition: 2 },
   "red-alert": { state: "on", brightness: 100, color: "red", transition: 0.5 },
   party: { state: "on", brightness: 80, effect: "colorloop", transition: 1 },
 };
