@@ -386,8 +386,11 @@
          ring and pulse animations — no overlap at any state */
       top: auto; left: auto; bottom: 104px; right: 13px;
       width: 50px; height: 50px; font-size: 22px;
-      transform: translate(0, 40px) scale(.4);
     }
+    /* the slide-in start pose ONLY while hidden — this selector must not
+       outweigh .show (which pops it to full size) like the combined rule
+       above accidentally did */
+    body.vs-on #ptt-cancel:not(.show) { transform: translate(0, 40px) scale(.4); }
     body.vs-on #toast { position: fixed; left: 14px; bottom: 14px; right: auto; z-index: 6; margin: 0; text-align: left; }
   }
 
