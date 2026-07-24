@@ -500,6 +500,11 @@ function post(msg) {
 function display(view, props) {
   post({ type: "display", view, props, seq: ++seq });
 }
+/* No seq → same-view updates swap in place instead of re-wiping the whole
+   panel. Used for slide ticks inside the greeting. */
+function displayRaw(view, props) {
+  post({ type: "display", view, props });
+}
 let pulseTimer = null;
 /** The processing beat a live wall shows while Claude thinks — then the
     answer lands (display clears the working badge, per the wall's own rule). */
@@ -529,6 +534,11 @@ function bootConsole() {
   if (consoleBooted) return;
   consoleBooted = true;
   stage.src = stage.dataset.src;
+  // Warm the HTTP cache so greeting slides swap without a flash. Deferred a
+  // tick: bootConsole can run before the SLIDES39 const below initializes.
+  setTimeout(() => {
+    for (const s of SLIDES39) { const im = new Image(); im.src = s.img; }
+  }, 0);
   /* The stage's one-shot ready can beat our listener (the head stylesheet
      delays inline scripts), so ping until it answers — the stage re-posts
      ready on every hello. */
@@ -545,31 +555,43 @@ CONSOLE_MQ.addEventListener("change", (e) => { if (e.matches) bootConsole(); });
 const GITHUB = "https://github.com/alacrity-ai/lcars-tng-computer";
 const GUIDE = GITHUB + "/blob/main/docs/APPLIANCE.md";
 
-const GREETING = ["composite", {
-  title: "TNG Computer — the ship's computer, for your home",
-  accent: "gold",
-  columns: 2,
-  blocks: [
-    { type: "group", title: "What this is", accent: "gold", items: [
-      { type: "text", body: "Hold a button on your phone and talk. A calm voice answers from the wall — an LCARS display on your TV that shows charts, diagrams, recipes, maps, the night sky, whatever the conversation needs." },
-      { type: "text", body: "The brain is Claude, running on your own hardware under your own subscription. This site is only the relay that connects your phones to your house — and the tricorder they carry." },
-      { type: "text", role: "caption", body: "Everything on this page is rendered by the Computer's own wall software. This is not a mockup." },
-    ]},
-    { type: "group", title: "System status", accent: "blue", items: [
-      { type: "status", label: "The wall", state: "on", detail: "any TV with a browser" },
-      { type: "status", label: "The tricorder", state: "on", detail: "push-to-talk on your phone" },
-      { type: "status", label: "The brain", state: "on", detail: "Claude, fenced in Docker" },
-      { type: "status", label: "This relay", state: "idle", detail: "outbound-only · keeps nothing" },
-      { type: "divider" },
-      { type: "keyvalue", pairs: [
-        { k: "Setup time", v: "About 15 minutes" },
-        { k: "Panel types", v: "24 and counting" },
-        { k: "Subscription", v: "Yours — Claude Pro or Max" },
-        { k: "Beta", v: "Free for invited households" },
+/* The greeting's left card is a slideshow of real panel renders (TNGC-39
+   follow-up): screencaps of the canonical renderer doing real-life work —
+   no LCARS scaffold in the slides, the stage already draws the frame. */
+const SLIDES39 = [
+  { img: "/welcome-assets/slides/timeline.png", cap: "“Computer, show me a timeline of Rome.”" },
+  { img: "/welcome-assets/slides/math.png", cap: "Homework help — rendered as real mathematics." },
+  { img: "/welcome-assets/slides/pandas.jpg", cap: "Any subject, illustrated. Pandas included." },
+  { img: "/welcome-assets/slides/video.jpg", cap: "Video on the wall — Big Buck Bunny © Blender Foundation (CC-BY)." },
+  { img: "/welcome-assets/slides/audio.png", cap: "Music keeps playing while you ask for other things." },
+  { img: "/welcome-assets/slides/lighting.png", cap: "“Movie mode.” Eight bulbs, three zones, one voice." },
+];
+function greetingProps(i) {
+  const s = SLIDES39[i % SLIDES39.length];
+  return {
+    title: "TNG Computer — the ship's computer, for your home",
+    accent: "gold",
+    columns: 2,
+    blocks: [
+      { type: "group", title: "Seen on the wall", accent: "gold", items: [
+        { type: "svg", assetUrl: s.img, caption: s.cap },
       ]},
-    ]},
-  ],
-}];
+      { type: "group", title: "System status", accent: "blue", items: [
+        { type: "status", label: "The wall", state: "on", detail: "any TV with a browser" },
+        { type: "status", label: "The tricorder", state: "on", detail: "push-to-talk on your phone" },
+        { type: "status", label: "The brain", state: "on", detail: "Claude, fenced in Docker" },
+        { type: "status", label: "This relay", state: "idle", detail: "outbound-only · keeps nothing" },
+        { type: "divider" },
+        { type: "keyvalue", pairs: [
+          { k: "Setup time", v: "About 15 minutes" },
+          { k: "Panel types", v: "24 and counting" },
+          { k: "Subscription", v: "Yours — Claude Pro or Max" },
+          { k: "Beta", v: "Free for invited households" },
+        ]},
+      ]},
+    ],
+  };
+}
 
 const PARTS = ["composite", {
   title: "Three parts, one Computer",
@@ -720,10 +742,36 @@ let installStep = 0;
 let reelIndex = 0;
 let reelTimer = null;
 let reelPaused = reduceMotion;
+let greetIndex = 0;
+let greetTimer = null;
+
+function showGreeting(pulse) {
+  const props = greetingProps(greetIndex);
+  if (pulse) answer("composite", props); else displayRaw("composite", props);
+  armGreet();
+}
+function armGreet() {
+  if (greetTimer) clearTimeout(greetTimer);
+  greetTimer = null;
+  if (!reduceMotion && current === "greeting") {
+    greetTimer = setTimeout(() => {
+      greetIndex = (greetIndex + 1) % SLIDES39.length;
+      showGreeting(false);
+    }, 6000);
+  }
+}
+function stepGreet(d) {
+  greetIndex = (greetIndex + d + SLIDES39.length) % SLIDES39.length;
+  showGreeting(false);
+}
 
 const SECTIONS = {
-  greeting: { label: "Greeting", show: () => answer(...GREETING),
-    ctx: () => [nextKey("parts")] },
+  greeting: { label: "Greeting", show: () => { greetIndex = 0; showGreeting(true); },
+    ctx: () => [
+      key("◀", () => stepGreet(-1)),
+      key("▶", () => stepGreet(1)),
+      nextKey("parts"),
+    ]},
   parts: { label: "Three parts", show: () => answer(...PARTS),
     ctx: () => [nextKey("connects")] },
   connects: { label: "How it connects", show: () => answer(...CONNECTS),
@@ -822,6 +870,7 @@ function renderCtx() {
 
 function go(id) {
   if (reelTimer) { clearTimeout(reelTimer); reelTimer = null; }
+  if (greetTimer) { clearTimeout(greetTimer); greetTimer = null; }
   current = id;
   for (const b of navBank.children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   SECTIONS[id].show();
@@ -846,6 +895,7 @@ document.addEventListener("keydown", (e) => {
   const d = e.key === "ArrowLeft" ? -1 : 1;
   if (current === "install") { stepInstall(d); e.preventDefault(); }
   else if (current === "reel") { stepReel(d); e.preventDefault(); }
+  else if (current === "greeting") { stepGreet(d); e.preventDefault(); }
 });
 
 /* ---- toast + clipboard (carried over) -------------------------------------- */
