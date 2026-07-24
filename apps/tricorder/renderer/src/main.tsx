@@ -10,10 +10,11 @@ import "@tng/panel-renderer/lcars.css";
  * The viewscreen stage (TNGC-37): the wall renderer, hosted for a phone.
  *
  * The PWA iframes this page in Viewscreen mode and forwards ServerMessages
- * verbatim as `{type:"tng-frame", msg}` postMessages. Rendering runs on a
- * fixed 1280×720 stage scaled to fit the iframe — literally the wall's
- * pixels, shrunk — so panel parity needs no responsive rework and can never
- * drift from the TV.
+ * verbatim as `{type:"tng-frame", msg}` postMessages. The PWA sizes the
+ * iframe ELEMENT at exactly 1280×720 and scales it with a CSS transform, so
+ * this document's viewport IS a wall's: lcars.css's vh/vw sizing (the frame
+ * itself is height:100vh) resolves identically to the TV, and parity needs
+ * no scaling logic in here at all.
  *
  * Deliberately NOT handled here (the PWA keeps these phone-native): youtube
  * playback (IFrame API events must ride the screen socket to advance the
@@ -21,29 +22,9 @@ import "@tng/panel-renderer/lcars.css";
  * though the working badge also renders on-stage for wall parity.
  */
 
-const STAGE_W = 1280;
-const STAGE_H = 720;
-
 interface ScreenState {
   view: PanelView;
   props: PanelProps;
-}
-
-function useStageScale(): number {
-  const [scale, setScale] = useState(() =>
-    Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H),
-  );
-  useEffect(() => {
-    const recompute = () =>
-      setScale(Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H));
-    window.addEventListener("resize", recompute);
-    window.addEventListener("orientationchange", recompute);
-    return () => {
-      window.removeEventListener("resize", recompute);
-      window.removeEventListener("orientationchange", recompute);
-    };
-  }, []);
-  return scale;
 }
 
 function Stage() {
@@ -51,7 +32,6 @@ function Stage() {
   const [widgets, setWidgets] = useState<Widget[]>([]);
   const [working, setWorking] = useState(false);
   const workingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scale = useStageScale();
 
   useEffect(() => {
     const clearWorking = () => {
@@ -132,34 +112,23 @@ function Stage() {
   }, []);
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        width: STAGE_W,
-        height: STAGE_H,
-        transform: `translate(-50%, -50%) scale(${scale})`,
-      }}
-    >
-      <LcarsFrame title="LCARS 40274">
-        <div key={screen.view} className="panel-wipe">
-          <Panel
-            view={screen.view}
-            props={screen.view === "status" ? { ...screen.props, working } : screen.props}
-          />
+    <LcarsFrame title="LCARS 40274">
+      <div key={screen.view} className="panel-wipe">
+        <Panel
+          view={screen.view}
+          props={screen.view === "status" ? { ...screen.props, working } : screen.props}
+        />
+      </div>
+      <WidgetLayer widgets={widgets} />
+      {working && (
+        <div className="working-badge">
+          <span className="working-sweep" aria-hidden>
+            <i /><i /><i /><i />
+          </span>
+          Processing
         </div>
-        <WidgetLayer widgets={widgets} />
-        {working && (
-          <div className="working-badge">
-            <span className="working-sweep" aria-hidden>
-              <i /><i /><i /><i />
-            </span>
-            Processing
-          </div>
-        )}
-      </LcarsFrame>
-    </div>
+      )}
+    </LcarsFrame>
   );
 }
 

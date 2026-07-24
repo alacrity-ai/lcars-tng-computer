@@ -329,10 +329,17 @@
     color: var(--ink); background: #555; text-transform: uppercase; }
   .vs-head .vs-chip.on { background: var(--gold); }
   /* TNGC-37: the render area hosts the wall-parity stage iframe (mounted for
-     the whole vs session) with the native youtube layer shown above it. */
-  #vs-render { flex: 1; overflow-y: auto; padding: 0; position: relative; }
-  #vs-stage { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: #000; }
-  #vs-native { display: none; position: relative; z-index: 1; background: #050505; min-height: 100%; padding: 10px 12px; }
+     the whole vs session) with the native youtube layer shown above it.
+     The iframe is a REAL wall viewport — exactly 1280×720 CSS px, so the
+     renderer's vh/vw sizing (.lcars-frame is 100vh) resolves like the TV's —
+     scaled to fit as an element (transform set by vsLayoutStage). */
+  #vs-render { flex: 1; overflow: hidden; padding: 0; position: relative; }
+  #vs-stage {
+    position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px;
+    border: 0; display: block; background: #000;
+    transform: translate(-50%, -50%) scale(.2); transform-origin: center center;
+  }
+  #vs-native { display: none; position: absolute; inset: 0; z-index: 1; background: #050505; overflow-y: auto; padding: 10px 12px; }
   #vs-render.native #vs-native { display: block; }
   #vs-render.native #vs-stage { visibility: hidden; }
   #vs-caption {
@@ -1145,7 +1152,20 @@ function vsEnsureStage() {
   f.title = "Viewscreen";
   $("vs-render").appendChild(f);
   vsStageFrame = f;
+  vsStageResize.observe($("vs-render"));
+  vsLayoutStage();
 }
+
+/** Fit the fixed 1280×720 wall viewport into whatever box vs-render has
+    right now (portrait mini wall or landscape full screen). */
+function vsLayoutStage() {
+  if (!vsStageFrame) return;
+  const r = $("vs-render").getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const s = Math.min(r.width / 1280, r.height / 720);
+  vsStageFrame.style.transform = "translate(-50%, -50%) scale(" + s + ")";
+}
+const vsStageResize = new ResizeObserver(vsLayoutStage);
 
 function vsDestroyStage() {
   const f = vsStageFrame;
