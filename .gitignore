@@ -43,3 +43,5 @@ voice/training/*
 
 # generated at boot by docker/plugin-merge.sh from .mcp.base.json + enabled plugins
 claude/.mcp.json
+# loader-generated plugin skills (plugin-merge.sh syncs these every boot)
+claude/.claude/skills/plugin-*/
