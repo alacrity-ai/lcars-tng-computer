@@ -364,11 +364,29 @@
   @media (orientation: landscape) {
     body.vs-on { padding: 0; }
     body.vs-on #app { max-width: none; padding: 0; }
-    body.vs-on .lcars-bar, body.vs-on .main-cols { display: none; }
+    body.vs-on .lcars-bar { display: none; }
     body.vs-on #vs-top { height: 100dvh; margin: 0; }
     body.vs-on .vs-frame { border: 0; border-radius: 0; }
     body.vs-on .vs-head { display: none; }
     body.vs-on #vs-exit-fab { display: flex; }
+    /* Hold-to-talk floats over the stage, bottom-right (TNGC-37 follow-up):
+       the REAL instrument — same element, same send/cancel state machine —
+       just compact. No room for the transcript preview here (the button's
+       own SEND state is the feedback); the ✕ rises directly ABOVE the
+       button — the usual diagonal top-right doesn't fit in this lane. */
+    body.vs-on .main-cols, body.vs-on .main-body { display: contents; }
+    body.vs-on .strip, body.vs-on .main-body > label, body.vs-on .typerow,
+    body.vs-on .action-row, body.vs-on #live { display: none; }
+    body.vs-on .ptt-wrap { position: fixed; right: 14px; bottom: 14px; z-index: 6; display: block; flex: none; min-height: 0; }
+    body.vs-on .ptt-holder { width: 76px; height: 76px; }
+    body.vs-on #ptt { width: 76px; height: 76px; font-size: 10px; border-width: 3px; }
+    body.vs-on .ring, body.vs-on .pulse { inset: -7px; }
+    body.vs-on #ptt-cancel {
+      top: auto; left: auto; bottom: 88px; right: 16px;
+      width: 44px; height: 44px; font-size: 18px;
+      transform: translate(0, 40px) scale(.4);
+    }
+    body.vs-on #toast { position: fixed; left: 14px; bottom: 14px; right: auto; z-index: 6; margin: 0; text-align: left; }
   }
 
   /* Native landscape layout for the MAIN screen (TNGC-37 follow-up): a real
