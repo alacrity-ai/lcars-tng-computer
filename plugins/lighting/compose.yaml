@@ -14,6 +14,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
     init: true
+    restart: unless-stopped
     # The stock image only listens on loopback without a config file; write
     # the minimal one at boot. Anonymous is fine: the broker is reachable
     # only on the compose network.
@@ -31,6 +32,7 @@ services:
   zigbee2mqtt:
     image: koenkk/zigbee2mqtt:2.12.1
     init: true
+    restart: unless-stopped
     depends_on: [mosquitto]
     # First boot seeds the config; after that Z2M owns the file (it appends
     # devices/groups as they pair). channel 25 is FOREVER-ish: changing it
@@ -77,6 +79,7 @@ services:
     build: ./plugins/lighting/service
     image: tng-plugin-lighting
     init: true
+    restart: unless-stopped
     depends_on: [mosquitto]
     environment:
       MQTT_URL: mqtt://mosquitto:1883
