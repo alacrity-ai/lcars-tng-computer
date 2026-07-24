@@ -20,6 +20,9 @@ zone, the fabric handles the rest.
 | "warmer / cooler light" | `set` with `colorTemp:"warm"` / `"cool"` (or kelvin 2200–6500) |
 | "make the lights red / amber / #ff8800" | `set` with `color` — back to white via `colorTemp` |
 | "movie mode" / "evening lights" / "all off" / "red alert" | `lights action:"scene" scene:"movie"/"evening"/"all-off"/"red-alert"` |
+| "party mode" / "disco" | `lights action:"scene" scene:"party"` — colorloop; stop it with `set effect:"stop_colorloop"` (then restore a colorTemp) |
+| "flash/blink the lights" (attention cue) | `lights action:"set" target:... effect:"blink"` — momentary, state untouched |
+| "make them pulse/breathe" | `set` with `effect:"breathe"` |
 | "are the kitchen lights on?" / "what lights are on?" | `lights action:"status"` — answer from it, no probing |
 | "show me the lights" | `lights action:"panel"` — the LIGHTING dashboard; it self-refreshes while on screen |
 

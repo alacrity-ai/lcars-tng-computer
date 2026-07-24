@@ -1,7 +1,7 @@
 {
   "id": "lighting",
   "name": "Zigbee Lighting",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minCore": "0.3.0",
   "description": "Local Zigbee lighting fabric — Mosquitto + Zigbee2MQTT sidecars, lights MCP tool, LIGHTING wall panel. Fully local, no cloud.",
   "services": [

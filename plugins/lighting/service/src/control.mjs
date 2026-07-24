@@ -11,7 +11,23 @@ export const SCENES = {
   movie: { state: "on", brightness: 12, colorTemp: 2700, transition: 3 },
   "all-off": { state: "off", transition: 2 },
   "red-alert": { state: "on", brightness: 100, color: "red", transition: 0.5 },
+  party: { state: "on", brightness: 80, effect: "colorloop", transition: 1 },
 };
+
+// Zigbee identify/color-loop effects (the Z2M "effect" enum). Momentary
+// (blink/breathe/okay) or continuous (colorloop, until stop_colorloop).
+export const EFFECTS = [
+  "blink",
+  "breathe",
+  "okay",
+  "channel_change",
+  "finish_effect",
+  "stop_effect",
+  "colorloop",
+  "stop_colorloop",
+];
+const effectKey = (s) => String(s ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+const EFFECT_BY_KEY = Object.fromEntries(EFFECTS.map((e) => [effectKey(e), e]));
 
 const COLOR_NAMES = {
   red: "#ff0000",
@@ -118,7 +134,12 @@ export function buildCommand(body = {}) {
     }
     out.color = { hex };
   }
-  if (Object.keys(out).length === 0) return { error: "nothing to do — give state, brightness, colorTemp, or color" };
+  if (body.effect !== undefined) {
+    const e = EFFECT_BY_KEY[effectKey(body.effect)];
+    if (!e) return { error: `unknown effect "${body.effect}" — have: ${EFFECTS.join(", ")}` };
+    out.effect = e;
+  }
+  if (Object.keys(out).length === 0) return { error: "nothing to do — give state, brightness, colorTemp, color, or effect" };
 
   // Every change fades by default — instant snaps read as a fault, not a cue.
   const t = body.transition === undefined ? 1.5 : Number(body.transition);

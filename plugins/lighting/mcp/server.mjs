@@ -14,8 +14,8 @@ const TOOL = {
   name: "lights",
   description:
     "Control the household Zigbee lighting fabric. Actions: on/off/set change lights " +
-    "(target + brightness/colorTemp/color/transition), scene applies a named preset " +
-    "(evening, movie, all-off, red-alert), status reports every fixture instantly from " +
+    "(target + brightness/colorTemp/color/transition/effect), scene applies a named preset " +
+    "(evening, movie, all-off, red-alert, party), status reports every fixture instantly from " +
     "cache (never probes the mesh), panel puts the LIGHTING dashboard on the wall. " +
     "Targets: a room/zone (living-room), a fixture (living-room/ceiling), or all (default).",
   inputSchema: {
@@ -32,7 +32,12 @@ const TOOL = {
       },
       scene: {
         type: "string",
-        description: "Scene name for action=scene: evening | movie | all-off | red-alert",
+        description: "Scene name for action=scene: evening | movie | all-off | red-alert | party",
+      },
+      effect: {
+        type: "string",
+        enum: ["blink", "breathe", "okay", "channel_change", "finish_effect", "stop_effect", "colorloop", "stop_colorloop"],
+        description: "Light effect (with action=set): blink/breathe/okay are momentary; colorloop cycles hues until stop_colorloop",
       },
       brightness: { type: "number", description: "Percent 0-100 (0 turns off)" },
       colorTemp: {
@@ -87,6 +92,7 @@ function describeCommand(cmd) {
   if (cmd.brightness !== undefined) parts.push(`${Math.round((cmd.brightness / 254) * 100)}%`);
   if (cmd.color_temp !== undefined) parts.push(`${Math.round(1_000_000 / cmd.color_temp)}K`);
   if (cmd.color?.hex) parts.push(cmd.color.hex);
+  if (cmd.effect) parts.push(`effect: ${cmd.effect}`);
   if (cmd.transition !== undefined) parts.push(`${cmd.transition}s fade`);
   return parts.join(", ");
 }
@@ -114,6 +120,7 @@ async function callLights(args = {}) {
         colorTemp: args.colorTemp,
         color: args.color,
         transition: args.transition,
+        effect: args.effect,
       };
       if (action === "on") body.state = "on";
       if (action === "off") body.state = "off";

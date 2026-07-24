@@ -71,8 +71,12 @@ anything.
 - **House:** an optional `all-lights` group; `target:"all"` uses it when it
   exists, otherwise every zone.
 - **Scenes** (server-side, in `service/src/control.mjs`): `evening` (40%
-  warm), `movie` (12% warm), `all-off`, `red-alert` (100% red). Scenes take
-  an optional `target` to scope to a zone.
+  warm), `movie` (12% warm), `all-off`, `red-alert` (100% red), `party`
+  (80% + colorloop — exit with effect `stop_colorloop`). Scenes take an
+  optional `target` to scope to a zone. `/set` also takes `effect` — the
+  Zigbee identify/color-loop effects (`blink`, `breathe`, `okay`,
+  `channel_change`, `finish_effect`, `stop_effect`, `colorloop`,
+  `stop_colorloop`).
 
 ## Troubleshooting
 
