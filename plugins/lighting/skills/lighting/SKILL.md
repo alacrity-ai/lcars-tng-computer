@@ -21,6 +21,7 @@ zone, the fabric handles the rest.
 | "make the lights red / amber / #ff8800" | `set` with `color` — back to white via `colorTemp` |
 | "movie mode" / "evening lights" / "all off" / "red alert" | `lights action:"scene" scene:"movie"/"evening"/"all-off"/"red-alert"` |
 | "party mode" / "disco" | `lights action:"scene" scene:"party"` — colorloop; stop it with `set effect:"stop_colorloop"` (then restore a colorTemp) |
+| lights **stuck / strobing / won't stop** an effect | `lights action:"scene" scene:"reset" target:<room>` — the recovery sequence: ~5 s dark, effects force-cleared per bulb, back at 70% neutral. Warn the human about the brief blackout, then run it. |
 | "flash/blink the lights" (attention cue) | `lights action:"set" target:... effect:"blink"` — momentary, state untouched |
 | "make them pulse/breathe" | `set` with `effect:"breathe"` |
 | "are the kitchen lights on?" / "what lights are on?" | `lights action:"status"` — answer from it, no probing |
@@ -38,6 +39,11 @@ only pass `transition` when the human asks for instant or extra-slow.
 - "Goodnight"-type requests → scene `all-off`, not per-room commands.
 - If the tool answers **"Lighting control is offline."** — say exactly that,
   once, and stop. No retry loops, no speculation about why.
+- **Never claim success the room contradicts.** If status shows a radio
+  delivery WARNING, commands may not have reached the bulbs regardless of
+  the reported state — tell the human, and reach for scene `reset` instead
+  of repeating the same command. Cached state is what Z2M *believes*, and
+  during effects or radio trouble the bulbs can disagree.
 - A target the tool rejects comes back with the known names — offer those,
   don't guess again blind.
 - Pairing new bulbs is an operator task (Zigbee2MQTT console), not yours —

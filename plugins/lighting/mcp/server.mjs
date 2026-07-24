@@ -15,7 +15,9 @@ const TOOL = {
   description:
     "Control the household Zigbee lighting fabric. Actions: on/off/set change lights " +
     "(target + brightness/colorTemp/color/transition/effect), scene applies a named preset " +
-    "(evening, movie, all-off, red-alert, party), status reports every fixture instantly from " +
+    "(evening, movie, all-off, red-alert, party — plus reset: the recovery sequence for a " +
+    "stuck/strobing light: brief power-down, effects cleared, neutral white), status reports " +
+    "every fixture instantly from " +
     "cache (never probes the mesh), panel puts the LIGHTING dashboard on the wall. " +
     "Targets: a room/zone (living-room), a fixture (living-room/ceiling), or all (default).",
   inputSchema: {
@@ -83,6 +85,11 @@ function formatStatus(s) {
   }
   if (s.groups?.length) lines.push(`Zones: ${s.groups.map((g) => g.name).join(", ")}`);
   lines.push(`Scenes: ${(s.scenes ?? []).join(", ")}`);
+  if (s.radio?.recentErrors) {
+    lines.push(
+      `WARNING: ${s.radio.recentErrors} radio delivery failure(s) in the last minute — recent commands may NOT have reached the bulbs even where the state above looks right. If a light is misbehaving, use scene "reset" on that room.`,
+    );
+  }
   return lines.join("\n");
 }
 

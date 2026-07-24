@@ -30,6 +30,7 @@ const cache = {
   groups: [], // bridge/groups
   states: new Map(), // friendly name -> last reported state object
   availability: new Map(), // friendly name -> online|offline
+  radioErrors: [], // recent zigbee2mqtt error-log lines (delivery failures)
 };
 let mqttConnected = false;
 const startedAt = Date.now();
@@ -94,7 +95,18 @@ client.on("message", (topic, buf) => {
     if (Array.isArray(list)) cache.groups = list;
     return;
   }
-  if (sub.startsWith("bridge/")) return; // logging, request/response chatter
+  if (sub === "bridge/logging") {
+    // Z2M reports radio-layer failures (MAC_NO_ACK etc.) here, NOT on the
+    // command topic — without this, the tool claims success for commands
+    // the mesh silently dropped (user-hit: unstoppable strobe).
+    const p = json();
+    if (p?.level === "error") {
+      cache.radioErrors.push({ t: Date.now(), message: String(p.message ?? "").slice(0, 300) });
+      if (cache.radioErrors.length > 20) cache.radioErrors.shift();
+    }
+    return;
+  }
+  if (sub.startsWith("bridge/")) return; // request/response chatter
   if (sub.endsWith("/availability")) {
     const name = sub.slice(0, -"/availability".length);
     cache.availability.set(name, (json()?.state ?? text) === "online" ? "online" : "offline");
@@ -190,7 +202,16 @@ function stateSummary() {
       name: g.friendly_name,
       members: (g.members ?? []).length,
     })),
-    scenes: Object.keys(SCENES),
+    scenes: [...Object.keys(SCENES), "reset"],
+    // Radio truth: Z2M-reported delivery failures in the last minute. When
+    // this is non-empty, recent commands may NOT have reached the bulbs no
+    // matter what the cache claims.
+    radio: {
+      // Only command ('set') failures drive the warning — 'get' failures are
+      // usually startup probes against wall-switched-off bulbs, not trouble.
+      recentErrors: recentRadioErrors().filter((e) => e.message.includes("Publish 'set'")).length,
+      lastError: cache.radioErrors.at(-1)?.message ?? null,
+    },
   };
 }
 
@@ -213,17 +234,40 @@ function readJson(req) {
   });
 }
 
+/** Group topic -> member device friendly names (falls back to the group). */
+function deviceTopicsFor(topic) {
+  const group = cache.groups.find((g) => g.friendly_name === topic);
+  if (!group) return [topic];
+  const byIeee = new Map(cache.devices.map((d) => [d.ieee_address, d.friendly_name]));
+  const members = (group.members ?? []).map((m) => byIeee.get(m.ieee_address)).filter(Boolean);
+  return members.length ? members : [topic];
+}
+
 function publishTo(targets, payload) {
-  // An active colorloop OVERRIDES color commands on these bulbs — Z2M would
-  // optimistically report the new color while the loop keeps spinning. So
-  // any command with explicit color intent kills a loop first (deactivate
-  // is a no-op when none is running). Brightness-only changes deliberately
-  // don't — "dim the party" should keep partying.
-  const colorIntent = (payload.color || payload.color_temp !== undefined) && !payload.effect;
+  // Two hard-won rules live here:
+  //  1. EFFECTS GO PER-DEVICE. Z2M's group effect path issues directed
+  //     reads/commands against individual members anyway and fails half of
+  //     them under load (MAC_NO_ACK) — fan the effect out ourselves.
+  //  2. COLOR INTENT KILLS A LOOP FIRST. An active colorloop overrides
+  //     color commands and Z2M optimistically reports the color you asked
+  //     for. Deactivate is a no-op when nothing loops. Brightness-only
+  //     changes deliberately keep the loop ("dim the party").
+  const { effect, ...rest } = payload;
+  const hasRest = Object.keys(rest).some((k) => k !== "transition");
+  const colorIntent = (rest.color || rest.color_temp !== undefined) && !effect;
   for (const t of targets.topics) {
-    if (colorIntent) client.publish(`${BASE}/${t}/set`, JSON.stringify({ effect: "stop_colorloop" }));
-    client.publish(`${BASE}/${t}/set`, JSON.stringify(payload));
+    const devices = colorIntent || effect ? deviceTopicsFor(t) : null;
+    if (colorIntent) for (const d of devices) client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect: "stop_colorloop" }));
+    if (effect) for (const d of devices) client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect }));
+    // State/color/brightness stays a single group cast — those are reliable
+    // and keep zones fading in sync.
+    if (hasRest) client.publish(`${BASE}/${t}/set`, JSON.stringify(rest));
   }
+}
+
+function recentRadioErrors(windowMs = 60_000) {
+  const cutoff = Date.now() - windowMs;
+  return cache.radioErrors.filter((e) => e.t >= cutoff);
 }
 
 const server = createServer(async (req, res) => {
@@ -241,6 +285,7 @@ const server = createServer(async (req, res) => {
         mqtt: mqttConnected,
         bridge: cache.bridge,
         devices: cache.devices.length,
+        radioErrorsLastMin: recentRadioErrors().length,
         uptimeSec: Math.round((Date.now() - startedAt) / 1000),
       });
     }
@@ -267,8 +312,50 @@ const server = createServer(async (req, res) => {
 
     if (route === "POST /scene") {
       const name = normalize(body.name ?? body.scene);
+      // The panic button: a stuck effect (strobe, colorloop the radio won't
+      // let us cancel) dies to a power cycle. Hard OFF, a dark gap so the
+      // mesh quiets down (directed stops were getting MAC_NO_ACK'd under
+      // load), per-device effect stops, then known-good neutral white.
+      if (name === "reset") {
+        const targets = resolveTargets(cache, body.target);
+        if (!targets) return send(404, { error: "nothing is paired yet" });
+        if (!mqttConnected) return send(503, { error: OFFLINE });
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const allDevices = [...new Set(targets.topics.flatMap((t) => deviceTopicsFor(t)))];
+        for (const t of targets.topics) client.publish(`${BASE}/${t}/set`, JSON.stringify({ state: "OFF", transition: 0 }));
+        await sleep(4000);
+        for (const d of allDevices) {
+          client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect: "stop_effect" }));
+          await sleep(500);
+          client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect: "stop_colorloop" }));
+          await sleep(500);
+        }
+        // Let the mesh drain before the ON — the first field run lost the
+        // final group broadcast to congestion and left the room dark.
+        await sleep(1500);
+        const onCmd = { state: "ON", brightness: 178, color_temp: 250, transition: 1 };
+        for (const t of targets.topics) client.publish(`${BASE}/${t}/set`, JSON.stringify(onCmd));
+        // Verify against reported state; retry stragglers individually.
+        await sleep(2500);
+        const dark = allDevices.filter((d) => cache.states.get(d)?.state !== "ON");
+        for (const d of dark) client.publish(`${BASE}/${d}/set`, JSON.stringify(onCmd));
+        if (dark.length) await sleep(2000);
+        const stillDark = allDevices.filter((d) => cache.states.get(d)?.state !== "ON");
+        const errs = recentRadioErrors(20_000).filter((e) => e.message.includes("Publish 'set'"));
+        return send(200, {
+          ok: stillDark.length === 0,
+          scene: "reset",
+          applied: targets,
+          verified: { on: allDevices.length - stillDark.length, of: allDevices.length },
+          note:
+            `power-cycled, effects cleared per device, restored to 70% neutral` +
+            (dark.length ? `; ${dark.length} needed an individual retry` : "") +
+            (stillDark.length ? ` — WARNING: ${stillDark.join(", ")} still not confirming ON (radio?) — may need a physical switch flip` : "") +
+            (errs.length ? ` — ${errs.length} radio delivery failure(s) logged during the sequence` : ""),
+        });
+      }
       const spec = SCENES[name];
-      if (!spec) return send(404, { error: `unknown scene "${body.name ?? body.scene ?? ""}" — have: ${Object.keys(SCENES).join(", ")}` });
+      if (!spec) return send(404, { error: `unknown scene "${body.name ?? body.scene ?? ""}" — have: ${[...Object.keys(SCENES), "reset"].join(", ")}` });
       const targets = resolveTargets(cache, body.target);
       if (!targets) return send(404, { error: "nothing is paired yet — no fixtures to apply the scene to" });
       if (!mqttConnected) return send(503, { error: OFFLINE });
