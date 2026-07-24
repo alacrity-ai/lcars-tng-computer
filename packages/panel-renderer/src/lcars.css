@@ -2537,7 +2537,7 @@ body {
   text-shadow: 0 0 4px #000;
 }
 
-.cp-text { color: #ddd; font-family: Georgia, serif; letter-spacing: .01em; font-size: 19px; line-height: 1.55; margin: 0; }
+.cp-text { color: #ddd; letter-spacing: .03em; font-size: 19px; line-height: 1.55; margin: 0; }
 .cp-caption { color: #999; font-size: 15px; margin: 4px 0 0; }
 
 .cp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
