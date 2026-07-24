@@ -43,9 +43,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { closeSync, openSync, readSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
@@ -439,10 +437,12 @@ function onCompactionStart(trigger: string): void {
   postCompactionBadge(true);
   sendComputerInfo(true);
   pushState();
+  startCompactWatch();
 }
 
 /** SessionStart(compact) hook — consolidation finished, session is back. */
 function onCompactionEnd(): void {
+  stopCompactWatch();
   if (!compacting && !paused) return;
   compacting = false;
   paused = false;
@@ -453,6 +453,73 @@ function onCompactionEnd(): void {
   pushState();
   // the transcript rolled — re-read from the new file promptly
   setTimeout(pollContext, 3_000).unref();
+}
+
+// PreCompact can fire and the compact still abort ("Not enough messages to
+// compact") — which never emits SessionStart(compact), so the badge would
+// hang until the failsafe. The bridge owns the pane anyway: while compacting,
+// watch it for a FRESH failure line (baseline-diffed so an old message still
+// on screen can't false-trigger) and treat that as the end.
+const COMPACT_WATCH_MS = Number(process.env.TNG_COMPACT_WATCH_MS ?? 3_000);
+const COMPACT_FAIL_PATTERNS = [
+  /not enough messages to compact/gi,
+  /compaction (failed|canceled|cancelled)/gi,
+  /error (compacting|during compaction)/gi,
+];
+
+let compactWatch: NodeJS.Timeout | null = null;
+let compactBaseline: number[] | null = null;
+
+function countPatterns(text: string): number[] {
+  return COMPACT_FAIL_PATTERNS.map((re) => text.match(re)?.length ?? 0);
+}
+
+function capturePane(cb: (text: string | null) => void): void {
+  execFile("tmux", ["capture-pane", "-p", "-t", TMUX_SESSION], { maxBuffer: 1024 * 1024 }, (err, stdout) => {
+    cb(err ? null : stdout);
+  });
+}
+
+function startCompactWatch(): void {
+  stopCompactWatch();
+  compactBaseline = null;
+  capturePane((text) => {
+    compactBaseline = text === null ? null : countPatterns(text);
+  });
+  compactWatch = setInterval(() => {
+    if (!compacting) return;
+    capturePane((text) => {
+      if (text === null || !compacting) return;
+      const now = countPatterns(text);
+      const base = compactBaseline ?? now.map(() => 0);
+      if (now.some((n, i) => n > (base[i] ?? 0))) {
+        console.error("[bridge] the session reported the compact aborted — resuming");
+        onCompactionEnd();
+        void fetch(`${SERVER_URL}/api/console/display`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            view: "alert",
+            props: {
+              level: "yellow",
+              title: "MEMORY CONSOLIDATION STOPPED",
+              message: "The session declined to compact (usually: not enough to consolidate yet). Commands resume normally.",
+            },
+          }),
+          signal: AbortSignal.timeout(3_000),
+        }).catch(() => {});
+      }
+    });
+  }, COMPACT_WATCH_MS);
+  compactWatch.unref();
+}
+
+function stopCompactWatch(): void {
+  if (compactWatch) {
+    clearInterval(compactWatch);
+    compactWatch = null;
+  }
+  compactBaseline = null;
 }
 
 // A lost SessionStart hook must degrade, not wedge the house (TNGC-32).
@@ -471,7 +538,6 @@ setInterval(() => {
 // (newest-FILE logic matters — compaction rolls files). Stateless re-scan
 // every 15s; ~256KB tail read, cheap.
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const WINDOW_OVERRIDE = Number(process.env.TNG_CONTEXT_WINDOW ?? 0);
 
 function contextWindowFor(model: string): number {
@@ -483,36 +549,18 @@ function contextWindowFor(model: string): number {
 let lastContext: { tokens: number; window: number; percent: number } | null = null;
 let lastModel: string | undefined;
 
-function newestTranscript(): string | null {
-  try {
-    const projects = join(CONFIG_DIR, "projects");
-    let best: string | null = null;
-    let bestMtime = 0;
-    for (const d of readdirSync(projects)) {
-      let files: string[];
-      try {
-        files = readdirSync(join(projects, d));
-      } catch {
-        continue;
-      }
-      for (const f of files) {
-        if (!f.endsWith(".jsonl")) continue;
-        const p = join(projects, d, f);
-        try {
-          const m = statSync(p).mtimeMs;
-          if (m > bestMtime) {
-            bestMtime = m;
-            best = p;
-          }
-        } catch {
-          // rolled away between listing and stat
-        }
-      }
-    }
-    return best;
-  } catch {
-    return null;
-  }
+/** THE live transcript, as reported by hooks (every hook receives
+    transcript_path on stdin; the turn-start/compaction hooks forward it).
+    Never guessed: a newest-file heuristic reads the PREVIOUS session's file
+    on a fresh launch (and can catch subagent transcripts) — the 73%-on-a-
+    fresh-session bug. Unknown → the meter reports nothing. */
+let sessionTranscript: string | null = null;
+
+function setTranscript(p: unknown): void {
+  if (typeof p !== "string" || !p.trim() || p === sessionTranscript) return;
+  sessionTranscript = p;
+  lastContext = null; // never show the old file's number against a new file
+  pollContext();
 }
 
 function readTail(path: string, bytes: number): string {
@@ -529,20 +577,24 @@ function readTail(path: string, bytes: number): string {
 }
 
 function pollContext(): void {
-  const file = newestTranscript();
-  if (!file) return;
+  if (!sessionTranscript) return;
   let text: string;
   try {
-    text = readTail(file, 256 * 1024);
+    text = readTail(sessionTranscript, 256 * 1024);
   } catch {
-    return;
+    return; // rolled away (post-compact) — the SessionStart hook re-points us
   }
   const lines = text.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line.includes('"usage"')) continue;
     try {
-      const ev = JSON.parse(line) as { message?: { model?: string; usage?: Record<string, number> } };
+      const ev = JSON.parse(line) as {
+        isSidechain?: boolean;
+        message?: { model?: string; usage?: Record<string, number> };
+      };
+      // Subagent turns record their OWN context, not the session's.
+      if (ev.isSidechain === true) continue;
       const u = ev.message?.usage;
       if (!u || typeof u.input_tokens !== "number") continue;
       const tokens =
@@ -650,6 +702,7 @@ const http = createServer((req, res) => {
       compacting,
       context: lastContext,
       model: lastModel ?? null,
+      transcript: sessionTranscript,
     });
   }
   if (req.method === "GET" && req.url === "/queue") {
@@ -660,10 +713,22 @@ const http = createServer((req, res) => {
   if (req.method === "GET" && req.url === "/abort-check") {
     return respond(200, { abort: !!abortRequest, by: abortRequest?.by ?? null });
   }
-  // Hit by the session's UserPromptSubmit hook: a typed turn began.
+  // Hit by the SessionStart hook (any matcher): binds the live transcript
+  // the moment the session opens — the meter works before the first turn.
+  if (req.method === "POST" && req.url === "/session-start") {
+    return readBody((body) => {
+      setTranscript(body.transcriptPath);
+      respond(200, { ok: true });
+    });
+  }
+  // Hit by the session's UserPromptSubmit hook: a typed turn began. The hook
+  // forwards transcript_path — the ONLY source for which transcript is live.
   if (req.method === "POST" && req.url === "/turn-start") {
-    onTurnStart();
-    return respond(200, { ok: true });
+    return readBody((body) => {
+      setTranscript(body.transcriptPath);
+      onTurnStart();
+      respond(200, { ok: true });
+    });
   }
   // Hit by the session's Stop hook: the turn ended — dispatch the next command.
   if (req.method === "POST" && req.url === "/turn-end") {
@@ -675,13 +740,17 @@ const http = createServer((req, res) => {
   // SessionStart(compact) = it finished and the session is back.
   if (req.method === "POST" && req.url === "/compaction-start") {
     return readBody((body) => {
+      setTranscript(body.transcriptPath);
       onCompactionStart(typeof body.trigger === "string" ? body.trigger : "unknown");
       respond(200, { ok: true });
     });
   }
   if (req.method === "POST" && req.url === "/compaction-end") {
-    onCompactionEnd();
-    return respond(200, { ok: true });
+    return readBody((body) => {
+      setTranscript(body.transcriptPath); // compaction rolls to a new file
+      onCompactionEnd();
+      respond(200, { ok: true });
+    });
   }
   // Local compaction trigger (same handler the cloud `compact` frame uses) —
   // loopback-only like everything else here.

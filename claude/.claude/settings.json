@@ -28,7 +28,7 @@
           },
           {
             "type": "command",
-            "command": "curl -s -m 1 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/turn-start\" >/dev/null 2>&1 || true"
+            "command": "curl -s -m 1 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/turn-start\" -H 'content-type: application/json' -d \"$(cat | jq -c '{transcriptPath: (.transcript_path // \"\")}' 2>/dev/null || echo '{}')\" >/dev/null 2>&1 || true"
           }
         ]
       }
@@ -62,18 +62,26 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-start\" -H 'content-type: application/json' -d \"{\\\"trigger\\\":\\\"$(cat | jq -r .trigger 2>/dev/null || echo unknown)\\\"}\" >/dev/null 2>&1 || true"
+            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-start\" -H 'content-type: application/json' -d \"$(cat | jq -c '{trigger: (.trigger // \"unknown\"), transcriptPath: (.transcript_path // \"\")}' 2>/dev/null || echo '{}')\" >/dev/null 2>&1 || true"
           }
         ]
       }
     ],
     "SessionStart": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/session-start\" -H 'content-type: application/json' -d \"$(cat | jq -c '{transcriptPath: (.transcript_path // \"\")}' 2>/dev/null || echo '{}')\" >/dev/null 2>&1 || true"
+          }
+        ]
+      },
+      {
         "matcher": "compact",
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-end\" >/dev/null 2>&1 || true"
+            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-end\" -H 'content-type: application/json' -d \"$(cat | jq -c '{transcriptPath: (.transcript_path // \"\")}' 2>/dev/null || echo '{}')\" >/dev/null 2>&1 || true"
           }
         ]
       }
