@@ -273,7 +273,10 @@ export function registerQuoteRoutes(app: FastifyInstance, hub: DisplayHub) {
       }
 
       cancelActiveReading();
-      hub.broadcast({ type: "display", view: "quote", props: { ...props } });
+      hub.broadcast(
+        { type: "display", view: "quote", props: { ...props } },
+        hub.resolveWall((req.body as { wall?: string } | undefined)?.wall),
+      );
       return {
         ok: true,
         symbol: props.symbol,

@@ -5,6 +5,7 @@ import { Panel } from "./panels/registry";
 import { PlaybackLayer } from "./PlaybackLayer";
 import { useSocket } from "./useSocket";
 import { EngageOverlay, useEngage } from "./engage";
+import { resolveInitialDisplay, ViewscreenLabel, ViewscreenPicker } from "./viewscreen";
 
 /** Tripwire for the stacked-app failure mode (a dev-server re-execution
     mounting a second live copy — two sockets, two karaoke carets, doubled
@@ -27,11 +28,28 @@ function useDuplicateInstanceCheck(): boolean {
   return duplicated;
 }
 
+/** Resolved once at module load: ?display= → localStorage → null (server
+    lands unnamed clients on the primary wall). */
+const initialDisplay = resolveInitialDisplay();
+
 export function App() {
-  const { screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash } =
-    useSocket();
+  const {
+    screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash,
+    confirmedDisplay, setDisplay,
+  } = useSocket(initialDisplay);
   const duplicated = useDuplicateInstanceCheck();
   const { needsEngage, engage } = useEngage();
+  /** Picker opens on the corner-label tap; it ALSO fronts the ENGAGE tap on a
+      fresh unnamed screen (a click is required there anyway — TNGC-35). */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [declared, setDeclared] = useState(initialDisplay !== null);
+  const showPicker = pickerOpen || (needsEngage && !declared);
+  const pick = (name: string) => {
+    setDisplay(name);
+    setDeclared(true);
+    setPickerOpen(false);
+    if (needsEngage) engage(); // one tap names the screen AND unlocks audio
+  };
 
   return (
     <LcarsFrame title="LCARS 40274">
@@ -80,7 +98,28 @@ export function App() {
       {audioLocked && !needsEngage && (
         <div className="audio-locked-badge">Audio muted by browser — tap to enable</div>
       )}
-      {needsEngage && <EngageOverlay onEngage={engage} />}
+      {/* viewscreen identity (TNGC-35): subtle corner label, tap to re-designate */}
+      {confirmedDisplay && !showPicker && (
+        <ViewscreenLabel
+          name={confirmedDisplay.name}
+          primary={confirmedDisplay.primary}
+          onClick={() => setPickerOpen(true)}
+        />
+      )}
+      {needsEngage && !showPicker && <EngageOverlay onEngage={engage} />}
+      {showPicker && (
+        <ViewscreenPicker
+          current={confirmedDisplay?.name ?? initialDisplay}
+          onPick={pick}
+          onDismiss={() => {
+            setPickerOpen(false);
+            if (needsEngage) {
+              setDeclared(true); // "keep" on a fresh screen = stay on primary
+              engage();
+            }
+          }}
+        />
+      )}
       {working && (
         <div className="working-badge">
           <span className="working-sweep" aria-hidden>

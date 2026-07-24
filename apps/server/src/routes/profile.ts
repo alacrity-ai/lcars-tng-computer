@@ -194,7 +194,7 @@ export function registerProfileRoutes(app: FastifyInstance, hub: DisplayHub) {
       props: imageUrl
         ? { url: imageUrl, title: data.title, body: data.extract, source: imageSource }
         : { title: data.title, body: data.extract },
-    });
+    }, hub.resolveWall((req.body as { wall?: string } | undefined)?.wall));
 
     return {
       ok: true,
@@ -232,7 +232,10 @@ export function registerProfileRoutes(app: FastifyInstance, hub: DisplayHub) {
         return reply.code(404).send({ error: "no images found for any of the queries" });
       }
       cancelActiveReading();
-      hub.broadcast({ type: "display", view: "image", props: { title, images } });
+      hub.broadcast(
+        { type: "display", view: "image", props: { title, images } },
+        hub.resolveWall((req.body as { wall?: string } | undefined)?.wall),
+      );
       return {
         ok: true,
         shown: images.length,
@@ -251,7 +254,7 @@ export function registerProfileRoutes(app: FastifyInstance, hub: DisplayHub) {
       type: "display",
       view: "image",
       props: { url: found.url, title: title ?? query, source: found.source },
-    });
+    }, hub.resolveWall((req.body as { wall?: string } | undefined)?.wall));
     return { ok: true, url: found.url, source: found.source };
   });
 }

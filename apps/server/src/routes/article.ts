@@ -158,7 +158,7 @@ export function registerArticleRoutes(app: FastifyInstance, hub: DisplayHub) {
 
     // Manual navigation supersedes any in-flight reading session.
     cancelActiveReading();
-    displayArticlePage(hub, parsedUrl.href, article, currentPage);
+    displayArticlePage(hub, hub.resolveWall(req.body?.wall), parsedUrl.href, article, currentPage);
 
     const body: OpenUrlResponse = {
       ok: true,

@@ -3,10 +3,11 @@ import type { DisplayHub } from "./hub.js";
 import type { CachedArticle } from "./routes/article.js";
 import { splitFastStart, synthesize, type SynthResult } from "./tts.js";
 
-/** Broadcast one article page to the wall. Lives here (not article.ts) so the
-    route module can import it without a circular runtime dependency. */
+/** Broadcast one article page to a viewscreen. Lives here (not article.ts) so
+    the route module can import it without a circular runtime dependency. */
 export function displayArticlePage(
   hub: DisplayHub,
+  wall: string,
   href: string,
   article: CachedArticle,
   page: number,
@@ -22,7 +23,7 @@ export function displayArticlePage(
       paragraphs: article.paragraphs,
       page,
     },
-  });
+  }, wall);
 }
 
 /**
@@ -49,6 +50,7 @@ class ReadingSession {
 
   constructor(
     private hub: DisplayHub,
+    private wall: string,
     private href: string,
     private article: CachedArticle,
     private pages: string[][],
@@ -82,7 +84,7 @@ class ReadingSession {
       caption: false,
       timing: synth.timing,
       highlightBase,
-    });
+    }, this.wall);
     await this.hub.waitForSpeakDone(
       synth.utteranceId,
       synth.durationMs + PLAYBACK_TIMEOUT_SLACK_MS,
@@ -92,7 +94,7 @@ class ReadingSession {
   async run(): Promise<void> {
     for (let page = this.startPage; page <= this.pages.length; page++) {
       if (this.cancelled) return;
-      displayArticlePage(this.hub, this.href, this.article, page);
+      displayArticlePage(this.hub, this.wall, this.href, this.article, page);
 
       const text = this.pageText(page);
       const alreadySynthing = this.prefetches.has(page);
@@ -122,7 +124,7 @@ class ReadingSession {
       }
 
       // A wall that lost its link mid-read shouldn't spin through pages.
-      if (this.hub.state.connectedDisplays === 0) return;
+      if (!this.hub.hasClients(this.wall)) return;
     }
   }
 }
@@ -142,6 +144,7 @@ export function cancelActiveReading() {
  */
 export function startReading(
   hub: DisplayHub,
+  wall: string,
   href: string,
   article: CachedArticle,
   page: number,
@@ -149,7 +152,7 @@ export function startReading(
   cancelActiveReading();
   const pages = paginateArticle(article.paragraphs);
   const startPage = Math.min(Math.max(page, 1), pages.length);
-  const session = new ReadingSession(hub, href, article, pages, startPage);
+  const session = new ReadingSession(hub, wall, href, article, pages, startPage);
   active = session;
   void session.run().finally(() => {
     if (active === session) active = null;

@@ -329,6 +329,14 @@ export function libraryRoutes(
     }
     const row = await getItemRow(c.env, actor.tenantId, c.req.param("id"));
     if (!row || !canTouch(actor, row)) return c.json({ error: "no such item" }, 404);
+    // TNGC-35: "Display on wall" honors the phone's viewscreen selection.
+    let wall: string | undefined;
+    try {
+      const body = (await c.req.json()) as { wall?: unknown };
+      if (typeof body.wall === "string" && body.wall.trim()) wall = body.wall.trim().slice(0, 64);
+    } catch {
+      // empty body — no wall preference
+    }
     const cmd: CloudDisplayCommand = {
       id: crypto.randomUUID(),
       itemId: row.id,
@@ -337,6 +345,7 @@ export function libraryRoutes(
       user: actor.userHandle,
       device: actor.deviceLabel,
       ts: Date.now(),
+      ...(wall ? { wall } : {}),
     };
     const res = await hub(c, actor.tenantId).fetch(
       new Request("https://hub/display-item", {

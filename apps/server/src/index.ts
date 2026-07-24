@@ -24,7 +24,12 @@ const hub = new DisplayHub();
 
 await app.register(websocket);
 
-app.get("/health", async () => ({ ok: true, mode: process.env.TNG_MODE ?? "dev", ...hub.state }));
+app.get("/health", async () => ({
+  ok: true,
+  mode: process.env.TNG_MODE ?? "dev",
+  primary: hub.primary,
+  ...hub.stateFor(hub.primary),
+}));
 
 app.register(async (scope) => {
   scope.get(WS_PATH, { websocket: true }, (socket) => {

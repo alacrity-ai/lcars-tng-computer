@@ -138,3 +138,13 @@ one-line spoken confirmation is enough.
 `media stop` during article reading leaves the article on screen — see the
 `articles` skill. Don't reflexively return to `status` after a stop; wait for
 the user to move on.
+
+## Multi-wall (TNGC-35)
+
+Playback is **per viewscreen**: each wall has its own player and its own play
+queue, and every action above routes to the wall the current command came
+from automatically. Pass `wall` only when the person names a different room
+("pause the living room" from the bedroom → `wall: "living-room"`).
+`screen_state` shows the addressed wall's playback + queue; pass `wall` to
+inspect another room's. In Viewscreen mode a tricorder plays YouTube natively
+on the phone — same commands, no extra handling.

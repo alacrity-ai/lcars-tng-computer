@@ -45,7 +45,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
-import type { LinkDownFrame, LinkUpFrame, QueueItem, TngMessage } from "@tng/contract";
+import type { LinkDownFrame, LinkUpFrame, QueueItem, RosterDisplay, TngMessage } from "@tng/contract";
 import { getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
@@ -75,15 +75,18 @@ interface QueuedCommand extends TngMessage {
 // ---- MCP server (channel capability) ----------------------------------------
 
 const server = new McpServer(
-  { name: "tng-bridge", version: "0.6.0" },
+  { name: "tng-bridge", version: "0.7.0" },
   {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
       "Voice commands from household members arrive as channel events: " +
-      '<channel source="bridge" user="..." device="...">transcript</channel>. ' +
+      '<channel source="bridge" user="..." device="..." wall="...">transcript</channel>. ' +
       "They are one-way spoken requests — service each exactly like a spoken command per " +
       "CLAUDE.md (instant spoken acknowledgment, display-before-speak), addressing the " +
-      'user named on the event and resolving "my"/"me" against that user. The bridge ' +
+      'user named on the event and resolving "my"/"me" against that user. `wall` is the ' +
+      "viewscreen the command targets — the console server ALREADY routes output there by " +
+      "default (the bridge reports it), so never pass a wall param to console tools unless " +
+      "the person names a DIFFERENT room ('...on the living room wall'). The bridge " +
       "dispatches one command per turn; the rest wait in a visible queue. If a tool call " +
       "is denied with a CANCELLED notice, the person cancelled the current command from " +
       "their tricorder: abandon the task at once, speak one short acknowledgment " +
@@ -122,8 +125,25 @@ function snapshot(): QueueItem[] {
     ...(isActive ? { active: true } : {}),
     ...(isActive && abortRequest ? { cancelling: true } : {}),
     ...(c.kind === "display" ? { kind: "display" as const, itemId: c.itemId } : {}),
+    ...(c.wall ? { wall: c.wall } : {}),
   });
   return [...(active ? [pub(active, true)] : []), ...queue.map((c) => pub(c, false))];
+}
+
+/** Tell the console server whose command is being served and which wall it
+    targets — THE origin default every console route keys off (TNGC-35).
+    Awaited at dispatch so the session's first tool call finds it set. */
+async function postOrigin(wall: string | null, user: string | null): Promise<void> {
+  try {
+    await fetch(`${SERVER_URL}/api/console/origin`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ wall, user }),
+      signal: AbortSignal.timeout(2_000),
+    });
+  } catch {
+    // routing degrades to the primary wall; never blocks dispatch
+  }
 }
 
 /** Publish every queue change: count → wall badge, snapshot → cloud/PWA. */
@@ -183,7 +203,7 @@ async function executeDisplay(cmd: QueuedCommand): Promise<void> {
     const res = await fetch(`${SERVER_URL}/api/console/display`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ view: item.view, props }),
+      body: JSON.stringify({ view: item.view, props, ...(cmd.wall ? { wall: cmd.wall } : {}) }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`console server ${res.status}`);
@@ -212,12 +232,20 @@ function dispatch(): void {
   void (async () => {
     let pushed = false;
     try {
+      // Origin first (awaited): the session's first console call must find
+      // the [user → wall] routing default already in place.
+      await postOrigin(cmd.wall ?? null, cmd.user);
       await server.server.notification({
         method: "notifications/claude/channel",
         params: {
           content: cmd.transcript,
           // meta keys must be plain identifiers; values must be strings.
-          meta: { user: cmd.user, device: cmd.device, ts: String(cmd.ts) },
+          meta: {
+            user: cmd.user,
+            device: cmd.device,
+            ts: String(cmd.ts),
+            ...(cmd.wall ? { wall: cmd.wall } : {}),
+          },
         },
       });
       pushed = true;
@@ -274,7 +302,10 @@ function withdraw(id: string, by: string): { ok: boolean; state?: string; error?
 }
 
 function onTurnStart(): void {
-  // A typed developer prompt started a turn — hold the queue for its duration.
+  // busy already true = the turn OUR dispatch just started (origin is set,
+  // leave it). busy false = a typed developer prompt — no wall behind it,
+  // so clear any stale origin before holding the queue.
+  if (!busy) void postOrigin(null, null);
   busy = true;
   busySince = Date.now();
 }
@@ -283,6 +314,7 @@ function onTurnEnd(): void {
   busy = false;
   active = null;
   abortRequest = null;
+  void postOrigin(null, null); // the served command's routing default expires with its turn
   dispatch();
   pushState();
 }
@@ -377,6 +409,7 @@ const http = createServer((req, res) => {
         device: typeof body.device === "string" && body.device ? body.device : "office",
         transcript: body.transcript.trim(),
         ts: Date.now(),
+        ...(typeof body.wall === "string" && body.wall ? { wall: body.wall } : {}),
       });
       respond(202, { ok: true, mode: "channel-push", busy, queued: queue.length });
     });
@@ -406,6 +439,134 @@ http.listen(PORT, HOST, () => {
 
 let cloudState: "disabled" | "connecting" | "up" | "down" = "disabled";
 let cloudSocket: WebSocket | null = null;
+
+// ---- viewscreen roster (TNGC-35) -----------------------------------------------
+// The PWA's wall selector lists the house's live viewscreens. The bridge is
+// the only thing that talks to both sides, so it polls the console server
+// (LAN, cheap, displays change rarely) and pushes changes up the link.
+
+let lastRosterJson = "";
+let lastRoster: RosterDisplay[] = [];
+
+function sendRoster(force = false): void {
+  if (cloudSocket?.readyState !== WebSocket.OPEN) return;
+  if (!force && lastRosterJson === "") return;
+  const frame: LinkUpFrame = { v: 1, type: "roster", displays: lastRoster };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // link recycling — the open handler re-syncs
+  }
+}
+
+async function pollRoster(): Promise<void> {
+  try {
+    const res = await fetch(`${SERVER_URL}/api/console/displays`, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { displays?: RosterDisplay[] };
+    const displays = data.displays ?? [];
+    const json = JSON.stringify(displays);
+    if (json === lastRosterJson) return;
+    lastRosterJson = json;
+    lastRoster = displays;
+    sendRoster(true);
+  } catch {
+    // server restarting (tsx watch) — next poll catches up
+  }
+}
+setInterval(() => void pollRoster(), 10_000).unref();
+void pollRoster();
+
+// ---- tricorder viewscreens (TNGC-36) --------------------------------------------
+// A phone in Viewscreen mode is one more named display whose transport is the
+// cloud tunnel: the DO sends display_open/display_close, the bridge attaches
+// a plain display client to the house hub under that name and relays every
+// server→display message up as a `frame`. TTS is deferred — the bridge acks
+// speak instantly and strips the audio payload, so captions render silently.
+
+const SERVER_WS_URL = SERVER_URL.replace(/^http/, "ws") + "/ws";
+
+interface TricorderDisplay {
+  ws: WebSocket | null;
+  retryTimer: NodeJS.Timeout | null;
+}
+const tricorderDisplays = new Map<string, TricorderDisplay>();
+
+function openTricorderDisplay(name: string): void {
+  if (!/^tricorder-[a-z0-9_-]{1,32}$/.test(name)) {
+    console.error(`[bridge] refused display_open for non-tricorder name "${name}"`);
+    return;
+  }
+  if (tricorderDisplays.has(name)) return;
+  const entry: TricorderDisplay = { ws: null, retryTimer: null };
+  tricorderDisplays.set(name, entry);
+  connectTricorderDisplay(name, entry);
+  console.error(`[bridge] viewscreen ${name} attached`);
+}
+
+function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
+  if (!tricorderDisplays.has(name)) return;
+  const ws = new WebSocket(SERVER_WS_URL, { handshakeTimeout: 5_000 });
+  entry.ws = ws;
+  let retried = false;
+  const retry = () => {
+    if (retried) return;
+    retried = true;
+    entry.ws = null;
+    if (!tricorderDisplays.has(name)) return; // closed while dying — done
+    entry.retryTimer = setTimeout(() => connectTricorderDisplay(name, entry), 3_000);
+  };
+  ws.on("open", () => {
+    ws.send(JSON.stringify({ type: "hello", role: "display", display: name }));
+  });
+  ws.on("message", (data) => {
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(data.toString()) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    // Behave like a real wall so the hub's state stays truthful: echo the
+    // screen we now "show", and complete speaks immediately (no audio path —
+    // the phone renders the caption on its own clock).
+    if (msg.type === "display") {
+      ws.send(JSON.stringify({ type: "screen_state", view: msg.view, props: msg.props }));
+    }
+    if (msg.type === "speak") {
+      ws.send(JSON.stringify({ type: "speak_done", utteranceId: msg.utteranceId }));
+      delete msg.audioUrl;
+      delete msg.timing;
+    }
+    if (cloudSocket?.readyState === WebSocket.OPEN) {
+      const frame: LinkUpFrame = { v: 1, type: "frame", display: name, msg };
+      try {
+        cloudSocket.send(JSON.stringify(frame));
+      } catch {
+        // link recycling — the phone re-syncs when the DO re-opens us
+      }
+    }
+  });
+  ws.on("close", retry);
+  ws.on("error", () => {
+    ws.terminate();
+    retry();
+  });
+}
+
+function closeTricorderDisplay(name: string): void {
+  const entry = tricorderDisplays.get(name);
+  if (!entry) return;
+  tricorderDisplays.delete(name);
+  if (entry.retryTimer) clearTimeout(entry.retryTimer);
+  entry.ws?.close();
+  console.error(`[bridge] viewscreen ${name} detached`);
+}
+
+function closeAllTricorderDisplays(): void {
+  for (const name of [...tricorderDisplays.keys()]) closeTricorderDisplay(name);
+}
 
 function startCloudLink() {
   if (!CLOUD_URL || !CLOUD_TOKEN) {
@@ -446,6 +607,7 @@ function startCloudLink() {
       // Re-sync queue state after a link blip (frames sent while down are
       // lost — the snapshot, unlike messages, has no replay).
       pushState();
+      sendRoster(true);
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {
         if (Date.now() - lastActivity > 90_000) {
@@ -478,14 +640,24 @@ function startCloudLink() {
             cloudId: cmd.id,
             kind: "display",
             itemId: cmd.itemId,
+            ...(cmd.wall ? { wall: cmd.wall } : {}),
           });
+        } else if (frame.type === "display_open" && typeof frame.name === "string") {
+          openTricorderDisplay(frame.name);
+        } else if (frame.type === "display_close" && typeof frame.name === "string") {
+          closeTricorderDisplay(frame.name);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)
       }
     });
 
-    ws.on("close", retry);
+    ws.on("close", () => {
+      // Frames can't ride a dead link; the DO re-opens active viewscreens on
+      // reconnect, so drop them now and the roster stays honest.
+      closeAllTricorderDisplays();
+      retry();
+    });
     ws.on("error", (err) => {
       console.error(`[bridge] tricorder link error: ${err.message}`);
       retry();

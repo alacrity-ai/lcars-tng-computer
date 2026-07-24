@@ -41,6 +41,30 @@ the router so the TV bookmark never goes stale.
    reappears after any refresh; one tap each time. (The office `make kiosk`
    Chromium launches with the autoplay flag, so it never shows the overlay.)
 
+## Naming the viewscreen (TNGC-35 — multi-wall)
+
+Every screen is a **named viewscreen**; commands route to walls by name, and
+the tricorder's wall selector lists whatever names are live. One URL serves
+them all — identity is per-screen:
+
+- **Kiosk scripting:** append `?display=<name>` to the URL
+  (`http://<ip>:5173/?display=living-room`) — normalizes like lighting
+  targets (lowercase, hyphens), persists in that browser's localStorage, and
+  skips the picker forever.
+- **First manual open** of a fresh screen that needs the ENGAGE tap shows a
+  **"WHICH VIEWSCREEN IS THIS?"** picker instead — one tap names the screen
+  AND unlocks audio. "Skip" keeps it on the primary wall.
+- **A screen with no name lands on the primary wall** (`TNG_PRIMARY_WALL`,
+  default `main`) — exactly the pre-multi-wall behavior, so a one-wall house
+  never notices any of this.
+- **Re-designating a moved box:** tap the subtle name label in the bottom-right
+  corner (cursor un-hides on mousemove) to reopen the picker, or say
+  *"Computer, this viewscreen is now the basement den."* When the move leaves
+  the old name empty, the screen keeps its current picture — state migrates
+  with the rename.
+- The "two walls talking at once" row below is HISTORY: displays and speech
+  now route per wall (red alerts and alarms still sound everywhere).
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -49,5 +73,5 @@ the router so the TV bookmark never goes stale.
 | Loaded fine yesterday, dead today | Office PC's LAN IP changed — re-run `expose-lan.ps1` to print the current IP, update the bookmark, add a DHCP reservation. |
 | Wall renders, no sound | The ENGAGE tap was missed or a refresh happened — tap the screen once. A persistent "Audio muted by browser" badge means the same thing. |
 | Wall says "Link offline" | The wall lost its WS to the vite proxy — server or vite died on the office box; `make health` there. |
-| Two walls talking at once | The hub broadcasts to every connected display, so an open office tab + the TV both speak. Close the office kiosk/tab when the TV room is the wall. |
+| Two walls talking at once | Since TNGC-35 they shouldn't: output routes to ONE named viewscreen (red alerts/alarms excepted). If it happens, both screens are running under the SAME name — check the corner labels and re-designate one. |
 | Hostname (not IP) refused by vite | Vite whitelists hostnames: start with `TNG_ALLOWED_HOSTS=office-pc.local make dev`. IPs need nothing. |

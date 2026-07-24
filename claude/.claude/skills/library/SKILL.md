@@ -85,3 +85,11 @@ touches copies already sent to others.
   regenerates (periodic table class of thing) → `diagrams` skill. Rule of
   thumb: *people* own library items; the *Computer* owns skill assets. When
   someone says "save to my tricorder", it's always this skill.
+
+## Multi-wall note (TNGC-35)
+
+`library display` paints the viewscreen the command came from — automatic,
+like every display path. Only when the person names a DIFFERENT room ("show
+my bread recipe on the kitchen wall") pass `wall: "kitchen"` on the display
+action. The phone-side "Display on wall" button honors the user's wall
+selection on its own.

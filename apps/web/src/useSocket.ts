@@ -26,10 +26,19 @@ function captionMs(text: string): number {
   return Math.min(8000, Math.max(1200, 250 + text.length * 55));
 }
 
-export function useSocket() {
+export function useSocket(displayName: string | null) {
   const [screen, setScreen] = useState<ScreenState>({ view: "boot", props: {} });
   const [voice, setVoice] = useState<VoiceLine | null>(null);
   const [connected, setConnected] = useState(false);
+  /** TNGC-35: the display name the SERVER confirmed for this socket (post-
+      normalization / rename) — what the corner label shows and localStorage
+      persists. */
+  const [confirmedDisplay, setConfirmedDisplay] = useState<{ name: string; primary: boolean } | null>(null);
+  const displayRef = useRef<string | null>(displayName);
+  /** Only a name this client DECLARED (param/storage/picker) persists — the
+      server confirming the implicit primary fallback must not brand a fresh
+      screen as "main" forever. */
+  const declaredRef = useRef(displayName !== null);
   /** True when the browser blocked audio autoplay (tab opened without the
       kiosk's --autoplay-policy flag); a tap/keypress unlocks it. */
   const [audioLocked, setAudioLocked] = useState(false);
@@ -70,7 +79,9 @@ export function useSocket() {
       ws.onopen = () => {
         retry = 0;
         setConnected(true);
-        send({ type: "hello", role: "display" });
+        // TNGC-35: declare which viewscreen this client is. Empty/absent =
+        // the server's primary wall (legacy behavior, invisible upgrade).
+        send({ type: "hello", role: "display", display: displayRef.current ?? undefined });
       };
 
       // True while the playing utterance is caption-less reading audio — that
@@ -139,6 +150,18 @@ export function useSocket() {
             setVoiceFlash({ volume: msg.volume, muted: msg.muted });
             if (voiceFlashTimer.current) clearTimeout(voiceFlashTimer.current);
             voiceFlashTimer.current = setTimeout(() => setVoiceFlash(null), 3000);
+          }
+        } else if (msg.type === "display_id") {
+          // The server's word on who we are — persist it so this screen keeps
+          // its identity across reloads (renames flow through here too).
+          displayRef.current = msg.name;
+          setConfirmedDisplay({ name: msg.name, primary: msg.primary });
+          if (declaredRef.current) {
+            try {
+              localStorage.setItem("tng.display", msg.name);
+            } catch {
+              // storage unavailable (private mode) — identity lasts the session
+            }
           }
         } else if (msg.type === "widgets") {
           setWidgets(msg.widgets);
@@ -376,5 +399,21 @@ export function useSocket() {
     };
   }, []);
 
-  return { screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash };
+  /** Re-designate this screen live ("the box moved to the den") — the server
+      migrates state when the move empties the old display, then answers with
+      display_id, which persists the new name. */
+  const setDisplay = (name: string) => {
+    declaredRef.current = true;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "set_display", name }));
+    } else {
+      displayRef.current = name; // applied at the next (re)connect hello
+    }
+  };
+
+  return {
+    screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash,
+    confirmedDisplay, setDisplay,
+  };
 }

@@ -119,15 +119,20 @@ server.registerTool(
       "swatch {label, color: \"#rrggbb\", detail?} — a rendered color chip, " +
       "divider. Accents: gold|peach|lav|blue|red. Max 64 blocks, nesting ≤3 — load the " +
       "composite skill for guidance. " +
-      "Props are view-specific.",
+      "Props are view-specific. " +
+      "VIEWSCREENS: the house can have several named walls; output automatically lands on " +
+      "the viewscreen the current command came from — pass wall ONLY when the person names " +
+      "a different room ('…on the living room wall' → wall: 'living-room'). Red alerts " +
+      "always broadcast to every viewscreen.",
     // Derived from the webapp's installed panels — never offer a view the wall
     // would render as a "not yet installed" stub.
     inputSchema: {
       view: z.enum(PANEL_VIEWS),
       props: z.record(z.unknown()).optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ view, props }) => {
+  async ({ view, props, wall }) => {
     // Resolve a prebuilt diagram reference to its SVG here, in the hands, so
     // the markup is never something the model had to carry. svgAsset is a
     // convenience the wall never sees — it only ever receives `svg`.
@@ -137,7 +142,7 @@ server.registerTool(
       const svg = await loadDiagramAsset(svgAsset); // throws → surfaced to the model
       resolved = { ...rest, svg };
     }
-    return textResult(await call("/api/console/display", { view, props: resolved }));
+    return textResult(await call("/api/console/display", { view, props: resolved, wall }));
   },
 );
 
@@ -223,11 +228,12 @@ server.registerTool(
       title: z.string().optional(),
       channel: z.string().optional(),
       durationSeconds: z.number().int().positive().optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ action, videoId, title, channel, durationSeconds }) =>
+  async ({ action, videoId, title, channel, durationSeconds, wall }) =>
     textResult(
-      await call("/api/console/queue", { action, videoId, title, channel, durationSeconds }),
+      await call("/api/console/queue", { action, videoId, title, channel, durationSeconds, wall }),
     ),
 );
 
@@ -255,9 +261,11 @@ server.registerTool(
       ]),
       rate: z.number().min(0.25).max(2).optional(),
       level: z.number().min(0).max(100).optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ action, rate, level }) => textResult(await call("/api/console/media", { action, rate, level })),
+  async ({ action, rate, level, wall }) =>
+    textResult(await call("/api/console/media", { action, rate, level, wall })),
 );
 
 server.registerTool(
@@ -361,10 +369,11 @@ server.registerTool(
       lng: z.number().min(-180).max(180).optional(),
       zoom: z.number().min(0).max(18).optional(),
       title: z.string().optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ action, amount, lat, lng, zoom, title }) =>
-    textResult(await call("/api/console/map-control", { action, amount, lat, lng, zoom, title })),
+  async ({ action, amount, lat, lng, zoom, title, wall }) =>
+    textResult(await call("/api/console/map-control", { action, amount, lat, lng, zoom, title, wall })),
 );
 
 server.registerTool(
@@ -401,6 +410,7 @@ server.registerTool(
       rate: z.number().min(0).optional(),
       layer: z.enum(["constellations", "labels", "planets"]).optional(),
       on: z.boolean().optional(),
+      wall: z.string().optional(),
     },
   },
   async (args) => textResult(await call("/api/console/sky-control", args)),
@@ -431,10 +441,11 @@ server.registerTool(
         .array(z.object({ text: z.string().min(1), lang: z.string().optional() }))
         .min(1)
         .optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ text, waitForPlayback, caption, lang, segments }) =>
-    textResult(await call("/api/console/speak", { text, waitForPlayback, caption, lang, segments })),
+  async ({ text, waitForPlayback, caption, lang, segments, wall }) =>
+    textResult(await call("/api/console/speak", { text, waitForPlayback, caption, lang, segments, wall })),
 );
 
 server.registerTool(
@@ -461,10 +472,11 @@ server.registerTool(
         .optional(),
       label: z.string().max(24).optional(),
       announce: z.string().optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ kind, seconds, time, label, announce }) =>
-    textResult(await call("/api/console/timer", { kind, seconds, time, label, announce })),
+  async ({ kind, seconds, time, label, announce, wall }) =>
+    textResult(await call("/api/console/timer", { kind, seconds, time, label, announce, wall })),
 );
 
 server.registerTool(
@@ -518,9 +530,10 @@ server.registerTool(
       q: z.string().optional(),
       name: z.string().optional(),
       family: z.enum(["prose", "data", "visual", "procedure", "notation", "media"]).optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ action, owner, id, to, q, name, family }) => {
+  async ({ action, owner, id, to, q, name, family, wall }) => {
     switch (action) {
       case "save": {
         if (!owner) throw new Error("save needs owner (the speaking user's handle)");
@@ -572,7 +585,7 @@ server.registerTool(
       case "display": {
         if (!id) throw new Error("display needs id (from search)");
         const { item, props } = await getItem(id);
-        await call("/api/console/display", { view: item.view, props });
+        await call("/api/console/display", { view: item.view, props, wall });
         return textResult(JSON.stringify({ ok: true, title: item.title, view: item.view }));
       }
       case "send": {
@@ -635,12 +648,34 @@ server.registerTool(
   "screen_state",
   {
     description:
-      "What is currently on the LCARS display (view, props, connected display count). " +
-      "For articles, props are summarized to {page, pages, pageText} — the current page's " +
-      "text only, never the whole article.",
-    inputSchema: {},
+      "What is currently on a viewscreen (view, props, widgets, queue, playback) plus the " +
+      "live viewscreen roster (`displays`, primary flagged) and which wall the state " +
+      "describes (`wall` — defaults to the current command's origin viewscreen). Pass wall " +
+      "to inspect a different room's screen. For articles, props are summarized to {page, " +
+      "pages, pageText} — the current page's text only, never the whole article.",
+    inputSchema: {
+      wall: z.string().optional(),
+    },
   },
-  async () => textResult(await call("/api/console/screen")),
+  async ({ wall }) =>
+    textResult(await call("/api/console/screen" + (wall ? `?wall=${encodeURIComponent(wall)}` : ""))),
+);
+
+server.registerTool(
+  "rename_viewscreen",
+  {
+    description:
+      "Re-designate a viewscreen — 'this viewscreen is now the basement den' → to: " +
+      "'basement den' (names normalize like lighting targets: lowercase, hyphens). `from` " +
+      "defaults to the viewscreen the current command came from, so 'this' needs no lookup. " +
+      "The screen keeps its picture; its clients persist the new name. Fails if the new " +
+      "name is already a live viewscreen or the target is the primary wall.",
+    inputSchema: {
+      to: z.string().min(1),
+      from: z.string().optional(),
+    },
+  },
+  async ({ to, from }) => textResult(await call("/api/console/rename-display", { to, from })),
 );
 
 await server.connect(new StdioServerTransport());

@@ -7,12 +7,15 @@
  */
 export const CONTRACT_VERSION = 1;
 
-/** A single utterance, fully attributed. `ts` is enqueue time (epoch ms). */
+/** A single utterance, fully attributed. `ts` is enqueue time (epoch ms).
+    TNGC-35 (additive): `wall` is the viewscreen the sender's tricorder was
+    targeting — absent means "let the Computer default" (origin/primary). */
 export interface TngMessage {
   user: string;
   device: string;
   transcript: string;
   ts: number;
+  wall?: string;
 }
 
 /** A message as persisted/relayed by the cloud queue. */
@@ -37,6 +40,8 @@ export interface QueueItem {
   cancelling?: boolean;
   kind?: "transcript" | "display";
   itemId?: string;
+  /** TNGC-35 (additive): the targeted viewscreen, for `user → wall` rows. */
+  wall?: string;
 }
 
 /** A library display command as persisted/relayed by the cloud queue
@@ -51,6 +56,15 @@ export interface CloudDisplayCommand {
   user: string;
   device: string;
   ts: number;
+  /** TNGC-35 (additive): the viewscreen "Display on wall" should paint. */
+  wall?: string;
+}
+
+/** TNGC-35: one live display as reported by the bridge's roster poll. */
+export interface RosterDisplay {
+  name: string;
+  clients: number;
+  primary?: boolean;
 }
 
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
@@ -61,11 +75,16 @@ export interface CloudDisplayCommand {
       `id` is the QueueItem id, `by` the requesting user handle.
     - display: put a saved library item on the wall (TNGC-23) — dispatched
       through the same visible queue, no session turn consumed.
+    - display_open / display_close (TNGC-36): a tricorder entered/left
+      Viewscreen mode — the bridge attaches/detaches a display client named
+      `name` (tricorder-<user>) to the house hub and relays its frames up.
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
   | { v: typeof CONTRACT_VERSION; type: "withdraw"; id: string; by?: string }
-  | { v: typeof CONTRACT_VERSION; type: "display"; cmd: CloudDisplayCommand };
+  | { v: typeof CONTRACT_VERSION; type: "display"; cmd: CloudDisplayCommand }
+  | { v: typeof CONTRACT_VERSION; type: "display_open"; name: string }
+  | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub
@@ -73,9 +92,16 @@ export type LinkDownFrame =
     - pending: legacy count-only badge frame (TNGC-21) — superseded by
       `queue`, still accepted by the hub for old bridges.
     - queue: the full dispatcher snapshot (TNGC-22) — the hub stores the
-      latest and serves it on /queue + counts it on /status. Additive in
-      v1: both ends ignore unknown frame types. */
+      latest and serves it on /queue + counts it on /status.
+    - roster (TNGC-35): the house's live viewscreen list — the hub stores the
+      latest; the PWA's wall selector reads it from /status.
+    - frame (TNGC-36): one server→display message for a tricorder viewscreen
+      (`display` = tricorder-<user>) — the hub fans it out to that user's
+      Viewscreen-mode sockets. Never stored; push-only.
+    Additive in v1: both ends ignore unknown frame types. */
 export type LinkUpFrame =
   | { v: typeof CONTRACT_VERSION; type: "ack"; id: string }
   | { v: typeof CONTRACT_VERSION; type: "pending"; count: number }
-  | { v: typeof CONTRACT_VERSION; type: "queue"; items: QueueItem[] };
+  | { v: typeof CONTRACT_VERSION; type: "queue"; items: QueueItem[] }
+  | { v: typeof CONTRACT_VERSION; type: "roster"; displays: RosterDisplay[] }
+  | { v: typeof CONTRACT_VERSION; type: "frame"; display: string; msg: unknown };

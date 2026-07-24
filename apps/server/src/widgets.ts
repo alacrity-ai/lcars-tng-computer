@@ -23,6 +23,11 @@ export class TimerEngine {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Model-composed announcement per widget, spoken on fire. */
   private announcements = new Map<string, string>();
+  /** TNGC-35: which viewscreen each widget's badge shows on. Announcements
+      still sound on EVERY wall — an alarm's job is noise. */
+  private walls = new Map<string, string>();
+  /** Walls we've ever pushed to, so removals clear their lists too. */
+  private touchedWalls = new Set<string>();
 
   constructor(
     private hub: DisplayHub,
@@ -32,10 +37,16 @@ export class TimerEngine {
   ) {}
 
   private push() {
-    this.hub.setWidgets("timers", [...this.widgets]);
+    for (const wall of this.touchedWalls) {
+      this.hub.setWidgets(
+        "timers",
+        this.widgets.filter((w) => this.walls.get(w.id) === wall),
+        wall,
+      );
+    }
   }
 
-  set(kind: TimerWidgetKind, endsAt: number, label?: string, announceText?: string): TimerWidget {
+  set(kind: TimerWidgetKind, endsAt: number, label?: string, announceText?: string, wall?: string): TimerWidget {
     if (this.widgets.length >= MAX_WIDGETS) {
       throw new Error(`widget limit reached (${MAX_WIDGETS}) — clear one first`);
     }
@@ -47,6 +58,9 @@ export class TimerEngine {
       createdAt: Date.now(),
       state: "running",
     };
+    const target = wall ?? this.hub.primary;
+    this.walls.set(widget.id, target);
+    this.touchedWalls.add(target);
     this.widgets.push(widget);
     if (announceText) this.announcements.set(widget.id, announceText);
     this.timers.set(
@@ -70,6 +84,7 @@ export class TimerEngine {
       const gone = new Set(targets.map((w) => w.id));
       this.widgets = this.widgets.filter((w) => !gone.has(w.id));
       this.push();
+      for (const id of gone) this.walls.delete(id);
     }
     return targets.length;
   }
@@ -103,6 +118,7 @@ export class TimerEngine {
         this.timers.delete(id);
         this.widgets = this.widgets.filter((w) => w.id !== id);
         this.push();
+        this.walls.delete(id);
       }, RING_LINGER_MS),
     );
   }

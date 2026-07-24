@@ -21,6 +21,7 @@ import { mintPairCode, registerRoutes } from "./register";
 export { TenantHub } from "./hub";
 
 const MAX_TRANSCRIPT_CHARS = 2000;
+const MAX_WALL_CHARS = 64;
 const MAX_FAILED_LOGINS = 5;
 const LOGIN_COOLDOWN_MS = 5 * 60_000;
 const GUEST_SESSION_TTL_MS = 24 * 60 * 60_000;
@@ -216,6 +217,30 @@ async function lookupSession(env: Env, req: Request): Promise<SessionIdentity | 
 
 app.route("/api/library", libraryRoutes(lookupSession, hub));
 
+// ---- Viewscreen mode socket (TNGC-36) — registered BEFORE the session gate:
+// browser WebSockets can't set Authorization headers, so the session token
+// arrives as ?token= and is validated here explicitly. Frames flow DO → phone
+// only; the socket accepts nothing but the platform's ping/pong keepalive.
+
+app.get("/api/screen", async (c) => {
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+    return c.json({ error: "websocket upgrade required" }, 426);
+  }
+  const token = c.req.query("token") ?? "";
+  if (!token) return c.json({ error: "unauthorized" }, 401);
+  const authed = new Request(c.req.raw.url, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const session = await lookupSession(c.env, authed);
+  if (!session) return c.json({ error: "unauthorized" }, 401);
+  if (session.role === "guest") {
+    return c.json({ error: "the guest account has no viewscreen" }, 403);
+  }
+  const fwd = new Request("https://hub/screen", c.req.raw);
+  fwd.headers.set("x-user-handle", session.userHandle);
+  return hub(c, session.tenantId).fetch(fwd);
+});
+
 // ---- session gate for everything else under /api/ ----------------------------
 
 app.use("/api/*", async (c, next) => {
@@ -260,7 +285,7 @@ app.post("/api/logout", async (c) => {
 // ---- the microphone -----------------------------------------------------------
 
 app.post("/api/message", async (c) => {
-  let body: { transcript?: unknown };
+  let body: { transcript?: unknown; wall?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -272,6 +297,12 @@ app.post("/api/message", async (c) => {
   if (body.transcript.length > MAX_TRANSCRIPT_CHARS) {
     return c.json({ error: `transcript too long (max ${MAX_TRANSCRIPT_CHARS} chars)` }, 400);
   }
+  // TNGC-35: the sender's viewscreen selection rides the envelope; absent
+  // means "let the Computer default" (origin/primary resolution house-side).
+  const wall =
+    typeof body.wall === "string" && body.wall.trim()
+      ? body.wall.trim().slice(0, MAX_WALL_CHARS)
+      : undefined;
 
   const s = c.get("session");
   const msg: TngMessage = {
@@ -279,6 +310,7 @@ app.post("/api/message", async (c) => {
     device: s.deviceLabel,
     transcript: body.transcript.trim(),
     ts: Date.now(),
+    ...(wall ? { wall } : {}),
   };
   const res = await hub(c, s.tenantId).fetch(
     new Request("https://hub/enqueue", {

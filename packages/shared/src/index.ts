@@ -515,6 +515,40 @@ export interface MathPanelProps {
 
 export type PanelProps = Record<string, unknown>;
 
+// ---------- Named displays / viewscreens (TNGC-35) ----------
+// One server, one URL, N named displays: the hub keys screen state, widgets,
+// playback, history, and timers by display name. Physical walls self-label
+// once (picker / ?display=); the tricorder registers as "tricorder-<user>"
+// (TNGC-36). Unnamed legacy clients land on the primary wall so a one-wall
+// house upgrades with zero behavior change.
+
+/** Display used when nothing configures one (TNG_PRIMARY_WALL overrides). */
+export const DEFAULT_PRIMARY_DISPLAY = "main";
+
+/** Same normalization contract as lighting targets: lowercase, whitespace →
+    hyphens, then strip everything that isn't [a-z0-9-] ("Ariel's Studio" →
+    "ariels-studio", "Living Room" → "living-room"). Returns "" when nothing
+    survives — callers treat that as "no name given". */
+export function normalizeDisplayName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
+/** One live display in the roster (connected clients only). */
+export interface DisplayRosterEntry {
+  name: string;
+  /** Connected sockets showing this display (a name can have several). */
+  clients: number;
+  /** The primary wall — where spontaneous/unrouted output lands. */
+  primary?: boolean;
+}
+
 // ---------- Composite panel (TNGC-33) ----------
 // The declarative panel language: plugins AND the model compose dashboards
 // from LCARS primitives; the wall renders them through trusted components
@@ -859,6 +893,14 @@ export interface WidgetsMessage {
   widgets: Widget[];
 }
 
+/** TNGC-35: the server's answer to hello/set_display — the (normalized) name
+    this socket is now showing, so the client can persist and label it. */
+export interface DisplayIdMessage {
+  type: "display_id";
+  name: string;
+  primary: boolean;
+}
+
 export type ServerMessage =
   | DisplayMessage
   | SpeakMessage
@@ -869,13 +911,25 @@ export type ServerMessage =
   | WorkingMessage
   | WidgetsMessage
   | VoiceStateMessage
-  | PlaybackMessage;
+  | PlaybackMessage
+  | DisplayIdMessage;
 
 // ---------- Webapp → server ----------
 
 export interface HelloMessage {
   type: "hello";
   role: "display";
+  /** TNGC-35: which viewscreen this client is. Omitted/empty = the primary
+      wall (legacy clients upgrade invisibly). */
+  display?: string;
+}
+
+/** TNGC-35: re-designate a live client ("this box moved to the basement").
+    When the old display is left empty by the move, its state migrates to the
+    new name — no blank screen on rename. */
+export interface SetDisplayMessage {
+  type: "set_display";
+  name: string;
 }
 
 export interface SpeakDoneMessage {
@@ -909,16 +963,22 @@ export interface VideoEndedMessage {
 
 export type ClientMessage =
   | HelloMessage
+  | SetDisplayMessage
   | SpeakDoneMessage
   | ScreenStateMessage
   | VideoErrorMessage
   | VideoEndedMessage;
 
 // ---------- Console REST API (MCP server → API server) ----------
+// TNGC-35: every route that touches a screen accepts an optional `wall`. The
+// server resolves the target as: explicit wall → the origin wall of the
+// command being served (the bridge posts it at dispatch) → the primary wall.
+// Voice routing therefore works with the caller passing nothing at all.
 
 export interface DisplayRequest {
   view: PanelView;
   props?: PanelProps;
+  wall?: string;
 }
 
 export interface SpeakRequest {
@@ -937,6 +997,7 @@ export interface SpeakRequest {
       for a foreign word or phrase inside an English sentence. The caption
       shows the concatenated segment texts. */
   segments?: SpeakSegment[];
+  wall?: string;
 }
 
 /** One run of same-language text inside a mixed-language speak call. */
@@ -948,6 +1009,7 @@ export interface SpeakSegment {
 
 export interface ChimeRequest {
   name: ChimeName;
+  wall?: string;
 }
 
 export interface MediaRequest {
@@ -956,6 +1018,7 @@ export interface MediaRequest {
   rate?: number;
   /** volume only: absolute level 0–100. */
   level?: number;
+  wall?: string;
 }
 
 export interface MapControlRequest {
@@ -965,9 +1028,10 @@ export interface MapControlRequest {
   lng?: number;
   zoom?: number;
   title?: string;
+  wall?: string;
 }
 
-export type SkyControlRequest = Omit<SkyControlMessage, "type">;
+export type SkyControlRequest = Omit<SkyControlMessage, "type"> & { wall?: string };
 
 /** Fired by harness hooks (UserPromptSubmit / Stop), not by the model. */
 export interface WorkingRequest {
@@ -980,6 +1044,12 @@ export interface WorkingRequest {
 export interface ScreenStateResponse {
   view: PanelView;
   props: PanelProps;
+  /** TNGC-35: which viewscreen this state describes (explicit ?wall= or the
+      origin/primary default). */
+  wall: string;
+  /** Live viewscreens (connected clients only), primary flagged. */
+  displays: DisplayRosterEntry[];
+  /** Total connected display clients across every viewscreen. */
   connectedDisplays: number;
   /** Active overlay widgets (timers, alarms) — includes each widget's id for clear_timer. */
   widgets: Widget[];
@@ -1006,6 +1076,9 @@ export interface SetTimerRequest {
   /** Natural sentence the server speaks when it fires ("Your tea is ready.").
       Falls back to a generic announcement. */
   announce?: string;
+  /** Viewscreen the countdown badge shows on (announcements sound on ALL
+      walls regardless — an alarm's job is noise). */
+  wall?: string;
 }
 
 export interface SetTimerResponse {
@@ -1043,6 +1116,7 @@ export interface PanelHistoryEntry {
     full props stay server-side and never re-enter the session's context. */
 export interface DisplayHistoryRequest {
   limit?: number;
+  wall?: string;
 }
 
 export interface DisplayHistoryResponse {
@@ -1053,6 +1127,7 @@ export interface DisplayHistoryResponse {
 /** redisplay: replay a recorded panel verbatim by history id. */
 export interface RedisplayRequest {
   id: string;
+  wall?: string;
 }
 
 export interface RedisplayResponse {
@@ -1079,6 +1154,8 @@ export interface QueueRequest {
   title?: string;
   channel?: string;
   durationSeconds?: number;
+  /** TNGC-35: which viewscreen's play queue (each wall has its own). */
+  wall?: string;
 }
 
 export interface QueueResponse {
@@ -1095,6 +1172,7 @@ export interface ReadArticleRequest {
   url: string;
   /** 1-based page to start reading from (default 1). */
   page?: number;
+  wall?: string;
 }
 
 export interface ReadArticleResponse {
@@ -1111,6 +1189,7 @@ export interface OpenUrlRequest {
   url: string;
   /** 1-based page of an already-opened article (served from cache). */
   page?: number;
+  wall?: string;
 }
 
 export interface OpenUrlResponse {

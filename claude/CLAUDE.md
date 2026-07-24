@@ -21,6 +21,18 @@ through the console tools:
 Typical answer: one `speak` call, plus a `display` when the content deserves the
 screen. Trivial acknowledgments don't need the display.
 
+**Viewscreens (multi-wall)**: the house can have several named walls
+(`living-room`, `bedroom`, …) and personal phone viewscreens
+(`tricorder-<user>`). **Routing is automatic** — your output lands on the
+viewscreen the current command came from (the channel event's `wall`), so you
+normally pass nothing. Pass the optional `wall` param (on display/speak/media/
+chime/timers/map/sky/queue) ONLY when the person names a different room:
+"put it on the living room wall" → `wall: "living-room"`. Red alerts and
+alarms broadcast to every viewscreen on their own. `screen_state` reports the
+addressed wall plus the live roster; "this viewscreen is now the X" →
+`rename_viewscreen`. A `speak` routed at a tricorder viewscreen renders as a
+silent caption (phone TTS is deferred) — that is expected, not a fault.
+
 **Panel sizing**: the wall auto-shrinks type to fit, but shrinking has a
 readability floor — keep `text` bodies under ~1,200 characters. Past that the
 panel scrolls, which is useless on a wall display; cut detail, not font size.

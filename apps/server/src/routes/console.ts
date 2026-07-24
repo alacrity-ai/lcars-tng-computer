@@ -42,8 +42,8 @@ let speechGeneration = 0;
 
 /** What the viewer is currently reading: a text panel's body, or the visible
     article page. Empty for every other view. */
-function onScreenText(hub: DisplayHub): string {
-  const { view, props } = hub.state;
+function onScreenText(hub: DisplayHub, wall: string): string {
+  const { view, props } = hub.stateFor(wall);
   if (view === "text" && typeof props.body === "string") return props.body;
   if (view === "image" && typeof props.body === "string") return props.body;
   if (view === "article" && Array.isArray(props.paragraphs)) {
@@ -88,18 +88,21 @@ function humanDelta(ms: number): string {
  * the hub, answer. All intelligence lives in the Claude session.
  */
 export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
-  let lastCompositeAt = 0;
+  /** Per-display composite rate limiter (TNGC-35) — one chatty plugin can't
+      strobe a wall, and two walls refreshing dashboards don't fight. */
+  const lastCompositeAt = new Map<string, number>();
   // Unprompted server-initiated speech, used when a timer fires with the
   // session idle: chime, then speak, superseding any in-flight utterance —
   // an alarm outranks whatever the Computer happens to be saying or reading.
+  // Broadcast policy (TNGC-35): alarms sound on EVERY viewscreen.
   const timerEngine = new TimerEngine(hub, async (text) => {
     cancelActiveReading();
     const gen = ++speechGeneration;
-    hub.broadcast({ type: "chime", name: "complete" });
+    hub.broadcastAll({ type: "chime", name: "complete" });
     const synth = await synthesize(text);
     if (gen !== speechGeneration) return; // something newer superseded the alarm
     if (synth) {
-      hub.broadcast({
+      hub.broadcastAll({
         type: "speak",
         utteranceId: synth.utteranceId,
         text,
@@ -111,11 +114,60 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       });
     } else {
       // TTS offline — caption-only, same degradation as the speak route.
-      hub.broadcast({ type: "speak", utteranceId: randomUUID(), text, caption: true, alarm: true });
+      hub.broadcastAll({ type: "speak", utteranceId: randomUUID(), text, caption: true, alarm: true });
     }
   });
-  const history = new PanelHistory();
-  hub.setDisplayObserver((view, props) => history.record(view, props));
+  /** Replay history per viewscreen (TNGC-35): "show that again" means what
+      was on THIS wall, not what the bedroom saw. */
+  const histories = new Map<string, PanelHistory>();
+  const historyFor = (wall: string): PanelHistory => {
+    let h = histories.get(wall);
+    if (!h) {
+      h = new PanelHistory();
+      histories.set(wall, h);
+    }
+    return h;
+  };
+  hub.setDisplayObserver((wall, view, props) => historyFor(wall).record(view, props));
+
+  // ---- viewscreen plumbing (TNGC-35) ----------------------------------------
+
+  /** Bridge-posted at command dispatch: the wall (and user) the command being
+      served came from. Every route's target default keys off this — voice
+      routing needs no tool-schema knowledge at all. Cleared at turn end. */
+  app.post<{ Body: { wall?: string | null; user?: string | null } }>(
+    "/api/console/origin",
+    async (req) => {
+      const wall = typeof req.body?.wall === "string" ? req.body.wall : null;
+      hub.setOrigin(wall);
+      return { ok: true, origin: hub.origin };
+    },
+  );
+
+  /** Live roster — the wall client's picker and the bridge's roster poll. */
+  app.get("/api/console/displays", async () => ({
+    ok: true,
+    primary: hub.primary,
+    displays: hub.roster(),
+  }));
+
+  /** Voice rename ("this viewscreen is now the basement den"): re-keys hub
+      state — no blank screen — and the clients persist the new name. */
+  app.post<{ Body: { to?: string; from?: string } }>(
+    "/api/console/rename-display",
+    async (req, reply) => {
+      const { to, from } = req.body ?? {};
+      if (!to) return reply.code(400).send({ error: "to (the new name) is required" });
+      const result = hub.renameDisplay(from ?? hub.resolveWall(undefined), to);
+      if ("error" in result) return reply.code(409).send(result);
+      const h = histories.get(result.from);
+      if (h) {
+        histories.delete(result.from);
+        histories.set(result.to, h);
+      }
+      return result;
+    },
+  );
 
   // TNGC-27: the voice setting survives everything — load at boot, persist
   // on every change. hub.setVoice broadcasts voice_state to the wall(s).
@@ -160,8 +212,8 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   // save path (TNGC-23). Called by console-mcp, never the model: the props
   // (30 KB diagram SVGs, full article paragraphs) flow server → MCP → cloud
   // without touching model context. Navigation views have nothing to save.
-  app.get("/api/console/history/current", async (_req, reply) => {
-    const { view, props } = hub.state;
+  app.get<{ Querystring: { wall?: string } }>("/api/console/history/current", async (req, reply) => {
+    const { view, props } = hub.stateFor(hub.resolveWall(req.query?.wall));
     if (view === "status" || view === "blank" || view === "boot") {
       return reply.code(409).send({ error: "nothing savable on screen (idle board)" });
     }
@@ -169,21 +221,34 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   });
 
   app.post<{ Body: DisplayHistoryRequest }>("/api/console/display-history", async (req) => {
-    const body: DisplayHistoryResponse = { ok: true, entries: history.list(req.body?.limit) };
+    const wall = hub.resolveWall(req.body?.wall);
+    const body: DisplayHistoryResponse = {
+      ok: true,
+      entries: historyFor(wall).list(req.body?.limit),
+    };
     return body;
   });
 
   app.post<{ Body: RedisplayRequest }>("/api/console/redisplay", async (req, reply) => {
     const { id } = req.body ?? {};
     if (!id) return reply.code(400).send({ error: "id is required" });
-    const entry = history.get(id);
+    const wall = hub.resolveWall(req.body?.wall);
+    // The target wall's history first; then anyone's — "show that again" from
+    // another room should still find it, and it replays onto THIS wall.
+    let entry = historyFor(wall).get(id);
+    if (!entry) {
+      for (const h of histories.values()) {
+        entry = h.get(id);
+        if (entry) break;
+      }
+    }
     if (!entry) return reply.code(404).send({ error: `no history entry ${id}` });
     cancelActiveReading();
     const props =
       entry.view === "youtube"
         ? ((await decorateYoutubeProps(entry.props)) as typeof entry.props)
         : entry.props;
-    hub.broadcast({ type: "display", view: entry.view, props });
+    hub.broadcast({ type: "display", view: entry.view, props }, wall);
     const body: RedisplayResponse = { ok: true, view: entry.view, summary: entry.summary };
     return body;
   });
@@ -191,13 +256,14 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   app.post<{ Body: DisplayRequest }>("/api/console/display", async (req, reply) => {
     const { view, props } = req.body ?? {};
     if (!view) return reply.code(400).send({ error: "view is required" });
+    const wall = hub.resolveWall(req.body?.wall);
     // A new panel supersedes an in-flight reading session.
     cancelActiveReading();
     // A saved playlist isn't a panel — it's queue state (TNGC-25). Restoring
     // here means the PWA's "Display on wall" (bridge POSTs to this route)
     // and the voice path both work with zero extra machinery.
     if ((view as string) === "playlist") {
-      const result = restorePlaylist(props ?? {});
+      const result = restorePlaylist(props ?? {}, wall);
       if ("error" in result) return reply.code(409).send(result);
       return { view, ...result };
     }
@@ -209,16 +275,22 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       const err = validateComposite(props ?? {});
       if (err) return reply.code(400).send({ error: err });
       const now = Date.now();
-      if (now - lastCompositeAt < 500) {
+      if (now - (lastCompositeAt.get(wall) ?? 0) < 500) {
         return reply.code(429).send({ error: "composite refresh rate limit (2/s) — batch your updates" });
       }
-      lastCompositeAt = now;
+      lastCompositeAt.set(wall, now);
     }
     // Embed-blocked youtube videos flip to the extracted-audio path here —
     // server-decided, from cache (TNGC-24); the session never reasons about it.
     const resolved = view === "youtube" ? await decorateYoutubeProps(props ?? {}) : (props ?? {});
-    hub.broadcast({ type: "display", view, props: resolved });
-    return { ok: true, view };
+    // Broadcast policy (TNGC-35): a RED alert goes to every viewscreen;
+    // everything else paints the addressed wall only.
+    if (view === "alert" && (resolved as { level?: unknown }).level === "red") {
+      hub.broadcastAll({ type: "display", view, props: resolved });
+      return { ok: true, view, wall: "*" };
+    }
+    hub.broadcast({ type: "display", view, props: resolved }, wall);
+    return { ok: true, view, wall };
   });
 
   app.post<{ Body: ReadArticleRequest }>("/api/console/read-article", async (req, reply) => {
@@ -238,7 +310,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       return reply.code(502).send({ error: `could not open page: ${message}` });
     }
     speechGeneration++; // reading supersedes any in-flight chunked speak
-    const started = startReading(hub, parsedUrl.href, article, page ?? 1);
+    const started = startReading(hub, hub.resolveWall(req.body?.wall), parsedUrl.href, article, page ?? 1);
     const body: ReadArticleResponse = {
       ok: true,
       url: parsedUrl.href,
@@ -251,10 +323,13 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
 
   // Hit by Claude Code hooks (UserPromptSubmit / Stop), not the model: the
   // wall reacts the instant a prompt is submitted, before any thinking.
+  // One brain — its busy state is house truth, so every wall shows it.
   app.post<{ Body: WorkingRequest }>("/api/console/working", async (req) => {
     const { active = true, chime = true } = req.body ?? {};
-    hub.broadcast({ type: "working", active });
-    if (active && chime) hub.broadcast({ type: "chime", name: "acknowledge" });
+    hub.broadcastAll({ type: "working", active });
+    // The acknowledge earcon plays where the request came from (origin wall,
+    // else primary) — the badge is global, the chirp is local.
+    if (active && chime) hub.broadcast({ type: "chime", name: "acknowledge" }, hub.resolveWall(undefined));
     return { ok: true, active };
   });
 
@@ -263,9 +338,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   // many voice commands are waiting on the busy session (TNGC-21).
   app.post<{ Body: { count?: number } }>("/api/console/command-pending", async (req) => {
     const count = Math.max(0, Math.trunc(req.body?.count ?? 0));
+    // The dispatcher queue is house-wide state — the badge shows everywhere.
     hub.setWidgets(
       "commands",
       count === 0 ? [] : [{ id: "commands", kind: "commands", count }],
+      "*",
     );
     return { ok: true, count };
   });
@@ -279,10 +356,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (action === "goto" && (typeof lat !== "number" || typeof lng !== "number")) {
       return reply.code(400).send({ error: "goto requires numeric lat and lng" });
     }
-    if (hub.state.view !== "map") {
-      return reply.code(409).send({ error: "no map is on screen" });
+    const wall = hub.resolveWall(req.body?.wall);
+    if (hub.stateFor(wall).view !== "map") {
+      return reply.code(409).send({ error: `no map is on the ${wall} viewscreen` });
     }
-    hub.broadcast({ type: "map_control", action, amount, lat, lng, zoom, title });
+    hub.broadcast({ type: "map_control", action, amount, lat, lng, zoom, title }, wall);
     return { ok: true, action };
   });
 
@@ -316,10 +394,12 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (action === "toggle" && !["constellations", "labels", "planets"].includes(body.layer ?? "")) {
       return reply.code(400).send({ error: "toggle needs layer: constellations | labels | planets" });
     }
-    if (hub.state.view !== "night-sky") {
-      return reply.code(409).send({ error: "no night sky is on screen" });
+    const wall = hub.resolveWall(body.wall);
+    if (hub.stateFor(wall).view !== "night-sky") {
+      return reply.code(409).send({ error: `no night sky is on the ${wall} viewscreen` });
     }
-    hub.broadcast({ type: "sky_control", ...body });
+    const { wall: _wall, ...controls } = body;
+    hub.broadcast({ type: "sky_control", ...controls }, wall);
     return { ok: true, action };
   });
 
@@ -342,7 +422,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
     let widget;
     try {
-      widget = timerEngine.set(kind, endsAt, label, announce);
+      widget = timerEngine.set(kind, endsAt, label, announce, hub.resolveWall(req.body?.wall));
     } catch (err) {
       return reply.code(409).send({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -368,7 +448,9 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   app.post<{ Body: ChimeRequest }>("/api/console/chime", async (req, reply) => {
     const { name } = req.body ?? {};
     if (!name) return reply.code(400).send({ error: "name is required" });
-    hub.broadcast({ type: "chime", name });
+    // Broadcast policy: the red-alert klaxon sounds everywhere.
+    if (name === "red-alert") hub.broadcastAll({ type: "chime", name });
+    else hub.broadcast({ type: "chime", name }, hub.resolveWall(req.body?.wall));
     return { ok: true, name };
   });
 
@@ -381,20 +463,23 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (!actions.includes(action)) {
       return reply.code(400).send({ error: `action must be one of: ${actions.join(", ")}` });
     }
+    // Media controls route by wall (TNGC-35): "pause" in the bedroom must
+    // not freeze the living-room movie.
+    const wall = hub.resolveWall(req.body?.wall);
     if (action === "speed") {
       // YouTube's supported range; anything else the player silently ignores,
       // which would read as the command not working.
       if (typeof rate !== "number" || rate < 0.25 || rate > 2) {
         return reply.code(400).send({ error: "speed requires rate between 0.25 and 2" });
       }
-      hub.broadcast({ type: "media", action, rate });
+      hub.broadcast({ type: "media", action, rate }, wall);
       return { ok: true, action, rate };
     }
     if (action === "volume") {
       if (typeof level !== "number" || level < 0 || level > 100) {
         return reply.code(400).send({ error: "volume requires level between 0 and 100" });
       }
-      hub.broadcast({ type: "media", action, level: Math.round(level) });
+      hub.broadcast({ type: "media", action, level: Math.round(level) }, wall);
       return { ok: true, action, level: Math.round(level) };
     }
     if (action === "stop") {
@@ -402,9 +487,9 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       speechGeneration++;
       // TNGC-26: stop ends the playback SESSION (foreground or background) —
       // the persistent player tears down, the ♫ badge clears.
-      hub.clearPlayback();
+      hub.clearPlayback(wall);
     }
-    hub.broadcast({ type: "media", action });
+    hub.broadcast({ type: "media", action }, wall);
     return { ok: true, action };
   });
 
@@ -415,6 +500,10 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     const segments = req.body?.segments?.filter((s) => s.text);
     const text = segments?.length ? segments.map((s) => s.text).join("") : rawText;
     if (!text) return reply.code(400).send({ error: "text is required" });
+
+    // Speech routes by wall (TNGC-35) — one voice pipeline, aimed at the
+    // viewscreen the command came from.
+    const wall = hub.resolveWall(req.body?.wall);
 
     // The Computer speaking supersedes an in-flight reading session — never
     // talk over the reading voice.
@@ -430,7 +519,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (caption) {
       const probe = text.slice(0, 80);
       if (probe.length >= 40) {
-        const at = onScreenText(hub).indexOf(probe);
+        const at = onScreenText(hub, wall).indexOf(probe);
         if (at >= 0) {
           effectiveCaption = false;
           screenOffset = at;
@@ -454,7 +543,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       // Sidecar down: caption-only single utterance so the Computer degrades
       // to silent-but-visible rather than mute-and-blank.
       const utteranceId = randomUUID();
-      hub.broadcast({ type: "speak", utteranceId, text, caption: effectiveCaption });
+      hub.broadcast({ type: "speak", utteranceId, text, caption: effectiveCaption }, wall);
       if (waitForPlayback) await hub.waitForSpeakDone(utteranceId);
       return { ok: true, utteranceId, tts: "offline" };
     }
@@ -472,7 +561,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
           caption: effectiveCaption,
           timing: synth.timing,
           highlightBase,
-        });
+        }, wall);
         await hub.waitForSpeakDone(synth.utteranceId, synth.durationMs + 20_000);
         highlightBase += parts[i].length;
       }
@@ -492,24 +581,30 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   // echoing all of it to the agent dumped ~12k tokens per screen_state call
   // on long articles. Summarize: swap paragraphs for page count + the
   // current page's text.
-  app.get("/api/console/screen", async (): Promise<ScreenStateResponse> => {
-    const s = hub.state;
-    const extras = { voice: hub.voice, playback: hub.playbackState };
-    if (s.view === "article" && Array.isArray(s.props.paragraphs)) {
-      const pages = paginateArticle(s.props.paragraphs as string[]);
-      const page = Math.min(Math.max(Number(s.props.page ?? 1), 1), pages.length);
-      const { paragraphs: _full, ...rest } = s.props;
-      return {
-        view: s.view,
-        props: { ...rest, page, pages: pages.length, pageText: pages[page - 1].join(" ") },
-        connectedDisplays: s.connectedDisplays,
-        widgets: s.widgets,
-        queue: getQueue(),
-        ...extras,
-      };
-    }
-    return { ...s, queue: getQueue(), ...extras };
-  });
+  app.get<{ Querystring: { wall?: string } }>(
+    "/api/console/screen",
+    async (req): Promise<ScreenStateResponse> => {
+      const wall = hub.resolveWall(req.query?.wall);
+      const s = hub.stateFor(wall);
+      const extras = { voice: hub.voice, playback: hub.playbackState(wall) };
+      if (s.view === "article" && Array.isArray(s.props.paragraphs)) {
+        const pages = paginateArticle(s.props.paragraphs as string[]);
+        const page = Math.min(Math.max(Number(s.props.page ?? 1), 1), pages.length);
+        const { paragraphs: _full, ...rest } = s.props;
+        return {
+          view: s.view,
+          props: { ...rest, page, pages: pages.length, pageText: pages[page - 1].join(" ") },
+          wall: s.wall,
+          displays: s.displays,
+          connectedDisplays: s.connectedDisplays,
+          widgets: s.widgets,
+          queue: getQueue(wall),
+          ...extras,
+        };
+      }
+      return { ...s, queue: getQueue(wall), ...extras };
+    },
+  );
 
   app.get("/api/console/tts", async () => (await ttsHealth()) ?? { engine: "offline" });
 }

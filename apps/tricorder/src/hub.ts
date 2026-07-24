@@ -24,6 +24,7 @@ import type {
   LinkDownFrame,
   LinkUpFrame,
   QueueItem,
+  RosterDisplay,
   TngMessage,
 } from "@tng/contract";
 
@@ -67,8 +68,33 @@ export class TenantHub extends DurableObject<Env> {
     return Number(this.env.MESSAGE_TTL_MS ?? 60_000);
   }
 
+  /** Bridge link sockets. Tagged "link" since TNGC-35/36; sockets with NO
+      tags are pre-tag bridges that survived a deploy under hibernation —
+      treat them as links so an upgrade never orphans a live house. */
+  private linkSockets(): WebSocket[] {
+    return this.ctx.getWebSockets().filter((ws) => {
+      const tags = this.ctx.getTags(ws);
+      return tags.includes("link") || tags.length === 0;
+    });
+  }
+
+  /** Phone sockets in Viewscreen mode (TNGC-36), optionally one user's. */
+  private screenSockets(user?: string): WebSocket[] {
+    return this.ctx.getWebSockets(user ? `user:${user}` : "screen");
+  }
+
   private online(): boolean {
-    return this.ctx.getWebSockets().length > 0;
+    return this.linkSockets().length > 0;
+  }
+
+  private sendDown(frame: LinkDownFrame): void {
+    for (const ws of this.linkSockets()) {
+      try {
+        ws.send(JSON.stringify(frame));
+      } catch {
+        // dead socket — persistent frames replay; ephemeral ones re-derive
+      }
+    }
   }
 
   private async depth(): Promise<number> {
@@ -93,12 +119,46 @@ export class TenantHub extends DurableObject<Env> {
       const pair = new WebSocketPair();
       // Exactly one bridge per tenant: a new link replaces any stale ghost
       // (half-dead NAT sockets linger; the newest connection wins).
-      for (const ws of this.ctx.getWebSockets()) ws.close(1012, "replaced by new link");
-      // A fresh bridge starts with an empty queue; drop the old snapshot so
-      // a crashed bridge's queue can't haunt the PWA until the first push.
+      for (const ws of this.linkSockets()) ws.close(1012, "replaced by new link");
+      // A fresh bridge starts with an empty queue and no roster; drop the old
+      // snapshots so a crashed bridge's state can't haunt the PWA.
       await this.ctx.storage.delete("queue");
-      this.ctx.acceptWebSocket(pair[1]);
+      await this.ctx.storage.delete("roster");
+      this.ctx.acceptWebSocket(pair[1], ["link"]);
       await this.replay(pair[1]);
+      // Re-attach every phone still in Viewscreen mode (TNGC-36): the new
+      // bridge knows nothing about them, and frames only flow while it does.
+      const users = new Set<string>();
+      for (const ws of this.screenSockets()) {
+        const tag = this.ctx.getTags(ws).find((t) => t.startsWith("user:"));
+        if (tag) users.add(tag.slice(5));
+      }
+      for (const user of users) {
+        try {
+          pair[1].send(JSON.stringify({ v: 1, type: "display_open", name: `tricorder-${user}` } satisfies LinkDownFrame));
+        } catch {
+          // link died mid-handshake — its replacement will redo this
+        }
+      }
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+
+    // Viewscreen mode (TNGC-36): a phone attaches here to RECEIVE display
+    // frames. The Worker authenticated the session and passes the user
+    // handle; the first socket for a user opens the house-side display,
+    // the last one closing shuts it.
+    if (url.pathname === "/screen") {
+      if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return json({ error: "websocket upgrade required" }, 426);
+      }
+      const user = req.headers.get("x-user-handle") ?? "";
+      if (!user) return json({ error: "missing user" }, 400);
+      const pair = new WebSocketPair();
+      const already = this.screenSockets(user).length > 0;
+      this.ctx.acceptWebSocket(pair[1], ["screen", `user:${user}`]);
+      if (!already) {
+        this.sendDown({ v: 1, type: "display_open", name: `tricorder-${user}` });
+      }
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
@@ -115,14 +175,7 @@ export class TenantHub extends DurableObject<Env> {
       const base = (await req.json()) as TngMessage;
       const msg: CloudMessage = { ...base, id: crypto.randomUUID() };
       await this.ctx.storage.put(`msg:${msg.id}`, msg);
-      const frame: LinkDownFrame = { v: 1, type: "msg", msg };
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(JSON.stringify(frame));
-        } catch {
-          // dead socket — the message stays stored; replay covers it
-        }
-      }
+      this.sendDown({ v: 1, type: "msg", msg });
       return json({
         ok: true,
         online: this.online(),
@@ -138,14 +191,7 @@ export class TenantHub extends DurableObject<Env> {
       if (!this.online()) return json({ error: "Computer offline" }, 409);
       const cmd = (await req.json()) as CloudDisplayCommand;
       await this.ctx.storage.put(`msg:${cmd.id}`, { ...cmd, kind: "display" });
-      const frame: LinkDownFrame = { v: 1, type: "display", cmd };
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(JSON.stringify(frame));
-        } catch {
-          // dead socket — the command stays stored; replay covers it
-        }
-      }
+      this.sendDown({ v: 1, type: "display", cmd });
       return json({ ok: true, online: true, pending: (await this.queueItems()).length }, 202);
     }
 
@@ -154,6 +200,11 @@ export class TenantHub extends DurableObject<Env> {
         online: this.online(),
         queued: await this.depth(),
         pending: (await this.queueItems()).length,
+        // TNGC-35: the house's live viewscreens (bridge-reported). Offline →
+        // empty, like the queue — a stale roster is worse than none.
+        displays: this.online()
+          ? ((await this.ctx.storage.get<RosterDisplay[]>("roster")) ?? [])
+          : [],
       });
     }
 
@@ -165,15 +216,7 @@ export class TenantHub extends DurableObject<Env> {
       const { id, by } = (await req.json()) as { id?: string; by?: string };
       if (typeof id !== "string" || !id) return json({ error: "id is required" }, 400);
       if (!this.online()) return json({ error: "Computer offline — nothing to withdraw" }, 409);
-      const frame: LinkDownFrame = { v: 1, type: "withdraw", id, by };
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(JSON.stringify(frame));
-        } catch {
-          // dead socket — the withdraw is lost, which the PWA's fast
-          // re-poll makes visible (the item is still listed)
-        }
-      }
+      this.sendDown({ v: 1, type: "withdraw", id, by });
       return json({ ok: true }, 202);
     }
 
@@ -203,14 +246,35 @@ export class TenantHub extends DurableObject<Env> {
     }
   }
 
-  async webSocketMessage(_ws: WebSocket, data: ArrayBuffer | string): Promise<void> {
+  async webSocketMessage(ws: WebSocket, data: ArrayBuffer | string): Promise<void> {
     if (typeof data !== "string") return;
+    // Up-frames only come from the bridge link; phone screen sockets are
+    // receive-only (their keepalive is the ping/pong auto-response).
+    if (this.ctx.getTags(ws).includes("screen")) return;
     try {
       const frame = JSON.parse(data) as LinkUpFrame;
       if (frame.type === "ack" && typeof frame.id === "string") {
         await this.ctx.storage.delete(`msg:${frame.id}`);
       } else if (frame.type === "queue" && Array.isArray(frame.items)) {
         await this.ctx.storage.put("queue", frame.items.slice(0, 50));
+      } else if (frame.type === "roster" && Array.isArray(frame.displays)) {
+        // TNGC-35: the wall selector's source of truth. Bounded like the queue.
+        await this.ctx.storage.put("roster", frame.displays.slice(0, 32));
+      } else if (frame.type === "frame" && typeof frame.display === "string") {
+        // TNGC-36: push one server→display message to the user whose
+        // tricorder viewscreen this is. Never stored — display frames are
+        // ephemeral by design (the phone re-syncs on reconnect).
+        if (frame.display.startsWith("tricorder-")) {
+          const user = frame.display.slice("tricorder-".length);
+          const payload = JSON.stringify(frame.msg);
+          for (const s of this.screenSockets(user)) {
+            try {
+              s.send(payload);
+            } catch {
+              // dying socket — webSocketClose will tidy up
+            }
+          }
+        }
       } else if (frame.type === "pending" && typeof frame.count === "number") {
         // Legacy count-only frame from a pre-TNGC-22 bridge: synthesize a
         // faceless snapshot so /status still counts something sensible.
@@ -230,7 +294,18 @@ export class TenantHub extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(): Promise<void> {
-    // Nothing to clean: getWebSockets() reflects reality, storage is the queue.
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    // A phone leaving Viewscreen mode: when its user's LAST screen socket
+    // closes, detach the house-side display so it drops from the roster.
+    // (Bridge links need no cleanup: getWebSockets() reflects reality,
+    // storage is the queue.)
+    const tag = this.ctx.getTags(ws).find((t) => t.startsWith("user:"));
+    if (!tag) return;
+    const user = tag.slice(5);
+    // The closing socket can still be in getWebSockets() during this event.
+    const remaining = this.screenSockets(user).filter((s) => s !== ws);
+    if (remaining.length === 0) {
+      this.sendDown({ v: 1, type: "display_close", name: `tricorder-${user}` });
+    }
   }
 }

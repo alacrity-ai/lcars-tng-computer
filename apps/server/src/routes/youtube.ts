@@ -18,13 +18,24 @@ import type { DisplayHub } from "../hub.js";
 
 const MAX_QUEUE = 25;
 
-// Play queue — module-level so the console screen_state route can report it.
-// Server-owned for the same reason widgets are: the next video must start
-// when the current one ends, and the Claude session is idle at that moment.
-let queue: QueueItem[] = [];
+// Play queues — one per viewscreen (TNGC-35): music on wall A survives wall B
+// changing panels, and each wall's queue advances independently. Module-level
+// so the console screen_state route can report them. Server-owned for the
+// same reason widgets are: the next video must start when the current one
+// ends, and the Claude session is idle at that moment.
+const queues = new Map<string, QueueItem[]>();
 
-export function getQueue(): QueueItem[] {
-  return [...queue];
+function queueFor(wall: string): QueueItem[] {
+  let q = queues.get(wall);
+  if (!q) {
+    q = [];
+    queues.set(wall, q);
+  }
+  return q;
+}
+
+export function getQueue(wall: string): QueueItem[] {
+  return [...(queues.get(wall) ?? [])];
 }
 
 const execFileAsync = promisify(execFile);
@@ -266,7 +277,7 @@ function asTracks(value: unknown): PlaylistTrack[] {
     closures); the console display route calls it for view === "playlist",
     which is what makes the PWA's "Display on wall" and the voice path
     restore identically with no bridge involvement. */
-export let restorePlaylist: (props: Record<string, unknown>) =>
+export let restorePlaylist: (props: Record<string, unknown>, wall: string) =>
   | { ok: true; started: PlaylistTrack; queued: number }
   | { error: string } = () => ({ error: "youtube routes not registered yet" });
 
@@ -300,89 +311,93 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
   });
 
-  /** Sync the wall's up-next badge to the queue. Call after every mutation —
+  /** Sync a wall's up-next badge to its queue. Call after every mutation —
       the badge exists iff something is waiting. */
-  function pushQueueWidget() {
+  function pushQueueWidget(wall: string) {
+    const q = queueFor(wall);
     hub.setWidgets(
       "queue",
-      queue.length === 0
+      q.length === 0
         ? []
         : [
             {
               id: "queue",
               kind: "queue",
-              count: queue.length,
-              nextTitle: queue[0].title ?? queue[0].videoId,
+              count: q.length,
+              nextTitle: q[0].title ?? q[0].videoId,
             },
           ],
+      wall,
     );
   }
 
   /** Broadcast a youtube panel through the embed-vs-audio decision (Layer 0).
       Async only for a cache-miss oEmbed check; callers fire-and-forget. */
-  async function broadcastYoutube(props: Record<string, unknown>): Promise<void> {
-    hub.broadcast({ type: "display", view: "youtube", props: await decorateYoutubeProps(props) });
+  async function broadcastYoutube(props: Record<string, unknown>, wall: string): Promise<void> {
+    hub.broadcast({ type: "display", view: "youtube", props: await decorateYoutubeProps(props) }, wall);
   }
 
   /** Start a track wherever the playback session lives (TNGC-26): a display
       broadcast when the player has the screen, a `playback track` message
       when it's backgrounded — so a queue advance under a diagram never
       steals the panel. Decoration (TNGC-24) applies on both paths. */
-  async function playTrack(props: Record<string, unknown>): Promise<void> {
+  async function playTrack(props: Record<string, unknown>, wall: string): Promise<void> {
     const decorated = await decorateYoutubeProps(props);
-    if (hub.playbackBackgrounded) hub.playbackTrack(decorated);
-    else hub.broadcast({ type: "display", view: "youtube", props: decorated });
+    if (hub.playbackBackgrounded(wall)) hub.playbackTrack(decorated, wall);
+    else hub.broadcast({ type: "display", view: "youtube", props: decorated }, wall);
   }
 
-  /** Pop the head of the queue into the playback session. Returns what
+  /** Pop the head of a wall's queue into its playback session. Returns what
       started, if anything. */
-  function playNext(): QueueItem | undefined {
-    const next = queue.shift();
+  function playNext(wall: string): QueueItem | undefined {
+    const next = queueFor(wall).shift();
     if (!next) return undefined;
     void playTrack({
       videoId: next.videoId,
       title: next.title,
       channel: next.channel,
       autoplay: true,
-    });
-    pushQueueWidget();
+    }, wall);
+    pushQueueWidget(wall);
     return next;
   }
 
   app.post<{ Body: QueueRequest }>("/api/console/queue", async (req, reply) => {
     const { action, videoId, title, channel, durationSeconds } = req.body ?? {};
+    const wall = hub.resolveWall(req.body?.wall);
+    const queue = queueFor(wall);
     if (action === "add") {
       if (!videoId) return reply.code(400).send({ error: "add requires videoId" });
       if (queue.length >= MAX_QUEUE) {
         return reply.code(409).send({ error: `queue is full (${MAX_QUEUE})` });
       }
       queue.push({ videoId, title, channel, durationSeconds });
-      // Nothing playing ANYWHERE to wait for → start it immediately rather
-      // than stranding the queue. A backgrounded track counts as playing
-      // (TNGC-26) — adding while music runs under a diagram just queues.
-      if (hub.state.view !== "youtube" && !hub.playbackState) {
-        const started = playNext();
-        const body: QueueResponse = { ok: true, queue: getQueue(), nowPlaying: started };
+      // Nothing playing ON THIS WALL to wait for → start it immediately
+      // rather than stranding the queue. A backgrounded track counts as
+      // playing (TNGC-26) — adding while music runs under a diagram queues.
+      if (hub.stateFor(wall).view !== "youtube" && !hub.playbackState(wall)) {
+        const started = playNext(wall);
+        const body: QueueResponse = { ok: true, queue: getQueue(wall), nowPlaying: started };
         return body;
       }
-      pushQueueWidget();
-      const body: QueueResponse = { ok: true, queue: getQueue() };
+      pushQueueWidget(wall);
+      const body: QueueResponse = { ok: true, queue: getQueue(wall) };
       return body;
     }
     if (action === "skip") {
-      const started = playNext();
+      const started = playNext(wall);
       if (!started) return reply.code(409).send({ error: "queue is empty — nothing to skip to" });
-      const body: QueueResponse = { ok: true, queue: getQueue(), nowPlaying: started };
+      const body: QueueResponse = { ok: true, queue: getQueue(wall), nowPlaying: started };
       return body;
     }
     if (action === "clear") {
-      queue = [];
-      pushQueueWidget();
+      queues.set(wall, []);
+      pushQueueWidget(wall);
       const body: QueueResponse = { ok: true, queue: [] };
       return body;
     }
     if (action === "list") {
-      const body: QueueResponse = { ok: true, queue: getQueue() };
+      const body: QueueResponse = { ok: true, queue: getQueue(wall) };
       return body;
     }
     return reply.code(400).send({ error: "action must be add, skip, clear, or list" });
@@ -391,8 +406,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // The playlist snapshot (TNGC-25): now playing + everything queued, in
   // order — what "save this playlist" captures. Read by console-mcp so the
   // track list flows server → MCP → cloud without touching model context.
-  app.get("/api/console/playlist/current", async (_req, reply) => {
-    const s = hub.state;
+  app.get<{ Querystring: { wall?: string } }>("/api/console/playlist/current", async (req, reply) => {
+    const wall = hub.resolveWall(req.query?.wall);
+    const s = hub.stateFor(wall);
     const now: PlaylistTrack[] =
       s.view === "youtube" && typeof s.props.videoId === "string"
         ? [
@@ -403,20 +419,20 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
             },
           ]
         : [];
-    const tracks = [...now, ...queue];
+    const tracks = [...now, ...queueFor(wall)];
     if (tracks.length === 0) {
       return reply.code(409).send({ error: "nothing is playing and nothing is queued" });
     }
     return { ok: true, tracks, count: tracks.length };
   });
 
-  restorePlaylist = (props) => {
+  restorePlaylist = (props, wall) => {
     const tracks = asTracks(props.tracks);
     if (tracks.length === 0) return { error: "playlist has no playable tracks" };
     const [first, ...rest] = tracks;
     // REPLACE the queue: playing a playlist means starting that vibe, not
     // appending to whatever was pending.
-    queue = rest.slice(0, MAX_QUEUE);
+    queues.set(wall, rest.slice(0, MAX_QUEUE));
     if (rest.length > MAX_QUEUE) {
       console.warn(`[youtube] playlist restore truncated ${rest.length - MAX_QUEUE} tracks (queue cap ${MAX_QUEUE})`);
     }
@@ -425,9 +441,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       title: first.title,
       channel: first.channel,
       autoplay: true,
-    });
-    pushQueueWidget();
-    return { ok: true, started: first, queued: queue.length };
+    }, wall);
+    pushQueueWidget(wall);
+    return { ok: true, started: first, queued: queueFor(wall).length };
   };
 
   // The audio stream proxy (TNGC-24): the wall's <audio> element plays
@@ -474,17 +490,18 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
   });
 
-  // Natural end of a video → seamless advance to the next queued one.
-  // Guarded against stale reports via the PLAYBACK record, not the visible
-  // panel (TNGC-26): with music backgrounded under a diagram, the old
-  // state.view guard silently dropped the event and stranded the queue.
-  hub.setVideoEndedHandler((videoId) => {
-    if (hub.playbackVideoId !== videoId) return;
-    if (!playNext() && hub.playbackBackgrounded) {
+  // Natural end of a video → seamless advance to the next queued one, on the
+  // wall that reported it. Guarded against stale reports via that wall's
+  // PLAYBACK record, not the visible panel (TNGC-26): with music backgrounded
+  // under a diagram, the old state.view guard silently dropped the event and
+  // stranded the queue.
+  hub.setVideoEndedHandler((wall, videoId) => {
+    if (hub.playbackVideoId(wall) !== videoId) return;
+    if (!playNext(wall) && hub.playbackBackgrounded(wall)) {
       // Nothing next and nobody watching — end the session so the ♫ badge
       // doesn't advertise a dead track. Foregrounded keeps today's behavior
       // (the ended player stays on screen).
-      hub.clearPlayback();
+      hub.clearPlayback(wall);
     }
   });
 
@@ -493,10 +510,10 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   //   embed error → Layer 1: retry the SAME video as extracted audio;
   //   audio error → Layer 2: next search candidate (decorated — a blocked
   //   candidate plays as audio) → queue → yellow alert.
-  hub.setVideoErrorHandler((videoId, _code, audio) => {
+  hub.setVideoErrorHandler((wall, videoId, _code, audio) => {
     void (async () => {
-      // Guard on the playback record, not the visible panel (TNGC-26).
-      if (hub.playbackVideoId !== videoId) return;
+      // Guard on the reporting wall's playback record (TNGC-26/35).
+      if (hub.playbackVideoId(wall) !== videoId) return;
       if (!audio) rememberEmbeddable(videoId, false);
       if (!audio && AUDIO_FALLBACK_ENABLED) {
         // The iframe failed but the media almost certainly exists — flip to
@@ -504,23 +521,23 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
         // video skips the embed entirely. playTrack keeps a backgrounded
         // flip invisible. With the fallback disabled (distributed builds,
         // TNGC-30) an embed error falls straight to substitution below.
-        await playTrack({ ...(hub.playbackProps ?? { videoId }), audioOnly: true, autoplay: true });
+        await playTrack({ ...(hub.playbackProps(wall) ?? { videoId }), audioOnly: true, autoplay: true }, wall);
         return;
       }
       // The AUDIO path failed — this video is genuinely unplayable.
       failedIds.add(videoId);
       for (const cand of lastResults) {
         if (failedIds.has(cand.videoId)) continue;
-        await playTrack({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true });
+        await playTrack({ videoId: cand.videoId, title: cand.title, channel: cand.channel, autoplay: true }, wall);
         return;
       }
       // No search-result substitute — fall through to the queue before
       // giving up (the errored video may itself have been queued).
-      if (playNext()) return;
-      hub.clearPlayback();
+      if (playNext(wall)) return;
+      hub.clearPlayback(wall);
       // Only take the screen for the failure if the player HAD the screen —
       // backgrounded music dying must not yank the visible panel.
-      if (hub.state.view === "youtube") {
+      if (hub.stateFor(wall).view === "youtube") {
         hub.broadcast({
           type: "display",
           view: "alert",
@@ -529,7 +546,7 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
             title: "Video unavailable",
             message: "No playable version found — try a different search",
           },
-        });
+        }, wall);
       }
     })();
   });
