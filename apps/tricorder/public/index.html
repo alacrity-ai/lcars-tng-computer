@@ -335,6 +335,11 @@
     border-top: 1px solid #332200;
   }
   #vs-caption.show { display: block; }
+  /* embed-blocked hand-off card (Play on YouTube) */
+  .vs-handoff { display: flex; flex-direction: column; gap: 4px; padding: 8px 4px; }
+  .vs-handoff-msg { color: var(--blue); font-size: 14px; letter-spacing: .02em; }
+  .vs-handoff-title { color: #fff; font-size: 16px; margin-top: 4px; overflow-wrap: break-word; }
+
   .vs-alert { border: 2px solid; border-radius: 10px; padding: 14px; text-align: center; text-transform: uppercase; }
   .vs-alert.red { border-color: var(--red); color: var(--red); animation: caret-blink 1.2s steps(1) infinite; }
   .vs-alert.yellow { border-color: var(--gold); color: var(--gold); }
@@ -1182,6 +1187,13 @@ function loadYT() {
 
 let vsPlayGen = 0;
 function vsPlayVideo(box, props) {
+  // Embed-blocked (server marked audioOnly): the phone can't reach the LAN
+  // audio extractor and caching media in the cloud isn't worth the weight —
+  // hand off to the native YouTube app instead (Leif's call, 2026-07-25).
+  if (props.audioOnly === true) {
+    vsYoutubeHandoff(box, props);
+    return;
+  }
   const gen = ++vsPlayGen;
   const videoId = props.videoId;
   const holder = document.createElement("div");
@@ -1203,21 +1215,56 @@ function vsPlayVideo(box, props) {
         onStateChange: (e) => {
           if (e.data === YT.PlayerState.ENDED) vsSendUp({ type: "video_ended", videoId });
         },
-        onError: (e) => {
-          // No LAN audio extractor on the phone, so every player error is
-          // terminal here: report audio:true and the house substitutes or
-          // advances the queue (a blocked playlist track skips to the next).
-          vsSendUp({ type: "video_error", videoId, code: e.data, audio: true });
-          if (gen === vsPlayGen) {
-            const note = document.createElement("div");
-            note.className = "cap";
-            note.textContent = "Unplayable here — skipping…";
-            holder.after(note);
-          }
+        onError: () => {
+          // oEmbed said embeddable but the player disagrees — same hand-off.
+          // Nothing is auto-reported: the card's Skip button advances the
+          // queue only when the person is done with the track.
+          if (gen !== vsPlayGen) return;
+          box.innerHTML = "";
+          vsYoutubeHandoff(box, props);
         },
       },
     });
   });
+}
+
+/** Embed-blocked hand-off: explain it, open the native YouTube app (a plain
+    watch URL is a universal link on both platforms), and offer Skip so a
+    playlist can move past the track when the person is done. */
+function vsYoutubeHandoff(box, props) {
+  ++vsPlayGen; // supersede any pending player mount
+  const videoId = props.videoId;
+  const card = document.createElement("div");
+  card.className = "vs-handoff";
+  const msg = document.createElement("div");
+  msg.className = "vs-handoff-msg";
+  msg.textContent = "YouTube doesn't allow this video to be embedded — it can play in the YouTube app instead.";
+  card.appendChild(msg);
+  if (props.title) {
+    const t = document.createElement("div");
+    t.className = "vs-handoff-title";
+    t.textContent = props.title;
+    card.appendChild(t);
+  }
+  const a = document.createElement("a");
+  a.className = "btn";
+  a.style.textDecoration = "none";
+  a.style.textAlign = "center";
+  a.textContent = "▶ Play on YouTube";
+  a.href = "https://www.youtube.com/watch?v=" + encodeURIComponent(videoId);
+  a.target = "_blank";
+  a.rel = "noopener";
+  card.appendChild(a);
+  const skip = document.createElement("button");
+  skip.className = "btn blue";
+  skip.textContent = "Skip to next";
+  skip.onclick = () => {
+    skip.disabled = true;
+    // audio:true = no fallback here — the house advances the queue
+    vsSendUp({ type: "video_error", videoId, audio: true });
+  };
+  card.appendChild(skip);
+  box.appendChild(card);
 }
 
 const VS_NATIVE = ["text", "article", "code", "table", "steps", "results", "image", "playlist"];
