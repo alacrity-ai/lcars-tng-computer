@@ -12,7 +12,7 @@
  * ./public (the PWA) are served by the platform before this Worker runs.
  */
 import { Hono } from "hono";
-import { CONTRACT_VERSION, type TngMessage } from "@tng/contract";
+import { CONTRACT_VERSION, EFFORT_LEVELS, MODEL_CHOICES, MODEL_VALUE_RE, type TngMessage } from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
 import { libraryRoutes } from "./library";
@@ -376,7 +376,41 @@ app.use("/api/admin/*", async (c, next) => {
 // down-frame that the bridge turns into a tmux-injected /compact.
 
 app.get("/api/admin/computer", async (c) => {
-  return hub(c, c.get("session").tenantId).fetch(new Request("https://hub/computer"));
+  const res = await hub(c, c.get("session").tenantId).fetch(new Request("https://hub/computer"));
+  const body = (await res.json()) as Record<string, unknown>;
+  // THE canonical choice lists (models change over time — edit @tng/contract)
+  return c.json({ ...body, choices: { models: MODEL_CHOICES, efforts: EFFORT_LEVELS } });
+});
+
+// Set the session model or effort (TNGC-32 follow-up): value validated HERE
+// against the canonical lists (custom model ids must be one shell-safe
+// token), relayed as a set_pref frame, injected bridge-side from a second
+// validation — the cloud can never type free text into the terminal.
+app.post("/api/admin/pref", async (c) => {
+  const s = c.get("session");
+  let body: { kind?: unknown; value?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const { kind, value } = body;
+  if (kind !== "model" && kind !== "effort") return c.json({ error: "kind must be model or effort" }, 400);
+  if (typeof value !== "string" || !value) return c.json({ error: "value is required" }, 400);
+  if (kind === "effort" && !(EFFORT_LEVELS as readonly string[]).includes(value)) {
+    return c.json({ error: `effort must be one of ${EFFORT_LEVELS.join(", ")}` }, 400);
+  }
+  if (kind === "model" && !MODEL_VALUE_RE.test(value)) {
+    return c.json({ error: "model must be a single lowercase token (letters, digits, . [ ] -)" }, 400);
+  }
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/set-pref", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, value, by: s.userHandle }),
+    }),
+  );
+  return new Response(res.body, { status: res.status, headers: res.headers });
 });
 
 app.post("/api/admin/compact", async (c) => {

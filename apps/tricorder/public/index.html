@@ -398,6 +398,13 @@
   .ac-meter { height: 14px; border-radius: 7px; background: #1c1c1c; overflow: hidden; margin: 10px 0 4px; }
   .ac-meter i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .4s; }
   .ac-meter i.warn { background: var(--red); }
+  .ac-pref { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 12px; }
+  .ac-pref .lbl { color: var(--blue); font-size: 12px; text-transform: uppercase; }
+  .ac-pref .val { color: #fff; font-size: 13px; overflow-wrap: anywhere; text-align: right; }
+  .ac-btns { display: flex; flex-wrap: wrap; gap: 0; margin-top: 2px; }
+  .ac-btns .btn.small { font-weight: 400; background: #1c1c1c; color: var(--peach); border: 1px solid #333; }
+  .ac-btns .btn.small.on { background: var(--gold); color: var(--ink); font-weight: 700; border-color: var(--gold); }
+  .ac-btns .btn.small[disabled] { opacity: .4; }
   #compact-banner {
     display: none; position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); z-index: 8; max-width: 92vw; padding: 8px 16px;
@@ -619,6 +626,10 @@
       <h3>Computer</h3>
       <div class="muted" id="ac-body">Loading…</div>
       <div class="ac-meter"><i id="ac-fill"></i></div>
+      <div class="ac-pref"><span class="lbl">Model</span><span class="val" id="ac-model">—</span></div>
+      <div class="ac-btns" id="ac-model-btns"></div>
+      <div class="ac-pref"><span class="lbl">Effort</span><span class="val" id="ac-effort">—</span></div>
+      <div class="ac-btns" id="ac-effort-btns"></div>
       <button class="btn blue" id="btn-compact">Consolidate memory</button>
       <div class="muted" id="ac-note" style="margin-top:8px"></div>
     </div>
@@ -1997,6 +2008,58 @@ async function renderComputerCard() {
   btn.disabled = compacting;
   btn.textContent = compacting ? "Consolidating…" : "Consolidate memory";
   $("ac-note").textContent = compacting ? "Commands queue until consolidation completes." : "";
+  renderPrefRows(info, d.choices, compacting);
+}
+
+// Model + effort controls (TNGC-32 follow-up). Choices come from the worker
+// (canonical list lives in @tng/contract). Model truth is the last assistant
+// message's model — it updates on the first reply AFTER a change.
+async function setPref(kind, value, note) {
+  try {
+    await api("/api/admin/pref", { method: "POST", body: JSON.stringify({ kind, value }) });
+    $("ac-note").textContent = note;
+    setTimeout(renderComputerCard, 4000);
+  } catch (e) {
+    $("admin-err").textContent = e.message;
+  }
+}
+
+function renderPrefRows(info, choices, compacting) {
+  $("ac-model").textContent = (info && info.model) || "—";
+  $("ac-effort").textContent = (info && info.effort) || "—";
+  const model = (info && info.model) || "";
+  const mWrap = $("ac-model-btns");
+  mWrap.innerHTML = "";
+  for (const m of (choices && choices.models) || []) {
+    const b = document.createElement("button");
+    b.className = "btn small";
+    b.textContent = m.label;
+    const root = (m.value.match(/opus|fable|sonnet|haiku/) || [""])[0];
+    if (root && model.includes(root)) b.classList.add("on");
+    b.disabled = compacting;
+    b.onclick = () => setPref("model", m.value, "Model change sent — shows here after the next reply.");
+    mWrap.appendChild(b);
+  }
+  const other = document.createElement("button");
+  other.className = "btn small";
+  other.textContent = "Other…";
+  other.disabled = compacting;
+  other.onclick = () => {
+    const v = prompt("Model id (e.g. claude-sonnet-5):");
+    if (v && v.trim()) setPref("model", v.trim(), "Model change sent — shows here after the next reply.");
+  };
+  mWrap.appendChild(other);
+  const eWrap = $("ac-effort-btns");
+  eWrap.innerHTML = "";
+  for (const lvl of (choices && choices.efforts) || []) {
+    const b = document.createElement("button");
+    b.className = "btn small";
+    b.textContent = lvl;
+    if (info && info.effort === lvl) b.classList.add("on");
+    b.disabled = compacting;
+    b.onclick = () => setPref("effort", lvl, "Effort change sent.");
+    eWrap.appendChild(b);
+  }
 }
 $("btn-compact").onclick = async () => {
   if (!confirm("Start memory consolidation? Commands will queue until it completes (a minute or two).")) return;

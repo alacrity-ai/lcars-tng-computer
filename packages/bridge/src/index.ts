@@ -43,11 +43,14 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
 import type { ComputerInfo, LinkDownFrame, LinkUpFrame, QueueItem, RosterDisplay, TngMessage } from "@tng/contract";
+import { EFFORT_LEVELS, MODEL_VALUE_RE } from "@tng/contract";
 import { getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
@@ -327,6 +330,15 @@ function onTurnEnd(): void {
     pushState();
     return;
   }
+  // Queued /model / /effort changes land on the idle composer first; the
+  // next command dispatches a beat later so the keystrokes can't interleave.
+  if (flushPendingPrefs()) {
+    setTimeout(() => {
+      dispatch();
+      pushState();
+    }, 600).unref();
+    return;
+  }
   dispatch();
   pushState();
 }
@@ -449,8 +461,15 @@ function onCompactionEnd(): void {
   console.error("[bridge] memory consolidation complete — dispatcher resuming");
   postCompactionBadge(false);
   sendComputerInfo(true);
-  dispatch();
-  pushState();
+  if (flushPendingPrefs()) {
+    setTimeout(() => {
+      dispatch();
+      pushState();
+    }, 600).unref();
+  } else {
+    dispatch();
+    pushState();
+  }
   // the transcript rolled — re-read from the new file promptly
   setTimeout(pollContext, 3_000).unref();
 }
@@ -522,6 +541,61 @@ function stopCompactWatch(): void {
   compactBaseline = null;
 }
 
+// ---- session preferences: /model + /effort (TNGC-32 follow-up) -----------------
+// Same rails as /compact: the injected line is BUILT from a validated value
+// (enum for effort, one shell-safe token for model) — never relayed text.
+// Mid-turn/mid-compaction requests wait and flush at the next safe moment.
+// No hook acks these; truth flows back on its own (effort re-reads
+// settings.json, model shows on the next assistant message's transcript line).
+
+const pendingPrefs = new Map<"model" | "effort", string>();
+
+function validPref(kind: string, value: string): kind is "model" | "effort" {
+  if (kind === "effort") return (EFFORT_LEVELS as readonly string[]).includes(value);
+  if (kind === "model") return MODEL_VALUE_RE.test(value);
+  return false;
+}
+
+function requestSetPref(kind: string, value: unknown, by: string): { ok: boolean; state: string } {
+  if (typeof value !== "string" || !validPref(kind, value)) {
+    return { ok: false, state: "invalid value" };
+  }
+  if (busy || compacting || paused) {
+    pendingPrefs.set(kind, value);
+    console.error(`[bridge] ${kind}=${value} queued by ${by} — session busy, applying at next idle`);
+    pushState();
+    return { ok: true, state: "queued" };
+  }
+  injectPref(kind, value, by);
+  return { ok: true, state: "injected" };
+}
+
+function injectPref(kind: "model" | "effort", value: string, by: string): void {
+  const line = kind === "effort" ? `/effort ${value}` : `/model ${value}`;
+  console.error(`[bridge] injecting ${line} via tmux (requested by ${by})`);
+  execFile("tmux", ["send-keys", "-t", TMUX_SESSION, line, "Enter"], (err) => {
+    if (err) {
+      console.error(`[bridge] ${kind} injection failed: ${err.message} — is the session in tmux?`);
+      return;
+    }
+    // no hook fires for these — refresh the truth sources shortly after
+    setTimeout(() => {
+      pollPrefs();
+      pollContext();
+      sendComputerInfo(true);
+    }, 2_500).unref();
+  });
+}
+
+/** Applied at turn end / compaction end — one settle beat before dispatch so
+    the typed slash commands land on an idle composer. */
+function flushPendingPrefs(): boolean {
+  if (pendingPrefs.size === 0 || busy || compacting || paused) return false;
+  for (const [kind, value] of pendingPrefs) injectPref(kind, value, "queued");
+  pendingPrefs.clear();
+  return true;
+}
+
 // A lost SessionStart hook must degrade, not wedge the house (TNGC-32).
 setInterval(() => {
   if (compacting && Date.now() - compactingSince > COMPACT_FAILSAFE_MS) {
@@ -539,11 +613,34 @@ setInterval(() => {
 // every 15s; ~256KB tail read, cheap.
 
 const WINDOW_OVERRIDE = Number(process.env.TNG_CONTEXT_WINDOW ?? 0);
+const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 
+/** The persisted effort level — /effort writes it to settings.json, so this
+    file IS the truth (verified live 2026-07-24: {"effortLevel":"high"}). */
+let lastEffort: string | undefined;
+
+function pollPrefs(): void {
+  try {
+    const s = JSON.parse(readFileSync(join(CONFIG_DIR, "settings.json"), "utf8")) as { effortLevel?: unknown };
+    if (typeof s.effortLevel === "string" && s.effortLevel !== lastEffort) {
+      lastEffort = s.effortLevel;
+      sendComputerInfo(false);
+    }
+  } catch {
+    // settings file absent/mid-write — next poll catches up
+  }
+}
+
+/** Per Anthropic's model table (checked 2026-07-24): the whole Claude 5
+    family — Fable 5, Opus 5, Sonnet 5 — is 1M context; Haiku 4.5 is 200k.
+    Legacy 4.x tiers were 200k unless the id carries the [1m] variant tag.
+    TNG_CONTEXT_WINDOW overrides everything. */
 function contextWindowFor(model: string): number {
   if (WINDOW_OVERRIDE > 0) return WINDOW_OVERRIDE;
-  if (/fable|mythos|sonnet-5/.test(model)) return 1_000_000;
-  return 200_000;
+  if (/haiku/.test(model)) return 200_000;
+  if (/\[1m\]/.test(model)) return 1_000_000;
+  if (/opus-4|sonnet-4/.test(model)) return 200_000;
+  return 1_000_000;
 }
 
 let lastContext: { tokens: number; window: number; percent: number } | null = null;
@@ -612,10 +709,16 @@ function pollContext(): void {
     }
   }
 }
-setInterval(pollContext, 15_000).unref();
-// First read AFTER module init completes — pollContext touches cloudSocket,
-// whose `let` lives further down this file (TDZ at load time otherwise).
-setTimeout(pollContext, 1_000).unref();
+setInterval(() => {
+  pollContext();
+  pollPrefs();
+}, 15_000).unref();
+// First read AFTER module init completes — these touch cloudSocket, whose
+// `let` lives further down this file (TDZ at load time otherwise).
+setTimeout(() => {
+  pollContext();
+  pollPrefs();
+}, 1_000).unref();
 
 let lastComputerKey = "";
 
@@ -623,6 +726,7 @@ function computerInfo(): ComputerInfo {
   return {
     ...(lastContext ? { context: lastContext } : {}),
     ...(lastModel ? { model: lastModel } : {}),
+    ...(lastEffort ? { effort: lastEffort } : {}),
     compacting,
     updatedAt: Date.now(),
   };
@@ -632,7 +736,7 @@ function computerInfo(): ComputerInfo {
     transitions and link-open (the PWA admin console reads it from the hub). */
 function sendComputerInfo(force: boolean): void {
   const info = computerInfo();
-  const key = `${info.context?.percent ?? -1}|${info.compacting}|${info.model ?? ""}`;
+  const key = `${info.context?.percent ?? -1}|${info.compacting}|${info.model ?? ""}|${info.effort ?? ""}`;
   if (!force && key === lastComputerKey) return;
   lastComputerKey = key;
   if (cloudSocket?.readyState === WebSocket.OPEN) {
@@ -702,6 +806,8 @@ const http = createServer((req, res) => {
       compacting,
       context: lastContext,
       model: lastModel ?? null,
+      effort: lastEffort ?? null,
+      pendingPrefs: Object.fromEntries(pendingPrefs),
       transcript: sessionTranscript,
     });
   }
@@ -758,6 +864,17 @@ const http = createServer((req, res) => {
     return readBody((body) => {
       const result = requestCompaction(typeof body.by === "string" && body.by ? body.by : "local");
       respond(result.ok ? 202 : 409, result);
+    });
+  }
+  // Local model/effort setter (same handler the cloud `set_pref` frame uses).
+  if (req.method === "POST" && req.url === "/set-pref") {
+    return readBody((body) => {
+      const result = requestSetPref(
+        typeof body.kind === "string" ? body.kind : "",
+        body.value,
+        typeof body.by === "string" && body.by ? body.by : "local",
+      );
+      respond(result.ok ? 202 : 400, result);
     });
   }
   if (req.method === "POST" && req.url === "/withdraw") {
@@ -1089,6 +1206,11 @@ function startCloudLink() {
           // Admin pressed Compact in the PWA (worker enforced the role).
           const result = requestCompaction(typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
           console.error(`[bridge] cloud compact request: ${result.state}`);
+        } else if (frame.type === "set_pref") {
+          // Admin set model/effort in the PWA (worker validated; re-validated
+          // inside — the injected line is built from the value, never trusted).
+          const result = requestSetPref(frame.kind, frame.value, typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
+          console.error(`[bridge] cloud set_pref ${frame.kind}: ${result.state}`);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

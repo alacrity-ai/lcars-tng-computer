@@ -222,6 +222,18 @@ export class TenantHub extends DurableObject<Env> {
       return json({ online: this.online(), computer: this.online() ? (info ?? null) : null });
     }
 
+    // TNGC-32 follow-up: admin set model/effort — relay to the bridge (role
+    // AND value validated in the Worker). Ephemeral like withdraw.
+    if (url.pathname === "/set-pref" && req.method === "POST") {
+      if (!this.online()) return json({ error: "Computer offline" }, 409);
+      const { kind, value, by } = (await req.json()) as { kind?: "model" | "effort"; value?: string; by?: string };
+      if ((kind !== "model" && kind !== "effort") || typeof value !== "string") {
+        return json({ error: "kind and value are required" }, 400);
+      }
+      this.sendDown({ v: 1, type: "set_pref", kind, value, by });
+      return json({ ok: true }, 202);
+    }
+
     // TNGC-32: admin pressed Compact — relay to the bridge (role enforced in
     // the Worker). Ephemeral like withdraw: no storage, no replay.
     if (url.pathname === "/compact" && req.method === "POST") {

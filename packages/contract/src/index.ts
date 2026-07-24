@@ -77,11 +77,42 @@ export interface ComputerInfo {
     window: number;
     percent: number;
   };
+  /** The session's live model — the last assistant message's model id
+      (updates on the first reply after a /model change). */
   model?: string;
+  /** The persisted effort level ($CLAUDE_CONFIG_DIR/settings.json). */
+  effort?: string;
   compacting: boolean;
   /** Epoch ms when the bridge computed this. */
   updatedAt: number;
 }
+
+// ---- session preferences (TNGC-32 follow-up) ----------------------------------
+// THE canonical choice lists for the admin console's model/effort controls.
+// Models change over time — edit exactly here; the worker validates against
+// this and serves it to the PWA, the bridge builds the injected slash
+// command from the validated value and nothing else.
+
+export interface ModelChoice {
+  /** What `/model <value>` is given. Aliases ("opus") track the current
+      default of a family across releases; explicit ids pin a variant. */
+  value: string;
+  label: string;
+}
+
+export const MODEL_CHOICES: readonly ModelChoice[] = [
+  { value: "opus", label: "Opus 5 — the default" },
+  { value: "claude-fable-5[1m]", label: "Fable 5 — deepest reasoning" },
+  { value: "sonnet", label: "Sonnet 5 — fast and capable" },
+  { value: "haiku", label: "Haiku 4.5 — fastest" },
+] as const;
+
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultracode", "auto"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
+/** Custom model ids (models change over time): one shell-safe token — no
+    whitespace or metacharacters can ever reach the injected command line. */
+export const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
 
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
     text "ping"/"pong" outside this framing (DO auto-response, never wakes
@@ -101,6 +132,9 @@ export interface ComputerInfo {
     - compact (TNGC-32): an admin pressed Compact in the PWA — the bridge
       holds the dispatcher and injects /compact into the tmux-wrapped
       session. `by` is the requesting admin's handle (audit trail).
+    - set_pref (TNGC-32 follow-up): an admin set the session model or
+      effort — the bridge injects `/model <value>` / `/effort <value>`,
+      value validated at the worker AND re-validated bridge-side.
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
@@ -109,7 +143,8 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display_open"; name: string }
   | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string }
   | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
-  | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string };
+  | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string }
+  | { v: typeof CONTRACT_VERSION; type: "set_pref"; kind: "model" | "effort"; value: string; by?: string };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub
