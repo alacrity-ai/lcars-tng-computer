@@ -1,6 +1,9 @@
 # deps / build
 node_modules/
 dist/
+# viewscreen stage build artifact (TNGC-37): `pnpm -C apps/tricorder build:vs`
+# regenerates it; wrangler deploy ships it as static assets under /vs/.
+apps/tricorder/public/vs/
 .cache/
 .wrangler/
 *.tsbuildinfo

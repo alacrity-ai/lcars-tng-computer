@@ -51,9 +51,36 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250705.0
         version: 4.20260702.1
+      '@fontsource/antonio':
+        specifier: ^5.1.0
+        version: 5.3.0
+      '@tng/panel-renderer':
+        specifier: workspace:*
+        version: link:../../packages/panel-renderer
+      '@tng/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.0
+        version: 4.7.0(vite@6.4.3(@types/node@26.1.1)(tsx@4.23.1))
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.3(@types/node@26.1.1)(tsx@4.23.1)
       wrangler:
         specifier: ^4.0.0
         version: 4.113.0(@cloudflare/workers-types@4.20260702.1)
@@ -63,18 +90,12 @@ importers:
       '@fontsource/antonio':
         specifier: ^5.1.0
         version: 5.3.0
+      '@tng/panel-renderer':
+        specifier: workspace:*
+        version: link:../../packages/panel-renderer
       '@tng/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      astronomy-engine:
-        specifier: ^2.1.19
-        version: 2.1.19
-      katex:
-        specifier: ^0.18.1
-        version: 0.18.1
-      leaflet:
-        specifier: ^1.9.4
-        version: 1.9.4
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -82,12 +103,6 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
-      '@types/katex':
-        specifier: ^0.16.8
-        version: 0.16.8
-      '@types/leaflet':
-        specifier: ^1.9.21
-        version: 1.9.21
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
@@ -171,6 +186,37 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+  packages/panel-renderer:
+    dependencies:
+      '@tng/shared':
+        specifier: workspace:*
+        version: link:../shared
+      astronomy-engine:
+        specifier: ^2.1.19
+        version: 2.1.19
+      katex:
+        specifier: ^0.18.1
+        version: 0.18.1
+      leaflet:
+        specifier: ^1.9.4
+        version: 1.9.4
+    devDependencies:
+      '@types/katex':
+        specifier: ^0.16.8
+        version: 0.16.8
+      '@types/leaflet':
+        specifier: ^1.9.21
+        version: 1.9.21
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

@@ -491,8 +491,41 @@ const SERVER_WS_URL = SERVER_URL.replace(/^http/, "ws") + "/ws";
 interface TricorderDisplay {
   ws: WebSocket | null;
   retryTimer: NodeJS.Timeout | null;
+  /** Frames relay through this promise chain so the async composite-asset
+      inlining (below) can never reorder them. */
+  relayChain: Promise<void>;
 }
 const tricorderDisplays = new Map<string, TricorderDisplay>();
+
+/** TNGC-37: composite `svg` blocks reference same-origin LAN assets the
+    phone can't fetch — inline them as data URIs before the frame rides the
+    tunnel. Small caps, fail-open: an asset that won't inline stays a
+    reference and the stage renders its placard. */
+const INLINE_SVG_MAX_BYTES = 256 * 1024;
+
+async function inlineCompositeSvgBlocks(blocks: unknown, depth = 0): Promise<void> {
+  if (depth > 3 || !Array.isArray(blocks)) return;
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: unknown; assetUrl?: unknown; items?: unknown };
+    if (b.type === "group") {
+      await inlineCompositeSvgBlocks(b.items, depth + 1);
+      continue;
+    }
+    if (b.type !== "svg" || typeof b.assetUrl !== "string" || !b.assetUrl.startsWith("/")) continue;
+    try {
+      const res = await fetch(`${SERVER_URL}${b.assetUrl}`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!res.ok) continue;
+      const body = Buffer.from(await res.arrayBuffer());
+      if (body.byteLength === 0 || body.byteLength > INLINE_SVG_MAX_BYTES) continue;
+      b.assetUrl = `data:image/svg+xml;base64,${body.toString("base64")}`;
+    } catch {
+      // unreachable/slow asset — leave the reference, the stage placards it
+    }
+  }
+}
 
 function openTricorderDisplay(name: string): void {
   if (!/^tricorder-[a-z0-9_-]{1,32}$/.test(name)) {
@@ -500,7 +533,7 @@ function openTricorderDisplay(name: string): void {
     return;
   }
   if (tricorderDisplays.has(name)) return;
-  const entry: TricorderDisplay = { ws: null, retryTimer: null };
+  const entry: TricorderDisplay = { ws: null, retryTimer: null, relayChain: Promise.resolve() };
   tricorderDisplays.set(name, entry);
   connectTricorderDisplay(name, entry);
   console.error(`[bridge] viewscreen ${name} attached`);
@@ -539,14 +572,22 @@ function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
       delete msg.audioUrl;
       delete msg.timing;
     }
-    if (cloudSocket?.readyState === WebSocket.OPEN) {
-      const frame: LinkUpFrame = { v: 1, type: "frame", display: name, msg };
-      try {
-        cloudSocket.send(JSON.stringify(frame));
-      } catch {
+    // Forward through the per-display chain: composite frames pause to inline
+    // their svg assets (TNGC-37), and everything queues behind them so frame
+    // order on the phone always matches the house.
+    entry.relayChain = entry.relayChain
+      .then(async () => {
+        if (msg.type === "display" && msg.view === "composite" && msg.props && typeof msg.props === "object") {
+          await inlineCompositeSvgBlocks((msg.props as { blocks?: unknown }).blocks);
+        }
+        if (cloudSocket?.readyState === WebSocket.OPEN) {
+          const frame: LinkUpFrame = { v: 1, type: "frame", display: name, msg };
+          cloudSocket.send(JSON.stringify(frame));
+        }
+      })
+      .catch(() => {
         // link recycling — the phone re-syncs when the DO re-opens us
-      }
-    }
+      });
   });
   ws.on("close", retry);
   ws.on("error", () => {

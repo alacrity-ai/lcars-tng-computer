@@ -1,6 +1,6 @@
 {
   "name": "@tng/bridge",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Bridge MCP server: pushes voice commands into the session as channel events; local POST /message + outbound WSS link to the Tricorder cloud queue",

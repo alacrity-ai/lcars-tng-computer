@@ -32,6 +32,8 @@ alarms broadcast to every viewscreen on their own. `screen_state` reports the
 addressed wall plus the live roster; "this viewscreen is now the X" →
 `rename_viewscreen`. A `speak` routed at a tricorder viewscreen renders as a
 silent caption (phone TTS is deferred) — that is expected, not a fault.
+Tricorder viewscreens render every panel with full wall parity (same renderer,
+scaled down), so never dumb a panel down because the target is a phone.
 
 **Panel sizing**: the wall auto-shrinks type to fit, but shrinking has a
 readability floor — keep `text` bodies under ~1,200 characters. Past that the

@@ -328,8 +328,13 @@
   .vs-head .vs-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 8px;
     color: var(--ink); background: #555; text-transform: uppercase; }
   .vs-head .vs-chip.on { background: var(--gold); }
-  #vs-render { flex: 1; overflow-y: auto; padding: 10px 12px; }
-  #vs-render iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 8px; }
+  /* TNGC-37: the render area hosts the wall-parity stage iframe (mounted for
+     the whole vs session) with the native youtube layer shown above it. */
+  #vs-render { flex: 1; overflow-y: auto; padding: 0; position: relative; }
+  #vs-stage { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: #000; }
+  #vs-native { display: none; position: relative; z-index: 1; background: #050505; min-height: 100%; padding: 10px 12px; }
+  #vs-render.native #vs-native { display: block; }
+  #vs-render.native #vs-stage { visibility: hidden; }
   #vs-caption {
     display: none; padding: 8px 12px; color: #fff; font-size: 14px; background: rgba(255,153,0,.12);
     border-top: 1px solid #332200;
@@ -340,24 +345,24 @@
   .vs-handoff-msg { color: var(--blue); font-size: 14px; letter-spacing: .02em; }
   .vs-handoff-title { color: #fff; font-size: 16px; margin-top: 4px; overflow-wrap: break-word; }
 
-  .vs-alert { border: 2px solid; border-radius: 10px; padding: 14px; text-align: center; text-transform: uppercase; }
-  .vs-alert.red { border-color: var(--red); color: var(--red); animation: caret-blink 1.2s steps(1) infinite; }
-  .vs-alert.yellow { border-color: var(--gold); color: var(--gold); }
-
-  /* compact composite renderer (TNGC-36) */
-  .cpx-group { border: 1px solid #2a2a2a; border-left: 4px solid var(--gold); border-radius: 8px;
-    padding: 8px 10px; margin: 8px 0; }
-  .cpx-group > .cpx-gt { color: var(--gold); font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
-  .cpx-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
-  .cpx-row .lbl { color: var(--blue); text-transform: uppercase; font-size: 11px; flex: 1; }
-  .cpx-row .val { color: #fff; }
-  .cpx-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .cpx-gauge { flex: 2; height: 10px; border-radius: 5px; background: #1c1c1c; overflow: hidden; }
-  .cpx-gauge i { display: block; height: 100%; background: var(--gold); }
-  .cpx-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #444; flex: none; }
-  .cpx-text { color: #ddd; font-size: 13px; letter-spacing: 0; margin: 4px 0; }
-  .cpx-text.cap { color: #888; font-size: 11px; text-transform: uppercase; }
-  .cpx-div { border: 0; border-top: 1px solid #222; margin: 8px 0; }
+  /* Landscape + Viewscreen mode (TNGC-37): the stage takes the whole phone —
+     details readable on a small screen. Rotate back to portrait for the
+     controls; the floating door icon exits directly. */
+  #vs-exit-fab {
+    display: none; align-items: center; justify-content: center;
+    position: fixed; top: 10px; right: 10px; z-index: 6;
+    width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+    border: 2px solid rgba(255,153,0,.5); background: rgba(0,0,0,.45); color: var(--gold);
+  }
+  @media (orientation: landscape) {
+    body.vs-on { padding: 0; }
+    body.vs-on #app { max-width: none; padding: 0; }
+    body.vs-on .lcars-bar, body.vs-on .main-cols { display: none; }
+    body.vs-on #vs-top { height: 100dvh; margin: 0; }
+    body.vs-on .vs-frame { border: 0; border-radius: 0; }
+    body.vs-on .vs-head { display: none; }
+    body.vs-on #vs-exit-fab { display: flex; }
+  }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -427,9 +432,15 @@
           <span class="vs-title" id="vs-title">PERSONAL VIEWSCREEN</span>
           <span class="vs-chip" id="vs-chip">LINK…</span>
         </div>
-        <div id="vs-render"><div class="li-placard">Standing by.</div></div>
+        <div id="vs-render"><div id="vs-native"></div></div>
         <div id="vs-caption"></div>
       </div>
+      <button id="vs-exit-fab" aria-label="Exit viewscreen mode">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+          stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
     </div>
     <div class="main-cols">
       <aside class="rail" aria-hidden="true">
@@ -1098,6 +1109,7 @@ function enterViewscreen() {
     localStorage.setItem("tricorder.wallPrev." + me.user.handle, getWall());
   }
   setWall(own);
+  vsEnsureStage();
   vsConnect();
 }
 
@@ -1111,9 +1123,72 @@ function exitViewscreen() {
   const w = vsWs;
   vsWs = null;
   if (w) { try { w.close(); } catch {} }
-  $("vs-render").innerHTML = "<div class='li-placard'>Standing by.</div>";
+  vsDestroyStage();
+  vsHideNative();
+  $("vs-title").textContent = "PERSONAL VIEWSCREEN";
   $("vs-caption").classList.remove("show");
 }
+
+// ---- wall-parity stage (TNGC-37) --------------------------------------------
+// The mini wall is the REAL wall renderer: /vs/ bundles @tng/panel-renderer
+// (the same components the room viewscreens use) into an iframe on a scaled
+// 16:9 stage. ServerMessages forward verbatim over postMessage; only youtube
+// stays phone-native (its player events must ride the screen socket so the
+// queue advances — and headphones win).
+let vsStageFrame = null, vsStageReady = false, vsStageQueue = [];
+
+function vsEnsureStage() {
+  if (vsStageFrame) return;
+  const f = document.createElement("iframe");
+  f.id = "vs-stage";
+  f.src = "/vs/";
+  f.title = "Viewscreen";
+  $("vs-render").appendChild(f);
+  vsStageFrame = f;
+}
+
+function vsDestroyStage() {
+  const f = vsStageFrame;
+  vsStageFrame = null;
+  vsStageReady = false;
+  vsStageQueue = [];
+  if (f) { try { f.remove(); } catch {} }
+}
+
+function vsStagePost(msg) {
+  if (!vsStageFrame) return;
+  if (!vsStageReady) {
+    // Bounded: the hub re-syncs state on (re)attach, so dropped backlog heals.
+    vsStageQueue.push(msg);
+    if (vsStageQueue.length > 64) vsStageQueue.shift();
+    return;
+  }
+  try { vsStageFrame.contentWindow.postMessage({ type: "tng-frame", msg }, location.origin); } catch {}
+}
+
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== "tng-vs-ready") return;
+  if (!vsStageFrame || e.source !== vsStageFrame.contentWindow) return;
+  vsStageReady = true;
+  const backlog = vsStageQueue;
+  vsStageQueue = [];
+  for (const m of backlog) vsStagePost(m);
+});
+
+/** The native layer (youtube player / hand-off card) covers the stage while
+    media plays; hiding it supersedes any pending player mount. */
+function vsShowNative() {
+  $("vs-render").classList.add("native");
+  return $("vs-native");
+}
+
+function vsHideNative() {
+  ++vsPlayGen;
+  $("vs-render").classList.remove("native");
+  $("vs-native").innerHTML = "";
+}
+
+$("vs-exit-fab").addEventListener("click", () => { if (vsOn) exitViewscreen(); });
 
 function vsConnect() {
   if (!vsOn || document.hidden || vsWs) return;
@@ -1152,7 +1227,14 @@ function vsFrame(msg) {
   if (msg.type === "display") {
     const p = msg.props || {};
     $("vs-title").textContent = p.title || p.subject || p.query || p.location || msg.view;
-    vsRenderView(msg.view, p);
+    if (msg.view === "youtube") {
+      const box = vsShowNative();
+      box.innerHTML = "";
+      if (typeof p.videoId === "string") vsPlayVideo(box, p);
+    } else {
+      vsHideNative();
+      vsStagePost(msg);
+    }
   } else if (msg.type === "speak") {
     // deferred-TTS behavior: the caption renders, nothing sounds
     const c = $("vs-caption");
@@ -1164,18 +1246,26 @@ function vsFrame(msg) {
   } else if (msg.type === "playback") {
     if (msg.action === "track" && msg.props) {
       $("vs-title").textContent = msg.props.title || "Now playing";
-      vsRenderView("youtube", msg.props);
+      const box = vsShowNative();
+      box.innerHTML = "";
+      if (typeof msg.props.videoId === "string") vsPlayVideo(box, msg.props);
     } else if (msg.action === "stop") vsClearMedia();
-  } else if (msg.type === "media" && msg.action === "stop") {
-    vsClearMedia();
+  } else if (msg.type === "media") {
+    if (msg.action === "stop") vsClearMedia();
+    vsStagePost(msg);
   } else if (msg.type === "working") {
     if (vsWs) vsSetChip(msg.active ? "WORKING" : "LIVE", true);
+    vsStagePost(msg);
+  } else if (msg.type === "widgets" || msg.type === "map_control" || msg.type === "sky_control") {
+    vsStagePost(msg);
   }
 }
 
 function vsClearMedia() {
-  if ($("vs-render").querySelector("iframe")) {
-    $("vs-render").innerHTML = "<div class='li-placard'>Standing by.</div>";
+  // Ends the native media layer; the stage underneath still shows the wall's
+  // current panel (same as a room viewscreen after "stop the music").
+  if ($("vs-render").classList.contains("native")) {
+    vsHideNative();
     $("vs-title").textContent = "PERSONAL VIEWSCREEN";
   }
 }
@@ -1283,162 +1373,6 @@ function vsYoutubeHandoff(box, props) {
   };
   card.appendChild(skip);
   box.appendChild(card);
-}
-
-const VS_NATIVE = ["text", "article", "code", "table", "steps", "results", "image", "playlist"];
-function vsRenderView(view, props) {
-  const box = $("vs-render");
-  if (view === "status" || view === "blank" || view === "boot") {
-    box.innerHTML = "<div class='li-placard'>Ready.</div>";
-    return;
-  }
-  if (view === "alert") {
-    box.innerHTML = "";
-    const d = document.createElement("div");
-    d.className = "vs-alert " + (props.level === "red" ? "red" : "yellow");
-    d.textContent = (props.title || (props.level === "red" ? "RED ALERT" : "ALERT")) +
-      (props.message ? " — " + props.message : "");
-    box.appendChild(d);
-    return;
-  }
-  if (view === "youtube") {
-    // Native playback — audio through the phone is the point (headphones
-    // win). Rendered through the YouTube IFrame API so ended/error events
-    // flow back up the screen socket and the per-wall queue advances —
-    // that's what makes a saved PLAYLIST work on the tricorder.
-    box.innerHTML = "";
-    if (typeof props.videoId === "string") vsPlayVideo(box, props);
-    return;
-  }
-  if (view === "composite") {
-    box.innerHTML = "";
-    renderComposite(props, box);
-    return;
-  }
-  if (VS_NATIVE.includes(view)) {
-    renderPayload(view, props, box);
-    return;
-  }
-  box.innerHTML = "<div class='li-placard'>View on a room viewscreen.</div>";
-}
-
-// Compact composite renderer (TNGC-36): the same block language the wall
-// speaks, phone-sized. Everything textContent; svg blocks reference LAN
-// assets the phone can't reach, so they placard.
-const CPX_ACCENT = { gold: "#FF9900", peach: "#FFCC99", lav: "#CC99CC", blue: "#9999CC", red: "#CC6666" };
-const CPX_STATE = { on: "#FF9900", off: "#444444", warn: "#FFCC99", alert: "#CC6666", idle: "#9999CC" };
-function renderComposite(props, box) {
-  for (const b of Array.isArray(props.blocks) ? props.blocks : []) {
-    const el = cpxBlock(b, 0);
-    if (el) box.appendChild(el);
-  }
-}
-function cpxBlock(b, depth) {
-  if (!b || typeof b !== "object" || depth > 3) return null;
-  const el = document.createElement(b.type === "divider" ? "hr" : "div");
-  const row = (fill) => { el.className = "cpx-row"; fill(); return el; };
-  const span = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; };
-  switch (b.type) {
-    case "group": {
-      el.className = "cpx-group";
-      if (CPX_ACCENT[b.accent]) el.style.borderLeftColor = CPX_ACCENT[b.accent];
-      const t = document.createElement("div"); t.className = "cpx-gt"; t.textContent = b.title || "";
-      el.appendChild(t);
-      for (const c of Array.isArray(b.items) ? b.items : []) {
-        const child = cpxBlock(c, depth + 1);
-        if (child) el.appendChild(child);
-      }
-      return el;
-    }
-    case "readout":
-      return row(() => {
-        el.appendChild(span("lbl", b.label || ""));
-        el.appendChild(span("val", String(b.value ?? "") + (b.unit ? " " + b.unit : "")));
-      });
-    case "status":
-      return row(() => {
-        const dot = document.createElement("span");
-        dot.className = "cpx-dot";
-        dot.style.background = CPX_STATE[b.state] || "#444444";
-        el.appendChild(dot);
-        el.appendChild(span("lbl", b.label || ""));
-        if (b.detail) el.appendChild(span("val", b.detail));
-      });
-    case "gauge":
-      return row(() => {
-        el.appendChild(span("lbl", b.label || ""));
-        const g = document.createElement("span"); g.className = "cpx-gauge";
-        const i = document.createElement("i");
-        i.style.width = Math.round(Math.max(0, Math.min(1, Number(b.value) || 0)) * 100) + "%";
-        if (CPX_ACCENT[b.accent]) i.style.background = CPX_ACCENT[b.accent];
-        g.appendChild(i); el.appendChild(g);
-        if (b.text) el.appendChild(span("val", b.text));
-      });
-    case "text":
-      el.className = "cpx-text" + (b.role === "caption" ? " cap" : "");
-      el.textContent = b.body || "";
-      return el;
-    case "list": {
-      el.className = "cpx-list";
-      for (const it of Array.isArray(b.items) ? b.items : []) {
-        const r = document.createElement("div"); r.className = "cpx-row";
-        r.appendChild(span("lbl", (it && it.label) || ""));
-        if (it && it.detail) r.appendChild(span("val", it.detail));
-        el.appendChild(r);
-      }
-      return el;
-    }
-    case "keyvalue": {
-      el.className = "cpx-list";
-      for (const p of Array.isArray(b.pairs) ? b.pairs : []) {
-        const r = document.createElement("div"); r.className = "cpx-row";
-        r.appendChild(span("lbl", (p && p.k) || ""));
-        r.appendChild(span("val", String((p && p.v) ?? "")));
-        el.appendChild(r);
-      }
-      return el;
-    }
-    case "sparkline":
-      return row(() => {
-        el.appendChild(span("lbl", b.label || ""));
-        const pts = (Array.isArray(b.points) ? b.points : []).map(Number).filter(Number.isFinite);
-        if (pts.length > 1) {
-          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          svg.setAttribute("viewBox", "0 0 100 24");
-          svg.setAttribute("style", "flex:2;height:20px");
-          const min = Math.min(...pts), max = Math.max(...pts), range = max - min || 1;
-          const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-          line.setAttribute("points", pts.map((v, i) =>
-            (i / (pts.length - 1) * 100).toFixed(1) + "," + (22 - (v - min) / range * 20).toFixed(1)).join(" "));
-          line.setAttribute("fill", "none");
-          line.setAttribute("stroke", CPX_ACCENT[b.accent] || "#FF9900");
-          line.setAttribute("stroke-width", "1.6");
-          svg.appendChild(line);
-          el.appendChild(svg);
-        }
-        if (b.unit) el.appendChild(span("val", b.unit));
-      });
-    case "swatch":
-      return row(() => {
-        const chip = document.createElement("span");
-        chip.className = "cpx-swatch";
-        if (/^#[0-9a-fA-F]{6}$/.test(b.color || "")) chip.style.background = b.color;
-        el.appendChild(chip);
-        el.appendChild(span("lbl", b.label || ""));
-        if (b.detail) el.appendChild(span("val", b.detail));
-      });
-    case "svg":
-      el.className = "li-placard";
-      el.textContent = "Graphic — view on a room viewscreen.";
-      return el;
-    case "divider":
-      el.className = "cpx-div";
-      return el;
-    default:
-      el.className = "cpx-text cap";
-      el.textContent = "[" + String(b.type) + "]";
-      return el;
-  }
 }
 
 // ---- queue screen (TNGC-22) -----------------------------------------------------

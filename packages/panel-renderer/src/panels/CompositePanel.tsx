@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   CompositeAccent,
   CompositeBlock,
@@ -48,6 +49,22 @@ function Sparkline({ points, color }: { points: number[]; color: string }) {
     <svg className="cp-sparkline-svg" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
       <path d={path} fill="none" stroke={color} strokeWidth="2.5" />
     </svg>
+  );
+}
+
+/** A same-origin asset can be unreachable from where this renderer runs (a
+    tricorder behind an old bridge that doesn't inline them yet — TNGC-37);
+    degrade to a placard, never a broken-image glyph. */
+function SvgBlock({ assetUrl, caption }: { assetUrl: string; caption?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <div className="cp-unknown">Graphic unavailable{caption ? ` — ${caption}` : ""}</div>;
+  }
+  return (
+    <figure className="cp-svg">
+      <img src={assetUrl} alt={caption ?? ""} onError={() => setFailed(true)} />
+      {caption && <figcaption className="cp-caption">{caption}</figcaption>}
+    </figure>
   );
 }
 
@@ -154,12 +171,7 @@ function Block({ block }: { block: CompositeBlock }) {
       );
     }
     case "svg":
-      return (
-        <figure className="cp-svg">
-          <img src={block.assetUrl} alt={block.caption ?? ""} />
-          {block.caption && <figcaption className="cp-caption">{block.caption}</figcaption>}
-        </figure>
-      );
+      return <SvgBlock assetUrl={block.assetUrl} caption={block.caption} />;
     case "divider":
       return <hr className="cp-divider" />;
     default:

@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource/antonio/400.css";
 import "@fontsource/antonio/700.css";
-import "./lcars.css";
+import "@tng/panel-renderer/lcars.css";
 import { App } from "./App";
 
 declare global {

@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { LcarsFrame } from "./components/LcarsFrame";
-import { WidgetLayer } from "./components/WidgetLayer";
-import { Panel } from "./panels/registry";
+import { LcarsFrame, Panel, WidgetLayer } from "@tng/panel-renderer";
 import { PlaybackLayer } from "./PlaybackLayer";
 import { useSocket } from "./useSocket";
 import { EngageOverlay, useEngage } from "./engage";
