@@ -89,7 +89,11 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display"; cmd: CloudDisplayCommand }
   | { v: typeof CONTRACT_VERSION; type: "display_open"; name: string }
   | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string }
-  | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown };
+  | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
+  // tunnel-audio (TNGC-36 follow-up): a phone needs an embed-blocked track;
+  // the bridge pulls the compact rendition from the house and PUTs it to the
+  // worker's R2 (HTTP, not a frame — bytes never ride the WS).
+  | { v: typeof CONTRACT_VERSION; type: "audio_fetch"; videoId: string };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub

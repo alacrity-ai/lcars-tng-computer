@@ -30,7 +30,12 @@
   // mailgun_myhome_computer_sending_key) — never in this file.
   "vars": {
     "MAILGUN_DOMAIN": "mg.myhome.computer",
-    "MAIL_FROM": "TNG Computer <computer@mg.myhome.computer>"
+    "MAIL_FROM": "TNG Computer <computer@mg.myhome.computer>",
+    // tunnel-audio (TNGC-36 follow-up): tenant slugs allowed to cache
+    // embed-blocked media in R2 for tricorder viewscreens. House-operator
+    // perk — NOT offered to customer tenants (storage would balloon).
+    // Objects live under tunnel-audio/ and expire via a bucket lifecycle rule.
+    "TUNNEL_AUDIO_TENANTS": "home,beta-test-house"
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TenantHub"] }],
   "observability": { "enabled": true }

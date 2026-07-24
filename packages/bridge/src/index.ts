@@ -594,6 +594,65 @@ function closeAllTricorderDisplays(): void {
   for (const name of [...tricorderDisplays.keys()]) closeTricorderDisplay(name);
 }
 
+// ---- tunnel audio (TNGC-36 follow-up) ---------------------------------------------
+// An embed-blocked track a phone wants: pull the compact rendition from the
+// house server (which resolves + proxies it — googlevideo URLs are bound to
+// its IP) and PUT it to the worker's R2 once. Streamed end to end with a
+// byte cap; the worker gates by tenant and a lifecycle rule expires objects.
+
+/** Origin of the cloud API, derived from the link URL (wss://host/link). */
+const CLOUD_ORIGIN = CLOUD_URL ? CLOUD_URL.replace(/^ws/, "http").replace(/\/link$/, "") : null;
+const TUNNEL_AUDIO_MAX_BYTES = 150 * 1024 * 1024;
+const audioFetchInFlight = new Set<string>();
+
+async function fetchAndUploadAudio(videoId: string): Promise<void> {
+  if (!CLOUD_ORIGIN || !CLOUD_TOKEN) return;
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || audioFetchInFlight.has(videoId)) return;
+  audioFetchInFlight.add(videoId);
+  const t0 = Date.now();
+  try {
+    const src = await fetch(`${SERVER_URL}/api/console/media-compact/${videoId}`, {
+      // resolution alone can take ~30s; the body then streams for as long
+      // as the track is big — no overall timeout, only the cap below
+      signal: AbortSignal.timeout(10 * 60_000),
+    });
+    if (!src.ok || !src.body) {
+      throw new Error(`house media-compact ${src.status}`);
+    }
+    let bytes = 0;
+    const capped = src.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          bytes += chunk.byteLength;
+          if (bytes > TUNNEL_AUDIO_MAX_BYTES) {
+            controller.error(new Error(`exceeds ${TUNNEL_AUDIO_MAX_BYTES} byte cap`));
+            return;
+          }
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+    const up = await fetch(`${CLOUD_ORIGIN}/api/tunnel-audio/${videoId}`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${CLOUD_TOKEN}`,
+        "content-type": src.headers.get("content-type") ?? "video/mp4",
+      },
+      body: capped,
+      // node fetch requires half-duplex for streamed request bodies
+      duplex: "half",
+    });
+    if (!up.ok) throw new Error(`worker upload ${up.status}`);
+    console.error(
+      `[bridge] tunnel-audio ${videoId}: ${Math.round(bytes / 1024 / 1024)}MB uploaded in ${Math.round((Date.now() - t0) / 1000)}s`,
+    );
+  } catch (err) {
+    console.error(`[bridge] tunnel-audio ${videoId} failed: ${(err as Error).message}`);
+  } finally {
+    audioFetchInFlight.delete(videoId);
+  }
+}
+
 function startCloudLink() {
   if (!CLOUD_URL || !CLOUD_TOKEN) {
     console.error(
@@ -674,6 +733,8 @@ function startCloudLink() {
           closeTricorderDisplay(frame.name);
         } else if (frame.type === "display_client" && typeof frame.name === "string") {
           forwardDisplayClient(frame.name, frame.msg);
+        } else if (frame.type === "audio_fetch" && typeof frame.videoId === "string") {
+          void fetchAndUploadAudio(frame.videoId);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

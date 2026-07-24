@@ -205,6 +205,46 @@ function prewarmAudio(videoId: string) {
   });
 }
 
+// ---- compact media resolution (tunnel-audio, TNGC-36 follow-up) ---------------
+// The tricorder viewscreen can't reach the LAN audio proxy, so embed-blocked
+// tracks are tunneled ONCE into R2 (bridge fetches this route, uploads to the
+// worker; a lifecycle rule expires the objects). Bytes cross the WAN and sit
+// in storage, so this resolver prefers the SMALLEST viable rendition: real
+// audio-only first (rarely offered tokenlessly), then muxed ≤360p — the
+// classic ~4–6MB/min format — before falling back to `best`.
+const compactUrls = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+
+function resolveCompactUrl(videoId: string): Promise<string> {
+  const hit = compactUrls.get(videoId);
+  if (hit && Date.now() < hit.expiresAt) return hit.promise;
+  const entry = { expiresAt: Date.now() + AUDIO_URL_FALLBACK_TTL_MS } as {
+    promise: Promise<string>;
+    expiresAt: number;
+  };
+  entry.promise = (async () => {
+    const { stdout } = await runYtdlp(
+      [
+        "--no-warnings",
+        "--extractor-args", "youtube:player_client=android",
+        "-f",
+        "bestaudio[ext=m4a]/bestaudio/best[height<=360][acodec!=none]/best[acodec!=none]/best",
+        "-g", `https://www.youtube.com/watch?v=${videoId}`,
+      ],
+      AUDIO_RESOLVE_TIMEOUT_MS,
+    );
+    const url = stdout.trim().split("\n")[0];
+    if (!url.startsWith("http")) throw new Error("yt-dlp returned no stream URL");
+    const expire = Number(new URL(url).searchParams.get("expire"));
+    entry.expiresAt = Number.isFinite(expire) && expire > 0
+      ? expire * 1000 - 10 * 60_000
+      : Date.now() + AUDIO_URL_FALLBACK_TTL_MS;
+    return url;
+  })();
+  entry.promise.catch(() => compactUrls.delete(videoId));
+  compactUrls.set(videoId, entry);
+  return entry.promise;
+}
+
 /** Decide embed vs audio for ANY youtube broadcast — display route, queue
     advance, error substitution. This is the whole of TNGC-24 Layer 0: no
     MCP traffic, no model reasoning, at most one ~200ms oEmbed check on a
@@ -487,6 +527,45 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(502).send({ error: `audio resolution failed: ${message}` });
+    }
+  });
+
+  // Compact-media proxy for the tunnel (TNGC-36 follow-up): the bridge pulls
+  // this once per embed-blocked track and uploads it to R2 for tricorder
+  // viewscreens. Same proxy discipline as /audio (never redirect — the
+  // googlevideo URL is bound to this resolver's IP), smaller rendition.
+  app.get<{ Params: { videoId: string } }>("/api/console/media-compact/:videoId", async (req, reply) => {
+    if (!AUDIO_FALLBACK_ENABLED) {
+      return reply.code(404).send({ error: "audio fallback disabled (TNG_AUDIO_FALLBACK=0)" });
+    }
+    const { videoId } = req.params;
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      return reply.code(400).send({ error: "bad video id" });
+    }
+    const upstream = async (fresh: boolean) => {
+      if (fresh) compactUrls.delete(videoId);
+      const url = await resolveCompactUrl(videoId);
+      return fetch(url, { headers: { "user-agent": UA } });
+    };
+    try {
+      let up = await upstream(false);
+      if (up.status === 403 || up.status === 410) {
+        up.body?.cancel().catch(() => {});
+        up = await upstream(true);
+      }
+      if (up.status !== 200) {
+        up.body?.cancel().catch(() => {});
+        return reply.code(502).send({ error: `media upstream ${up.status}` });
+      }
+      reply.code(200);
+      for (const h of ["content-type", "content-length"] as const) {
+        const v = up.headers.get(h);
+        if (v) reply.header(h, v);
+      }
+      return reply.send(up.body ? Readable.fromWeb(up.body as NodeWebReadableStream) : Buffer.alloc(0));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(502).send({ error: `media resolution failed: ${message}` });
     }
   });
 
