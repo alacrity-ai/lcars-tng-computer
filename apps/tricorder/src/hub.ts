@@ -21,6 +21,7 @@ import { DurableObject } from "cloudflare:workers";
 import type {
   CloudDisplayCommand,
   CloudMessage,
+  ComputerInfo,
   LinkDownFrame,
   LinkUpFrame,
   QueueItem,
@@ -124,6 +125,7 @@ export class TenantHub extends DurableObject<Env> {
       // snapshots so a crashed bridge's state can't haunt the PWA.
       await this.ctx.storage.delete("queue");
       await this.ctx.storage.delete("roster");
+      await this.ctx.storage.delete("computer");
       this.ctx.acceptWebSocket(pair[1], ["link"]);
       await this.replay(pair[1]);
       // Re-attach every phone still in Viewscreen mode (TNGC-36): the new
@@ -196,6 +198,9 @@ export class TenantHub extends DurableObject<Env> {
     }
 
     if (url.pathname === "/status") {
+      const computer = this.online()
+        ? await this.ctx.storage.get<ComputerInfo>("computer")
+        : undefined;
       return json({
         online: this.online(),
         queued: await this.depth(),
@@ -205,7 +210,27 @@ export class TenantHub extends DurableObject<Env> {
         displays: this.online()
           ? ((await this.ctx.storage.get<RosterDisplay[]>("roster")) ?? [])
           : [],
+        // TNGC-32: every phone shows the consolidation banner, not just admins
+        compacting: computer?.compacting === true,
       });
+    }
+
+    // TNGC-32: the session's context/compaction state as last reported by
+    // the bridge (admin console reads this; role enforced in the Worker).
+    if (url.pathname === "/computer") {
+      const info = await this.ctx.storage.get<ComputerInfo>("computer");
+      return json({ online: this.online(), computer: this.online() ? (info ?? null) : null });
+    }
+
+    // TNGC-32: admin pressed Compact — relay to the bridge (role enforced in
+    // the Worker). Ephemeral like withdraw: no storage, no replay.
+    if (url.pathname === "/compact" && req.method === "POST") {
+      if (!this.online()) return json({ error: "Computer offline" }, 409);
+      const info = await this.ctx.storage.get<ComputerInfo>("computer");
+      if (info?.compacting) return json({ error: "consolidation already in progress" }, 409);
+      const { by } = (await req.json()) as { by?: string };
+      this.sendDown({ v: 1, type: "compact", by });
+      return json({ ok: true }, 202);
     }
 
     if (url.pathname === "/queue") {
@@ -279,6 +304,9 @@ export class TenantHub extends DurableObject<Env> {
       } else if (frame.type === "roster" && Array.isArray(frame.displays)) {
         // TNGC-35: the wall selector's source of truth. Bounded like the queue.
         await this.ctx.storage.put("roster", frame.displays.slice(0, 32));
+      } else if (frame.type === "computer" && frame.info && typeof frame.info === "object") {
+        // TNGC-32: context meter + compaction state for the admin console.
+        await this.ctx.storage.put("computer", frame.info);
       } else if (frame.type === "frame" && typeof frame.display === "string") {
         // TNGC-36: push one server→display message to the user whose
         // tricorder viewscreen this is. Never stored — display frames are

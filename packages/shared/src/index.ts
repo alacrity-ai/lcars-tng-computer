@@ -895,6 +895,14 @@ export interface WidgetsMessage {
 
 /** TNGC-35: the server's answer to hello/set_display — the (normalized) name
     this socket is now showing, so the client can persist and label it. */
+/** TNGC-32: memory consolidation (context compaction) is running — every
+    display shows a persistent badge so the household knows commands queue
+    until it finishes. Broadcast-all on change; synced to joining clients. */
+export interface CompactionMessage {
+  type: "compaction";
+  active: boolean;
+}
+
 export interface DisplayIdMessage {
   type: "display_id";
   name: string;
@@ -912,7 +920,8 @@ export type ServerMessage =
   | WidgetsMessage
   | VoiceStateMessage
   | PlaybackMessage
-  | DisplayIdMessage;
+  | DisplayIdMessage
+  | CompactionMessage;
 
 // ---------- Webapp → server ----------
 

@@ -190,8 +190,19 @@ export class DisplayHub {
     const widgets = this.composedWidgets(e);
     if (widgets.length > 0) this.send(socket, { type: "widgets", widgets });
     this.send(socket, { type: "voice_state", volume: this.voiceVolume, muted: this.voiceMuted });
+    // a screen joining mid-consolidation must show the badge too (TNGC-32)
+    if (this.compacting) this.send(socket, { type: "compaction", active: true });
     // a wall reload mid-music resumes the track (position resets — accepted)
     if (e.playback) this.send(socket, { type: "playback", action: "track", props: e.playback });
+  }
+
+  /** TNGC-32: memory-consolidation badge — broadcast-all + synced at join. */
+  private compacting = false;
+
+  setCompacting(active: boolean) {
+    if (this.compacting === active) return;
+    this.compacting = active;
+    this.broadcastAll({ type: "compaction", active });
   }
 
   private leave(socket: WebSocket) {

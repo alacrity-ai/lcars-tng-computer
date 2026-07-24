@@ -111,6 +111,10 @@ async function doctor() {
     check("channel delivery", !silentDrop,
       `delivered ${bridge.delivered}, failures ${bridge.deliveryFailures}`,
       "commands reach the box but never reach Claude — the CLI likely dropped --dangerously-load-development-channels; use the pinned image version");
+    // TNGC-32: context meter (read from the session transcript by the bridge)
+    if (bridge.context) {
+      out(`       context: ${bridge.context.percent}% (${Math.round(bridge.context.tokens / 1000)}k / ${Math.round(bridge.context.window / 1000)}k tokens)${bridge.compacting ? " — CONSOLIDATING NOW" : ""}`);
+    }
   }
 
   // 4. stack (wall + speech). TTS is checked THROUGH the server — the egress

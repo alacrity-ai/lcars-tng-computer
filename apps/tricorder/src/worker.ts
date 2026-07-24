@@ -370,6 +370,27 @@ app.use("/api/admin/*", async (c, next) => {
   await next();
 });
 
+// ---- Computer management (TNGC-32) ----------------------------------------------
+// Context meter + remote memory consolidation. The bridge reports context/
+// compaction state up the link (`computer` frames); Compact rides a `compact`
+// down-frame that the bridge turns into a tmux-injected /compact.
+
+app.get("/api/admin/computer", async (c) => {
+  return hub(c, c.get("session").tenantId).fetch(new Request("https://hub/computer"));
+});
+
+app.post("/api/admin/compact", async (c) => {
+  const s = c.get("session");
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/compact", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ by: s.userHandle }),
+    }),
+  );
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
 app.get("/api/admin/overview", async (c) => {
   const tenantId = c.get("session").tenantId;
   const [users, sessions] = await Promise.all([

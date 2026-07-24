@@ -56,6 +56,27 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-start\" -H 'content-type: application/json' -d \"{\\\"trigger\\\":\\\"$(cat | jq -r .trigger 2>/dev/null || echo unknown)\\\"}\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 2 -X POST \"http://127.0.0.1:${TNG_BRIDGE_PORT:-3791}/compaction-end\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
     ]
   }
 }

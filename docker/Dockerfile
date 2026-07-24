@@ -4,7 +4,7 @@
 FROM node:24-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      iptables ipset iproute2 dnsutils curl git jq procps psmisc \
+      iptables ipset iproute2 dnsutils curl git jq procps psmisc tmux \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@10 @anthropic-ai/claude-code
@@ -23,4 +23,7 @@ WORKDIR /home/node/tng-computer/claude
 # to the unprivileged node user (uid 1000 = the host user, so bind-mounted
 # repo writes keep their ownership).
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["claude", "--dangerously-skip-permissions", "--dangerously-load-development-channels", "server:bridge"]
+# tmux owns the terminal (TNGC-32): the bridge can inject whitelisted CLI
+# commands (/compact) via `tmux send-keys -t tng`. Detach: C-b d;
+# scrollback: C-b [ (tmux copy mode).
+CMD ["tmux", "new-session", "-A", "-s", "tng", "claude", "--dangerously-skip-permissions", "--dangerously-load-development-channels", "server:bridge"]

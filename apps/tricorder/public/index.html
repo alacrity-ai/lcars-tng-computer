@@ -394,6 +394,24 @@
     body.vs-on #toast { position: fixed; left: 14px; bottom: 14px; right: auto; z-index: 6; margin: 0; text-align: left; }
   }
 
+  /* Computer management + consolidation banner (TNGC-32) */
+  .ac-meter { height: 14px; border-radius: 7px; background: #1c1c1c; overflow: hidden; margin: 10px 0 4px; }
+  .ac-meter i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .4s; }
+  .ac-meter i.warn { background: var(--red); }
+  #compact-banner {
+    display: none; position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%); z-index: 8; max-width: 92vw; padding: 8px 16px;
+    border: 2px solid var(--gold); border-radius: 16px; background: rgba(20,12,0,.94);
+    color: var(--gold); font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; text-align: center;
+    animation: compact-pulse 1.6s ease-in-out infinite;
+  }
+  body.compacting #compact-banner { display: block; }
+  @keyframes compact-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,153,0,.35); }
+    50% { box-shadow: 0 0 18px 3px rgba(255,153,0,.25); }
+  }
+
   /* Native landscape layout for the MAIN screen (TNGC-37 follow-up): a real
      two-pane cockpit — controls on the left, the talk instrument on the
      right — instead of stretched portrait. Nothing scrolls. Portrait and
@@ -431,6 +449,9 @@
 </style>
 </head>
 <body>
+<!-- Memory consolidation banner (TNGC-32): shown to EVERYONE while the
+     Computer compacts — commands queue until it clears -->
+<div id="compact-banner">Memory consolidation in progress — commands will queue</div>
 <div id="app">
   <div class="lcars-bar">
     <div class="lcars-cap"></div>
@@ -593,6 +614,14 @@
   <!-- ADMIN -->
   <div class="view" id="view-admin">
     <button class="link" id="btn-back" style="text-align:left">&#9664; Back</button>
+    <!-- Computer management (TNGC-32): live context meter + remote compaction -->
+    <div class="card">
+      <h3>Computer</h3>
+      <div class="muted" id="ac-body">Loading…</div>
+      <div class="ac-meter"><i id="ac-fill"></i></div>
+      <button class="btn blue" id="btn-compact">Consolidate memory</button>
+      <div class="muted" id="ac-note" style="margin-top:8px"></div>
+    </div>
     <button class="btn" id="btn-pair">Pair your Computer</button>
     <button class="btn lav" id="btn-rotate">Rotate guest password</button>
     <div id="admin-users"></div>
@@ -861,7 +890,22 @@ async function pollStatus() {
     const s = await api("/api/status");
     if (Array.isArray(s.displays)) displays = s.displays;
     setPill(s.online, s.pending || 0);
+    setCompactBanner(s.compacting === true);
   } catch { /* 401 already handled; network blips keep last state */ }
+}
+
+// Memory consolidation banner (TNGC-32): driven by the status poll everywhere
+// and instantly by broadcast frames while in Viewscreen mode. While active,
+// poll fast so the banner clears the moment consolidation finishes.
+let compactingNow = false;
+function setCompactBanner(active) {
+  if (compactingNow === active) return;
+  compactingNow = active;
+  document.body.classList.toggle("compacting", active);
+  if (active) {
+    fastUntil = Math.max(fastUntil, Date.now() + 180000);
+    schedulePoll();
+  }
 }
 function setPill(online, pending) {
   lastOnline = online;
@@ -954,7 +998,12 @@ async function send(text) {
 $("btn-send").onclick = () => { send($("in-type").value); $("in-type").value = ""; };
 $("in-type").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-send").click(); });
 $("btn-logout").onclick = async () => { try { await api("/api/logout", { method: "POST", body: "{}" }); } catch {} logout(); };
-$("btn-admin").onclick = () => { renderAdmin(); show("admin"); };
+$("btn-admin").onclick = () => {
+  renderAdmin();
+  show("admin");
+  if (acTimer) clearInterval(acTimer);
+  acTimer = setInterval(renderComputerCard, 10000);
+};
 
 // ---- push to talk -------------------------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1336,6 +1385,9 @@ function vsFrame(msg) {
     vsStagePost(msg);
   } else if (msg.type === "working") {
     if (vsWs) vsSetChip(msg.active ? "WORKING" : "LIVE", true);
+    vsStagePost(msg);
+  } else if (msg.type === "compaction") {
+    setCompactBanner(msg.active === true);
     vsStagePost(msg);
   } else if (msg.type === "widgets" || msg.type === "map_control" || msg.type === "sky_control") {
     vsStagePost(msg);
@@ -1911,8 +1963,59 @@ function fmtAgo(ts) {
   return h < 48 ? h + "h ago" : Math.round(h / 24) + "d ago";
 }
 
+// ---- Computer management (TNGC-32) ---------------------------------------------
+// The context meter reads what the bridge measured from the session
+// transcript; Compact rides worker → hub → bridge → tmux. Refreshed on a
+// slow interval while the admin view is open.
+let acTimer = null;
+async function renderComputerCard() {
+  let d;
+  try { d = await api("/api/admin/computer"); }
+  catch (e) { $("ac-body").textContent = e.message; return; }
+  const btn = $("btn-compact");
+  const fill = $("ac-fill");
+  if (!d.online) {
+    $("ac-body").textContent = "Computer offline.";
+    fill.style.width = "0";
+    btn.disabled = true;
+    $("ac-note").textContent = "";
+    return;
+  }
+  const info = d.computer;
+  const ctx = info && info.context;
+  if (ctx) {
+    $("ac-body").textContent = "Context: " + ctx.percent + "% — " +
+      Math.round(ctx.tokens / 1000) + "k / " + Math.round(ctx.window / 1000) + "k tokens" +
+      (info.model ? " · " + info.model : "");
+    fill.style.width = Math.min(100, ctx.percent) + "%";
+    fill.className = ctx.percent >= 80 ? "warn" : "";
+  } else {
+    $("ac-body").textContent = "Context: awaiting the bridge's first report…";
+    fill.style.width = "0";
+  }
+  const compacting = !!(info && info.compacting);
+  btn.disabled = compacting;
+  btn.textContent = compacting ? "Consolidating…" : "Consolidate memory";
+  $("ac-note").textContent = compacting ? "Commands queue until consolidation completes." : "";
+}
+$("btn-compact").onclick = async () => {
+  if (!confirm("Start memory consolidation? Commands will queue until it completes (a minute or two).")) return;
+  const b = $("btn-compact");
+  b.disabled = true;
+  try {
+    await api("/api/admin/compact", { method: "POST", body: "{}" });
+    b.textContent = "Requested…";
+    setCompactBanner(true);
+  } catch (e) {
+    $("admin-err").textContent = e.message;
+    b.disabled = false;
+  }
+  setTimeout(renderComputerCard, 1500);
+};
+
 async function renderAdmin() {
   $("admin-err").textContent = "";
+  void renderComputerCard();
   let data;
   try { data = await api("/api/admin/overview"); }
   catch (e) { $("admin-err").textContent = e.message; return; }
@@ -1969,7 +2072,10 @@ async function renderAdmin() {
   });
 }
 
-$("btn-back").onclick = () => show("main");
+$("btn-back").onclick = () => {
+  if (acTimer) { clearInterval(acTimer); acTimer = null; }
+  show("main");
+};
 $("btn-rotate").onclick = async () => {
   if (!confirm("Rotate the guest password? All guest sessions are revoked immediately.")) return;
   try {

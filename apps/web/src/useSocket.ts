@@ -50,6 +50,8 @@ export function useSocket(displayName: string | null) {
   /** TNGC-26: what the persistent PlaybackLayer is playing — set by youtube
       displays and `playback track` messages, cleared by stop. */
   const [playback, setPlayback] = useState<PanelProps | null>(null);
+  /** TNGC-32: memory consolidation running — drives the persistent badge. */
+  const [compacting, setCompacting] = useState(false);
   /** TNGC-27: the voice setting as React state (drives the muted badge) and
       a transient flash shown for a few seconds after any CHANGE. */
   const [voiceState, setVoiceState] = useState({ volume: 100, muted: false });
@@ -165,6 +167,8 @@ export function useSocket(displayName: string | null) {
           }
         } else if (msg.type === "widgets") {
           setWidgets(msg.widgets);
+        } else if (msg.type === "compaction") {
+          setCompacting(msg.active);
         } else if (msg.type === "chime") {
           void playChime(msg.name);
         } else if (msg.type === "media") {
@@ -414,6 +418,6 @@ export function useSocket(displayName: string | null) {
 
   return {
     screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash,
-    confirmedDisplay, setDisplay,
+    compacting, confirmedDisplay, setDisplay,
   };
 }

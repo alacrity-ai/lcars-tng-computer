@@ -333,6 +333,14 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     return { ok: true, active };
   });
 
+  // Hit by the bridge (TNGC-32): memory consolidation started/ended — every
+  // screen shows the persistent badge so people know commands are holding.
+  app.post<{ Body: { active?: boolean } }>("/api/console/compaction", async (req) => {
+    const active = req.body?.active === true;
+    hub.setCompacting(active);
+    return { ok: true, active };
+  });
+
   // Hit by the bridge (not the model) on every command delivery and on the
   // session's turn-end hook: the wall's pending-commands badge mirrors how
   // many voice commands are waiting on the busy session (TNGC-21).

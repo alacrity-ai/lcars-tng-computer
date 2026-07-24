@@ -33,7 +33,7 @@ const initialDisplay = resolveInitialDisplay();
 export function App() {
   const {
     screen, voice, connected, audioLocked, working, widgets, playback, voiceState, voiceFlash,
-    confirmedDisplay, setDisplay,
+    compacting, confirmedDisplay, setDisplay,
   } = useSocket(initialDisplay);
   const duplicated = useDuplicateInstanceCheck();
   const { needsEngage, engage } = useEngage();
@@ -86,6 +86,13 @@ export function App() {
               </span>
             </>
           )}
+        </div>
+      )}
+      {/* memory consolidation (TNGC-32): commands hold until this clears */}
+      {compacting && (
+        <div className="compaction-badge">
+          Memory consolidation in progress
+          <span className="compaction-sub">commands will queue until complete</span>
         </div>
       )}
       {/* persistent reminder while the voice is silenced — answers come as

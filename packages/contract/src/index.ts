@@ -67,6 +67,22 @@ export interface RosterDisplay {
   primary?: boolean;
 }
 
+/** TNGC-32: the Computer session's health as reported by the bridge —
+    context usage (read from the session transcript) and whether memory
+    consolidation (/compact) is currently running. The hub stores the
+    latest; the PWA admin console reads it. All fields best-effort. */
+export interface ComputerInfo {
+  context?: {
+    tokens: number;
+    window: number;
+    percent: number;
+  };
+  model?: string;
+  compacting: boolean;
+  /** Epoch ms when the bridge computed this. */
+  updatedAt: number;
+}
+
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
     text "ping"/"pong" outside this framing (DO auto-response, never wakes
     the hub).
@@ -82,6 +98,9 @@ export interface RosterDisplay {
       player events (video_ended / video_error) — the bridge forwards `msg`
       to the house hub over that display's socket, which is what advances a
       playlist's per-wall queue on the phone. The DO whitelists the types.
+    - compact (TNGC-32): an admin pressed Compact in the PWA — the bridge
+      holds the dispatcher and injects /compact into the tmux-wrapped
+      session. `by` is the requesting admin's handle (audit trail).
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
@@ -89,7 +108,8 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display"; cmd: CloudDisplayCommand }
   | { v: typeof CONTRACT_VERSION; type: "display_open"; name: string }
   | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string }
-  | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown };
+  | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
+  | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub
@@ -103,10 +123,13 @@ export type LinkDownFrame =
     - frame (TNGC-36): one server→display message for a tricorder viewscreen
       (`display` = tricorder-<user>) — the hub fans it out to that user's
       Viewscreen-mode sockets. Never stored; push-only.
+    - computer (TNGC-32): the session's context usage + compaction state —
+      the hub stores the latest for the admin console and the PWA badge.
     Additive in v1: both ends ignore unknown frame types. */
 export type LinkUpFrame =
   | { v: typeof CONTRACT_VERSION; type: "ack"; id: string }
   | { v: typeof CONTRACT_VERSION; type: "pending"; count: number }
   | { v: typeof CONTRACT_VERSION; type: "queue"; items: QueueItem[] }
   | { v: typeof CONTRACT_VERSION; type: "roster"; displays: RosterDisplay[] }
-  | { v: typeof CONTRACT_VERSION; type: "frame"; display: string; msg: unknown };
+  | { v: typeof CONTRACT_VERSION; type: "frame"; display: string; msg: unknown }
+  | { v: typeof CONTRACT_VERSION; type: "computer"; info: ComputerInfo };

@@ -107,6 +107,7 @@ function Stage() {
   const [screen, setScreen] = useState<ScreenState>({ view: "boot", props: {} });
   const [widgets, setWidgets] = useState<Widget[]>([]);
   const [working, setWorking] = useState(false);
+  const [compacting, setCompacting] = useState(false);
   const workingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomRef = useRef<HTMLDivElement | null>(null);
   useStageZoom(zoomRef);
@@ -139,6 +140,9 @@ function Stage() {
           break;
         case "widgets":
           setWidgets(Array.isArray(msg.widgets) ? (msg.widgets as Widget[]) : []);
+          break;
+        case "compaction":
+          setCompacting(msg.active === true);
           break;
         case "working":
           if (msg.active) {
@@ -202,6 +206,12 @@ function Stage() {
           />
         </div>
         <WidgetLayer widgets={widgets} />
+        {compacting && (
+          <div className="compaction-badge">
+            Memory consolidation in progress
+            <span className="compaction-sub">commands will queue until complete</span>
+          </div>
+        )}
         {working && (
           <div className="working-badge">
             <span className="working-sweep" aria-hidden>

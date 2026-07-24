@@ -42,10 +42,14 @@
  */
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { closeSync, openSync, readSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
-import type { LinkDownFrame, LinkUpFrame, QueueItem, RosterDisplay, TngMessage } from "@tng/contract";
+import type { ComputerInfo, LinkDownFrame, LinkUpFrame, QueueItem, RosterDisplay, TngMessage } from "@tng/contract";
 import { getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
@@ -75,7 +79,7 @@ interface QueuedCommand extends TngMessage {
 // ---- MCP server (channel capability) ----------------------------------------
 
 const server = new McpServer(
-  { name: "tng-bridge", version: "0.7.0" },
+  { name: "tng-bridge", version: "0.8.0" },
   {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
@@ -221,6 +225,9 @@ async function executeDisplay(cmd: QueuedCommand): Promise<void> {
     turn or set busy) but still wait their turn behind a queued transcript —
     the queue is strictly ordered. */
 function dispatch(): void {
+  // Memory consolidation holds EVERYTHING (TNGC-32): the queue is strictly
+  // ordered, and typing into the session mid-compact is undefined behavior.
+  if (paused) return;
   while (!busy && queue.length > 0 && queue[0].kind === "display") {
     void executeDisplay(queue.shift()!);
   }
@@ -315,8 +322,275 @@ function onTurnEnd(): void {
   active = null;
   abortRequest = null;
   void postOrigin(null, null); // the served command's routing default expires with its turn
+  // A compaction request that arrived mid-turn injects the moment the turn
+  // ends — before any queued command can start a new one (TNGC-32).
+  if (compactPending) {
+    injectCompact(compactPending.by);
+    pushState();
+    return;
+  }
   dispatch();
   pushState();
+}
+
+// ---- memory consolidation (TNGC-32) --------------------------------------------
+// The session runs inside tmux (make computer / appliance CMD); /compact is a
+// CLI-level command no tool or hook can invoke, so the bridge types it via
+// `tmux send-keys` — from a hardcoded whitelist, never free text. Flow:
+// admin presses Compact in the PWA → `compact` down-frame (or local POST
+// /compact) → hold the dispatcher → wait for any running turn to Stop →
+// inject → the session's PreCompact hook is the ACK (also fires for
+// AUTO-compact, which gets the badge + hold for free) → SessionStart(compact)
+// hook ends it. Every transition is visible: badge on every screen via the
+// console server, state up the link for the PWA. Never a silent hang — a
+// missing ACK unpauses and says so on the wall.
+
+const TMUX_SESSION = process.env.TNG_TMUX_SESSION ?? "tng";
+const COMPACT_ACK_MS = Number(process.env.TNG_COMPACT_ACK_MS ?? 12_000);
+const COMPACT_FAILSAFE_MS = Number(process.env.TNG_COMPACT_FAILSAFE_MS ?? 10 * 60_000);
+
+let paused = false;
+let compacting = false;
+let compactingSince = 0;
+let compactPending: { by: string } | null = null;
+let compactAckTimer: NodeJS.Timeout | null = null;
+
+function postCompactionBadge(active: boolean): void {
+  void fetch(`${SERVER_URL}/api/console/compaction`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ active }),
+    signal: AbortSignal.timeout(2_000),
+  }).catch(() => {
+    // badge is best-effort; state still flows up the link
+  });
+}
+
+function requestCompaction(by: string): { ok: boolean; state: string } {
+  if (compacting) return { ok: false, state: "already-compacting" };
+  if (compactPending || compactAckTimer) return { ok: false, state: "already-requested" };
+  paused = true;
+  if (busy) {
+    compactPending = { by };
+    console.error(`[bridge] compaction requested by ${by} — waiting for the running turn to end`);
+    return { ok: true, state: "waiting-turn-end" };
+  }
+  injectCompact(by);
+  return { ok: true, state: "injected" };
+}
+
+/** The ONLY text the bridge may ever type into the session. Voice/cloud must
+    never become a general keystroke path into the terminal. */
+const INJECT_WHITELIST = new Set(["/compact"]);
+
+function injectCompact(by: string): void {
+  compactPending = null;
+  const cmd = "/compact";
+  if (!INJECT_WHITELIST.has(cmd)) return;
+  console.error(`[bridge] injecting ${cmd} via tmux (requested by ${by})`);
+  execFile("tmux", ["send-keys", "-t", TMUX_SESSION, cmd, "Enter"], (err) => {
+    if (err) {
+      compactFailed(`tmux send-keys failed: ${err.message}`);
+      return;
+    }
+    // send-keys is best-effort typing into a UI — PreCompact is the real ACK.
+    compactAckTimer = setTimeout(() => compactFailed("the session did not start compacting (no PreCompact ack)"), COMPACT_ACK_MS);
+  });
+}
+
+function compactFailed(reason: string): void {
+  console.error(`[bridge] compaction request failed: ${reason}`);
+  if (compactAckTimer) {
+    clearTimeout(compactAckTimer);
+    compactAckTimer = null;
+  }
+  compactPending = null;
+  paused = false;
+  dispatch();
+  pushState();
+  sendComputerInfo(true);
+  void fetch(`${SERVER_URL}/api/console/display`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      view: "alert",
+      props: {
+        level: "yellow",
+        title: "MEMORY CONSOLIDATION FAILED",
+        message: `${reason}. Commands resume normally. Is the session running inside tmux (rebuild: make computer-image)?`,
+      },
+    }),
+    signal: AbortSignal.timeout(3_000),
+  }).catch(() => {});
+}
+
+/** PreCompact hook — fires for the injected /compact AND for auto-compact. */
+function onCompactionStart(trigger: string): void {
+  if (compactAckTimer) {
+    clearTimeout(compactAckTimer);
+    compactAckTimer = null;
+  }
+  compactPending = null;
+  if (compacting) return;
+  paused = true;
+  compacting = true;
+  compactingSince = Date.now();
+  console.error(`[bridge] memory consolidation started (${trigger}) — dispatcher holding`);
+  postCompactionBadge(true);
+  sendComputerInfo(true);
+  pushState();
+}
+
+/** SessionStart(compact) hook — consolidation finished, session is back. */
+function onCompactionEnd(): void {
+  if (!compacting && !paused) return;
+  compacting = false;
+  paused = false;
+  console.error("[bridge] memory consolidation complete — dispatcher resuming");
+  postCompactionBadge(false);
+  sendComputerInfo(true);
+  dispatch();
+  pushState();
+  // the transcript rolled — re-read from the new file promptly
+  setTimeout(pollContext, 3_000).unref();
+}
+
+// A lost SessionStart hook must degrade, not wedge the house (TNGC-32).
+setInterval(() => {
+  if (compacting && Date.now() - compactingSince > COMPACT_FAILSAFE_MS) {
+    console.error(
+      `[bridge] no compaction-end for ${Math.round(COMPACT_FAILSAFE_MS / 60000)}min — assuming the hook was lost, resuming`,
+    );
+    onCompactionEnd();
+  }
+}, 30_000).unref();
+
+// ---- context meter (TNGC-32) ----------------------------------------------------
+// The session transcript records exact `usage` on every assistant message;
+// the newest jsonl under $CLAUDE_CONFIG_DIR/projects is the live session
+// (newest-FILE logic matters — compaction rolls files). Stateless re-scan
+// every 15s; ~256KB tail read, cheap.
+
+const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+const WINDOW_OVERRIDE = Number(process.env.TNG_CONTEXT_WINDOW ?? 0);
+
+function contextWindowFor(model: string): number {
+  if (WINDOW_OVERRIDE > 0) return WINDOW_OVERRIDE;
+  if (/fable|mythos|sonnet-5/.test(model)) return 1_000_000;
+  return 200_000;
+}
+
+let lastContext: { tokens: number; window: number; percent: number } | null = null;
+let lastModel: string | undefined;
+
+function newestTranscript(): string | null {
+  try {
+    const projects = join(CONFIG_DIR, "projects");
+    let best: string | null = null;
+    let bestMtime = 0;
+    for (const d of readdirSync(projects)) {
+      let files: string[];
+      try {
+        files = readdirSync(join(projects, d));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!f.endsWith(".jsonl")) continue;
+        const p = join(projects, d, f);
+        try {
+          const m = statSync(p).mtimeMs;
+          if (m > bestMtime) {
+            bestMtime = m;
+            best = p;
+          }
+        } catch {
+          // rolled away between listing and stat
+        }
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+function readTail(path: string, bytes: number): string {
+  const fd = openSync(path, "r");
+  try {
+    const size = statSync(path).size;
+    const len = Math.min(bytes, size);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    return buf.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function pollContext(): void {
+  const file = newestTranscript();
+  if (!file) return;
+  let text: string;
+  try {
+    text = readTail(file, 256 * 1024);
+  } catch {
+    return;
+  }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.includes('"usage"')) continue;
+    try {
+      const ev = JSON.parse(line) as { message?: { model?: string; usage?: Record<string, number> } };
+      const u = ev.message?.usage;
+      if (!u || typeof u.input_tokens !== "number") continue;
+      const tokens =
+        (u.input_tokens ?? 0) +
+        (u.cache_read_input_tokens ?? 0) +
+        (u.cache_creation_input_tokens ?? 0) +
+        (u.output_tokens ?? 0);
+      if (typeof ev.message?.model === "string") lastModel = ev.message.model;
+      const window = contextWindowFor(lastModel ?? "");
+      lastContext = { tokens, window, percent: Math.min(100, Math.round((tokens / window) * 100)) };
+      sendComputerInfo(false);
+      return;
+    } catch {
+      // truncated first line of the tail window — keep scanning upward
+    }
+  }
+}
+setInterval(pollContext, 15_000).unref();
+// First read AFTER module init completes — pollContext touches cloudSocket,
+// whose `let` lives further down this file (TDZ at load time otherwise).
+setTimeout(pollContext, 1_000).unref();
+
+let lastComputerKey = "";
+
+function computerInfo(): ComputerInfo {
+  return {
+    ...(lastContext ? { context: lastContext } : {}),
+    ...(lastModel ? { model: lastModel } : {}),
+    compacting,
+    updatedAt: Date.now(),
+  };
+}
+
+/** Push context/compaction state up the link — on change, or forced at
+    transitions and link-open (the PWA admin console reads it from the hub). */
+function sendComputerInfo(force: boolean): void {
+  const info = computerInfo();
+  const key = `${info.context?.percent ?? -1}|${info.compacting}|${info.model ?? ""}`;
+  if (!force && key === lastComputerKey) return;
+  lastComputerKey = key;
+  if (cloudSocket?.readyState === WebSocket.OPEN) {
+    const frame: LinkUpFrame = { v: 1, type: "computer", info };
+    try {
+      cloudSocket.send(JSON.stringify(frame));
+    } catch {
+      // link recycling — the open handler re-syncs
+    }
+  }
 }
 
 // Failsafe: a lost Stop hook must degrade to pre-queue behavior, not wedge.
@@ -371,6 +645,11 @@ const http = createServer((req, res) => {
       queued: queue.length,
       ttlMs: TTL_MS,
       cloud: cloudState,
+      // TNGC-32: context meter + consolidation state (tng doctor reads this)
+      paused,
+      compacting,
+      context: lastContext,
+      model: lastModel ?? null,
     });
   }
   if (req.method === "GET" && req.url === "/queue") {
@@ -390,6 +669,27 @@ const http = createServer((req, res) => {
   if (req.method === "POST" && req.url === "/turn-end") {
     onTurnEnd();
     return respond(200, { ok: true });
+  }
+  // TNGC-32 hooks: PreCompact = consolidation is truly starting (the ACK for
+  // an injected /compact, and the only signal for auto-compact);
+  // SessionStart(compact) = it finished and the session is back.
+  if (req.method === "POST" && req.url === "/compaction-start") {
+    return readBody((body) => {
+      onCompactionStart(typeof body.trigger === "string" ? body.trigger : "unknown");
+      respond(200, { ok: true });
+    });
+  }
+  if (req.method === "POST" && req.url === "/compaction-end") {
+    onCompactionEnd();
+    return respond(200, { ok: true });
+  }
+  // Local compaction trigger (same handler the cloud `compact` frame uses) —
+  // loopback-only like everything else here.
+  if (req.method === "POST" && req.url === "/compact") {
+    return readBody((body) => {
+      const result = requestCompaction(typeof body.by === "string" && body.by ? body.by : "local");
+      respond(result.ok ? 202 : 409, result);
+    });
   }
   if (req.method === "POST" && req.url === "/withdraw") {
     return readBody((body) => {
@@ -675,6 +975,7 @@ function startCloudLink() {
       // lost — the snapshot, unlike messages, has no replay).
       pushState();
       sendRoster(true);
+      sendComputerInfo(true);
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {
         if (Date.now() - lastActivity > 90_000) {
@@ -715,6 +1016,10 @@ function startCloudLink() {
           closeTricorderDisplay(frame.name);
         } else if (frame.type === "display_client" && typeof frame.name === "string") {
           forwardDisplayClient(frame.name, frame.msg);
+        } else if (frame.type === "compact") {
+          // Admin pressed Compact in the PWA (worker enforced the role).
+          const result = requestCompaction(typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
+          console.error(`[bridge] cloud compact request: ${result.state}`);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

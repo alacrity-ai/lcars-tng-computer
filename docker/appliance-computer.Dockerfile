@@ -10,7 +10,7 @@
 FROM node:24-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      iptables ipset iproute2 dnsutils curl git jq procps psmisc \
+      iptables ipset iproute2 dnsutils curl git jq procps psmisc tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # The pin. Bump deliberately, test channels delivery, then ship a new tag.
@@ -44,4 +44,5 @@ ENV HOME=/home/node \
 WORKDIR /opt/tng/claude
 
 ENTRYPOINT ["/usr/local/bin/appliance-computer-entrypoint.sh"]
-CMD ["claude", "--dangerously-skip-permissions", "--dangerously-load-development-channels", "server:bridge"]
+# tmux owns the terminal (TNGC-32) — the bridge injects /compact via send-keys
+CMD ["tmux", "new-session", "-A", "-s", "tng", "claude", "--dangerously-skip-permissions", "--dangerously-load-development-channels", "server:bridge"]
