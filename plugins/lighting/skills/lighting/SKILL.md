@@ -35,6 +35,9 @@ only pass `transition` when the human asks for instant or extra-slow.
 - **Status is cached and instant** — call it freely to answer questions or
   ground a relative change ("a bit dimmer"). Never say you'll "check the
   bulbs"; you already know.
+- **The panel is ground truth** — `action:"panel"` reads every bulb before
+  rendering (~2 s), so what lands on the wall IS the room. If the human says
+  the cached status looks wrong, showing the panel is also the re-sync.
 - Relative changes: ±20–25 brightness points feels like one spoken step.
 - "Goodnight"-type requests → scene `all-off`, not per-room commands.
 - If the tool answers **"Lighting control is offline."** — say exactly that,

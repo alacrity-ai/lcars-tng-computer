@@ -270,6 +270,26 @@ function recentRadioErrors(windowMs = 60_000) {
   return cache.radioErrors.filter((e) => e.t >= cutoff);
 }
 
+/**
+ * Read ground truth off every reachable bulb and let it land in the cache.
+ * Reporting gaps and Z2M's optimistic group echoes let the cache drift from
+ * the actual bulbs (user-hit: panel showed stale levels after a run of
+ * adjustments) — so anything user-facing that CLAIMS to be current calls
+ * this first. Reads are fire-and-collect: publish /get to each device, then
+ * give the answers a beat to arrive; wall-switched-off bulbs just miss the
+ * window (their /get errors are filtered out of the radio warning).
+ */
+async function refreshTruth(timeoutMs = 2000) {
+  if (!mqttConnected) return;
+  const READ = JSON.stringify({ state: "", brightness: "", color_temp: "", color: { x: "", y: "" } });
+  for (const d of cache.devices) {
+    if (!d.friendly_name) continue;
+    if (cache.availability.get(d.friendly_name) === "offline") continue;
+    client.publish(`${BASE}/${d.friendly_name}/get`, READ);
+  }
+  await new Promise((r) => setTimeout(r, timeoutMs));
+}
+
 const server = createServer(async (req, res) => {
   const send = (code, obj) => {
     res.writeHead(code, { "content-type": "application/json" });
@@ -289,7 +309,12 @@ const server = createServer(async (req, res) => {
         uptimeSec: Math.round((Date.now() - startedAt) / 1000),
       });
     }
-    if (route === "GET /state") return send(200, stateSummary());
+    if (route === "GET /state") {
+      // ?fresh=1 → verified truth (reads every bulb, ~2s); default is the
+      // instant cache — voice status stays snappy.
+      if (url.searchParams.get("fresh")) await refreshTruth();
+      return send(200, stateSummary());
+    }
     if (route === "GET /panel/preview") return send(200, composePanel(cache, mqttConnected));
     if (req.method !== "POST") return send(404, { error: "unknown route" });
 
@@ -364,6 +389,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (route === "POST /panel") {
+      // The panel claims to BE the room — never render it from a possibly
+      // drifted cache. ~2s of truth-read before first paint is the price.
+      await refreshTruth();
       const r = await postPanel().catch(() => null);
       if (!r) return send(502, { error: "wall server unreachable" });
       if (!r.ok) {
