@@ -25,6 +25,19 @@ import "@tng/panel-renderer/lcars.css";
 interface ScreenState {
   view: PanelView;
   props: PanelProps;
+  /** Frame stamp from the host (Welcome Console, TNGC-39) so consecutive
+      same-view displays still wipe. The PWA never sends one. */
+  seq?: number;
+}
+
+// TNGC-39: the Welcome Console hosts this stage on an ordinary web page,
+// where a hidden cursor (right for a wall terminal) would just feel broken.
+// Only that shell passes the flag; the PWA and the wall never do.
+if (new URLSearchParams(location.search).get("cursor") === "1") {
+  const style = document.createElement("style");
+  style.textContent =
+    "html, body, #root, .map-panel .leaflet-container { cursor: auto !important; }";
+  document.head.appendChild(style);
 }
 
 /** Pinch-zoom for the stage (TNGC-37 follow-up): two fingers zoom in on the
@@ -123,6 +136,12 @@ function Stage() {
       if (e.origin !== location.origin || e.source !== window.parent) return;
       const data = e.data as { type?: string; msg?: Record<string, unknown> } | null;
       if (!data || typeof data !== "object") return;
+      // TNGC-39: a host whose listener attached late (e.g. the Welcome
+      // Console behind a slow stylesheet) pings until it hears ready.
+      if (data.type === "tng-vs-hello") {
+        window.parent.postMessage({ type: "tng-vs-ready" }, location.origin);
+        return;
+      }
       if (data.type === "tng-reset") {
         clearWorking();
         setScreen({ view: "boot", props: {} });
@@ -136,7 +155,11 @@ function Stage() {
           // Content landing is the request being fulfilled — same rule as the
           // wall's useSocket.
           clearWorking();
-          setScreen({ view: msg.view as PanelView, props: (msg.props as PanelProps) ?? {} });
+          setScreen({
+            view: msg.view as PanelView,
+            props: (msg.props as PanelProps) ?? {},
+            seq: typeof msg.seq === "number" ? msg.seq : undefined,
+          });
           break;
         case "widgets":
           setWidgets(Array.isArray(msg.widgets) ? (msg.widgets as Widget[]) : []);
@@ -199,7 +222,10 @@ function Stage() {
       style={{ width: "100%", height: "100%", transformOrigin: "0 0", willChange: "transform" }}
     >
       <LcarsFrame title="LCARS 40274">
-        <div key={screen.view} className="panel-wipe">
+        <div
+          key={screen.seq !== undefined ? `${screen.view}:${screen.seq}` : screen.view}
+          className="panel-wipe"
+        >
           <Panel
             view={screen.view}
             props={screen.view === "status" ? { ...screen.props, working } : screen.props}
