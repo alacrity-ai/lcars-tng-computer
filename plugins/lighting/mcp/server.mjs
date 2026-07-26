@@ -48,6 +48,10 @@ const TOOL = {
       },
       color: { type: "string", description: "Color name (red, amber, blue, ...) or #rrggbb" },
       transition: { type: "number", description: "Fade duration in seconds (default 1.5)" },
+      wall: {
+        type: "string",
+        description: "Viewscreen to put the panel on (action=panel only), e.g. main or office. Defaults to the wall the command originated from.",
+      },
     },
     required: ["action"],
   },
@@ -112,8 +116,8 @@ async function callLights(args = {}) {
       return text(formatStatus(s));
     }
     if (action === "panel") {
-      const r = await api("POST", "/panel", {});
-      return r.ok ? text("Lighting panel is on the wall.") : errText(r.error ?? "display refused");
+      const r = await api("POST", "/panel", args.wall ? { wall: args.wall } : {});
+      return r.ok ? text(`Lighting panel is on the ${r.wall ?? "wall"} viewscreen.`) : errText(r.error ?? "display refused");
     }
     if (action === "scene") {
       const r = await api("POST", "/scene", { name: args.scene ?? args.target, target: args.scene ? args.target : undefined });

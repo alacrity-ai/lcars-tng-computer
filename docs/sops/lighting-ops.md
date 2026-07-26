@@ -100,8 +100,12 @@ color?, transition?, effect?}` → service `POST /set` / `/scene`.
   `channel_change` `finish_effect` `stop_effect` `colorloop`
   `stop_colorloop`. Effects always fan out **per device** under the hood.
 - Semantics that surprise people: brightness-only changes do NOT stop a
-  colorloop ("dim the party" keeps partying); any `color`/`colorTemp`
-  command DOES (auto `stop_colorloop` first).
+  colorloop ("dim the party" keeps partying); a `color`/`colorTemp` command
+  DOES stop loops **the service started** (it tracks them and sends
+  `stop_colorloop` first, with a settle gap so the stop can't race the
+  group-cast color command and eat it). A loop started from the Z2M frontend
+  or surviving a service restart is untracked — a color command won't kill
+  it; use scene `reset`.
 
 ## Truth model — what to believe, when
 

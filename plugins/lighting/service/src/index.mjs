@@ -123,34 +123,48 @@ client.on("message", (topic, buf) => {
 });
 
 // ------------------------------------------------------------------ wall panel
-let panelActiveUntil = 0; // we posted the panel; it may still be on screen
+// The panel can be live on several viewscreens at once (TNGC-35 walls), and
+// each is shadowed independently: resolved wall name -> {activeUntil,
+// lastPost}. Keyed by the name the SERVER resolved (the display response
+// echoes it), so an omitted wall pins to whichever wall it landed on instead
+// of drifting with the origin on later refreshes.
+const panels = new Map();
 let refreshTimer = null;
-let lastPanelPost = 0;
 
 function scheduleRefresh() {
-  if (Date.now() > panelActiveUntil || refreshTimer) return;
+  const now = Date.now();
+  if (refreshTimer || ![...panels.values()].some((p) => p.activeUntil > now)) return;
   refreshTimer = setTimeout(async () => {
     refreshTimer = null;
-    try {
-      const res = await fetch(`${STACK_URL}/api/console/screen`, { signal: AbortSignal.timeout(3000) });
-      const screen = await res.json();
-      if (screen.view !== "composite" || screen.props?.title !== PANEL_TITLE) {
-        panelActiveUntil = 0; // the wall moved on — stop shadowing it
-        return;
+    for (const [wall, p] of [...panels]) {
+      if (Date.now() > p.activeUntil) continue;
+      try {
+        const url = `${STACK_URL}/api/console/screen${wall ? `?wall=${encodeURIComponent(wall)}` : ""}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+        const screen = await res.json();
+        if (screen.view !== "composite" || screen.props?.title !== PANEL_TITLE) {
+          panels.delete(wall); // this wall moved on — stop shadowing it
+          continue;
+        }
+        await postPanel(wall);
+      } catch {
+        /* stack unreachable — the next state change will try again */
       }
-      await postPanel();
-    } catch {
-      /* stack unreachable — the next state change will try again */
     }
   }, 800);
 }
 
-async function postPanel() {
-  // Stay under the server's composite rate limit (2/s) even when a burst of
-  // MQTT updates lands, and retry once if the shared bucket still 429s.
-  const wait = 600 - (Date.now() - lastPanelPost);
+async function postPanel(wall) {
+  // Stay under the server's per-wall composite rate limit (2/s) even when a
+  // burst of MQTT updates lands, and retry once if the bucket still 429s.
+  const entry = panels.get(wall) ?? { activeUntil: 0, lastPost: 0 };
+  const wait = 600 - (Date.now() - entry.lastPost);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  const body = JSON.stringify({ view: "composite", props: composePanel(cache, mqttConnected) });
+  const body = JSON.stringify({
+    view: "composite",
+    props: composePanel(cache, mqttConnected),
+    ...(wall ? { wall } : {}),
+  });
   const post = () =>
     fetch(`${STACK_URL}/api/console/display`, {
       method: "POST",
@@ -159,14 +173,22 @@ async function postPanel() {
       signal: AbortSignal.timeout(5000),
     });
   let res = await post();
-  lastPanelPost = Date.now();
+  entry.lastPost = Date.now();
   if (res.status === 429) {
     await new Promise((r) => setTimeout(r, 700));
     res = await post();
-    lastPanelPost = Date.now();
+    entry.lastPost = Date.now();
   }
-  if (res.ok) panelActiveUntil = Date.now() + 30 * 60 * 1000;
-  return res;
+  let resolved = wall;
+  if (res.ok) {
+    resolved = (await res.json().catch(() => null))?.wall ?? wall;
+    entry.activeUntil = Date.now() + 30 * 60 * 1000;
+    if (resolved !== wall) panels.delete(wall);
+    panels.set(resolved, entry);
+  } else {
+    panels.set(wall, entry);
+  }
+  return { res, wall: resolved };
 }
 
 // ------------------------------------------------------------------------ http
@@ -243,24 +265,54 @@ function deviceTopicsFor(topic) {
   return members.length ? members : [topic];
 }
 
-function publishTo(targets, payload) {
-  // Two hard-won rules live here:
+// Colorloops the SERVICE started, by device name. An active loop is invisible
+// to reported state, but every loop in normal operation starts here — so this
+// set is the truth about who is looping. A loop started elsewhere (Z2M
+// frontend) or before a service restart is invisible to it: a color command
+// won't stop that loop — scene "reset" is the documented way out.
+const looping = new Set();
+
+async function publishTo(targets, payload) {
+  // Three hard-won rules live here:
   //  1. EFFECTS GO PER-DEVICE. Z2M's group effect path issues directed
   //     reads/commands against individual members anyway and fails half of
   //     them under load (MAC_NO_ACK) — fan the effect out ourselves.
-  //  2. COLOR INTENT KILLS A LOOP FIRST. An active colorloop overrides
-  //     color commands and Z2M optimistically reports the color you asked
-  //     for. Deactivate is a no-op when nothing loops. Brightness-only
-  //     changes deliberately keep the loop ("dim the party").
+  //  2. COLOR INTENT KILLS A TRACKED LOOP FIRST — and only a tracked one.
+  //     An unconditional stop_colorloop preamble raced the group-cast color
+  //     command it preceded (directed unicasts and group multicasts are
+  //     separate Z2M queues, so arrival order at the bulb is undefined) and
+  //     a deactivate landing second restores the pre-loop color, eating the
+  //     command. Brightness-only changes deliberately keep the loop
+  //     ("dim the party").
+  //  3. STOPS SETTLE BEFORE THE GROUP CAST. When a stop was sent, wait for
+  //     the per-device queues to drain so the deactivate can't land inside
+  //     (or after) the color command's fade.
   const { effect, ...rest } = payload;
   const hasRest = Object.keys(rest).some((k) => k !== "transition");
   const colorIntent = (rest.color || rest.color_temp !== undefined) && !effect;
+  let stopsSent = false;
   for (const t of targets.topics) {
     const devices = colorIntent || effect ? deviceTopicsFor(t) : null;
-    if (colorIntent) for (const d of devices) client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect: "stop_colorloop" }));
-    if (effect) for (const d of devices) client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect }));
-    // State/color/brightness stays a single group cast — those are reliable
-    // and keep zones fading in sync.
+    if (colorIntent) {
+      for (const d of devices) {
+        if (!looping.delete(d)) continue;
+        client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect: "stop_colorloop" }));
+        stopsSent = true;
+      }
+    }
+    if (effect) {
+      for (const d of devices) {
+        if (effect === "colorloop") looping.add(d);
+        else if (effect === "stop_colorloop" || effect === "stop_effect") looping.delete(d);
+        client.publish(`${BASE}/${d}/set`, JSON.stringify({ effect }));
+      }
+      if ((effect === "stop_colorloop" || effect === "stop_effect") && hasRest) stopsSent = true;
+    }
+  }
+  if (stopsSent) await new Promise((r) => setTimeout(r, 500));
+  // State/color/brightness stays a single group cast — those are reliable
+  // and keep zones fading in sync.
+  for (const t of targets.topics) {
     if (hasRest) client.publish(`${BASE}/${t}/set`, JSON.stringify(rest));
   }
 }
@@ -331,7 +383,7 @@ const server = createServer(async (req, res) => {
       const cmd = buildCommand(body);
       if (cmd.error) return send(400, { error: cmd.error });
       if (!mqttConnected) return send(503, { error: OFFLINE });
-      publishTo(targets, cmd);
+      await publishTo(targets, cmd);
       return send(200, { ok: true, applied: targets, command: cmd });
     }
 
@@ -347,6 +399,7 @@ const server = createServer(async (req, res) => {
         if (!mqttConnected) return send(503, { error: OFFLINE });
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         const allDevices = [...new Set(targets.topics.flatMap((t) => deviceTopicsFor(t)))];
+        for (const d of allDevices) looping.delete(d); // reset clears every effect below
         for (const t of targets.topics) client.publish(`${BASE}/${t}/set`, JSON.stringify({ state: "OFF", transition: 0 }));
         await sleep(4000);
         for (const d of allDevices) {
@@ -384,7 +437,7 @@ const server = createServer(async (req, res) => {
       const targets = resolveTargets(cache, body.target);
       if (!targets) return send(404, { error: "nothing is paired yet — no fixtures to apply the scene to" });
       if (!mqttConnected) return send(503, { error: OFFLINE });
-      publishTo(targets, buildCommand(spec));
+      await publishTo(targets, buildCommand(spec));
       return send(200, { ok: true, scene: name, applied: targets });
     }
 
@@ -392,13 +445,14 @@ const server = createServer(async (req, res) => {
       // The panel claims to BE the room — never render it from a possibly
       // drifted cache. ~2s of truth-read before first paint is the price.
       await refreshTruth();
-      const r = await postPanel().catch(() => null);
+      const wall = typeof body.wall === "string" && body.wall ? body.wall : undefined;
+      const r = await postPanel(wall).catch(() => null);
       if (!r) return send(502, { error: "wall server unreachable" });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        return send(r.status, { error: err.error ?? `display refused (${r.status})` });
+      if (!r.res.ok) {
+        const err = await r.res.json().catch(() => ({}));
+        return send(r.res.status, { error: err.error ?? `display refused (${r.res.status})` });
       }
-      return send(200, { ok: true, view: "composite", title: PANEL_TITLE });
+      return send(200, { ok: true, view: "composite", title: PANEL_TITLE, wall: r.wall });
     }
 
     // Operator convenience for pairing sessions (also available in the Z2M
