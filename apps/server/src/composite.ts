@@ -13,6 +13,8 @@ import {
 } from "@tng/shared";
 
 const ACCENTS = new Set(["gold", "peach", "lav", "blue", "red"]);
+const ICONS = new Set(["bulb", "thermometer", "droplet", "bolt"]);
+const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** Returns a user-legible error string, or null when valid. */
 export function validateComposite(props: Record<string, unknown>): string | null {
@@ -68,10 +70,24 @@ export function validateComposite(props: Record<string, unknown>): string | null
           if ((block.points as number[]).length > 200) return "sparkline.points: max 200 points";
           break;
         }
+        case "status": {
+          // The inline chip lands in a style attribute exactly like swatch's
+          // does — same hex-only rule, same reason.
+          if (block.swatch !== undefined && (typeof block.swatch !== "string" || !HEX.test(block.swatch))) {
+            return 'status.swatch must be "#rrggbb"';
+          }
+          if (block.icon !== undefined && !ICONS.has(block.icon as string)) {
+            return `status.icon must be one of: ${[...ICONS].join(", ")}`;
+          }
+          if (block.value !== undefined && typeof block.value !== "string") {
+            return "status.value must be a string (pre-formatted, e.g. \"100%\")";
+          }
+          break;
+        }
         case "swatch": {
           // The color lands in an inline style on the wall — hex only, so a
           // hostile value can never smuggle CSS past the renderer.
-          if (typeof block.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(block.color)) {
+          if (typeof block.color !== "string" || !HEX.test(block.color)) {
             return 'swatch.color must be "#rrggbb"';
           }
           break;

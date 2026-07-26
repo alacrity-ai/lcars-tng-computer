@@ -28,7 +28,9 @@ weather…), always prefer it — composite is the fallback and the combiner.
 ```
 
 Blocks: `group` (titled section, nests once or twice — max depth 3),
-`readout` (label + big value), `status` (on|off|warn|alert|idle chip),
+`readout` (label + big value), `status` (on|off|warn|alert|idle chip — plus
+optional inline trim: `icon` (`bulb|thermometer|droplet|bolt`) + `value`
+("100%") and `swatch` ("#rrggbb" chip), so one entity fits on ONE row),
 `gauge` (0..1 bar, optional overlay text), `text` (body|caption),
 `list` ({label, detail?} rows), `keyvalue` (pairs table),
 `sparkline` (numeric trend, ≤200 points), `swatch` (a rendered color chip —
@@ -40,6 +42,11 @@ Accents: gold, peach, lav, blue, red.
 
 - **Groups are rooms/topics; 2 columns for 3+ groups**, 1 column for a
   focused board. Never bury one number in a lone group — use a readout row.
+- **One entity, one row.** When a thing has a state, a level, and a color,
+  say it with a single `status` (chip + `icon`/`value` + `swatch`) instead of
+  stacking status + gauge + swatch — three rows per item stops fitting the
+  moment the list grows. Spend a `gauge` only when the bar itself is the
+  point (a level being watched), not to print a percentage.
 - Hard caps: 64 blocks, depth 3, 16 KB. The wall scrolls past one screen —
   cut content instead; a dashboard nobody can read across the room failed.
 - Live updates: re-display the same view with changed props — the wall

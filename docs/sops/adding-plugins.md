@@ -207,10 +207,12 @@ State-cache lessons (these WILL bite you otherwise):
 
 Plugins render through the **composite block language** only — POST
 `{"view":"composite","props":{…}}` to `STACK_URL/api/console/display`. Blocks:
-`group`, `readout`, `status`, `gauge`, `text`, `list`, `keyvalue`,
+`group`, `readout`, `status` (chip, plus optional inline `icon`/`value`/
+`swatch` — one entity per row), `gauge`, `text`, `list`, `keyvalue`,
 `sparkline`, `swatch` (a rendered color chip), `svg` (same-origin path only),
 `divider`. Limits enforced server-side: ≤64 blocks, nesting ≤3, ≤16 KB,
-strict formats (`gauge.value` 0..1, `swatch.color` `#rrggbb`). Full schema:
+strict formats (`gauge.value` 0..1, `swatch.color`/`status.swatch` `#rrggbb`).
+Full schema:
 `packages/shared/src/index.ts` + `claude/.claude/skills/composite/SKILL.md`.
 
 The refresh discipline — this is the difference between a live dashboard and
@@ -226,15 +228,18 @@ a wall that fights the user:
    server 429s — back off once and retry).
 5. Same-view re-POSTs update in place (no wipe) — that's what makes gauges
    track live.
-6. Design for scale: per-entity rows until ~14 entities, then collapse to
-   per-zone summaries, or you'll hit the 64-block cap.
+6. Design for scale: **one block per entity** (`status` carries level and
+   color inline — don't stack status + gauge + swatch), then collapse to
+   per-zone summaries as you approach the 64-block cap. Lighting's threshold
+   is computed, not guessed: `fixtures + rooms + chrome > 64`.
 
 If the language is missing a primitive your panel genuinely needs (lighting
-needed `swatch` to show *actual colors*): extend it in core — type in
-`packages/shared`, validation in `apps/server/src/composite.ts` (strict —
-composite props are plugin-supplied input landing on the wall), renderer case
-in `apps/web/src/panels/CompositePanel.tsx`, CSS, a line in the composite
-skill + the display tool description. Unknown types render as placards on
+needed `swatch` to show *actual colors*, then `status.icon`/`value`/`swatch`
+to fit a fixture on one row): extend it in core — type in `packages/shared`,
+validation in `apps/server/src/composite.ts` (strict — composite props are
+plugin-supplied input landing on the wall), renderer case in
+`packages/panel-renderer/src/panels/CompositePanel.tsx` + `lcars.css`, a line
+in the composite skill + the display tool description. Unknown types render as placards on
 old walls, so the schema evolves additively. That's a core PR — justify it
 in the commit.
 

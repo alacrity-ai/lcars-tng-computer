@@ -2,6 +2,7 @@ import { useState } from "react";
 import type {
   CompositeAccent,
   CompositeBlock,
+  CompositeIcon,
   CompositePanelProps,
 } from "@tng/shared";
 
@@ -29,6 +30,23 @@ const STATE_ACCENT: Record<string, string> = {
 
 function accent(a: CompositeAccent | undefined, fallback = "var(--gold)"): string {
   return a ? ACCENT_VAR[a] ?? fallback : fallback;
+}
+
+/* Glyphs are drawn from THIS table, never from props — a block names one, the
+   renderer owns the geometry. Unknown names fall through to text-only. */
+const ICON_PATH: Record<CompositeIcon, string> = {
+  bulb: "M12 3a6 6 0 0 0-3.4 10.9V16h6.8v-2.1A6 6 0 0 0 12 3zM9.4 18.4h5.2M10.4 20.9h3.2",
+  thermometer: "M12 3a2 2 0 0 0-2 2v8.3a4 4 0 1 0 4 0V5a2 2 0 0 0-2-2z",
+  droplet: "M12 3s5.5 6 5.5 9.5a5.5 5.5 0 1 1-11 0C6.5 9 12 3 12 3z",
+  bolt: "M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z",
+};
+
+function Glyph({ d, color }: { d: string; color: string }) {
+  return (
+    <svg className="cp-status-icon" viewBox="0 0 24 24" aria-hidden>
+      <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function Sparkline({ points, color }: { points: number[]; color: string }) {
@@ -97,6 +115,10 @@ function Block({ block }: { block: CompositeBlock }) {
     case "status": {
       const color = STATE_ACCENT[block.state] ?? "var(--blue)";
       const lit = block.state !== "off";
+      // Validator guarantees #rrggbb; re-check anyway before it hits a style.
+      const chip = block.swatch && /^#[0-9a-fA-F]{6}$/.test(block.swatch) ? block.swatch : null;
+      const glyph = block.icon ? ICON_PATH[block.icon] : undefined;
+      const metric = block.value || glyph;
       return (
         <div className="cp-status">
           <span
@@ -106,6 +128,15 @@ function Block({ block }: { block: CompositeBlock }) {
             {block.state.toUpperCase()}
           </span>
           <span className="cp-status-label">{block.label}</span>
+          {/* Everything past the label is right-aligned trim: metric, color,
+              then the detail line — one fixture, one row. */}
+          {metric && (
+            <span className="cp-status-metric">
+              {glyph && <Glyph d={glyph} color={lit ? color : "#666"} />}
+              {block.value && <span className="cp-status-value">{block.value}</span>}
+            </span>
+          )}
+          {chip && <span className="cp-status-swatch" style={{ background: chip }} />}
           {block.detail && <span className="cp-status-detail">{block.detail}</span>}
         </div>
       );

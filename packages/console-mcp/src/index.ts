@@ -114,7 +114,9 @@ server.registerTool(
       "compose LCARS primitives when no dedicated panel fits or the user asks for a " +
       "dashboard/status board of several things at once. Block types: group {title, items: " +
       "[blocks]}, readout {label, value, unit?}, status {label, state: on|off|warn|alert|idle, " +
-      "detail?}, gauge {label, value: 0..1, text?}, text {body, role?}, list {items: [{label, " +
+      "detail?, icon?: bulb|thermometer|droplet|bolt, value?: \"100%\", swatch?: \"#rrggbb\"} — " +
+      "the optional trim keeps one entity on ONE row (chip · glyph+level · color · detail), " +
+      "gauge {label, value: 0..1, text?}, text {body, role?}, list {items: [{label, " +
       "detail?}]}, keyvalue {pairs: [{k, v}]}, sparkline {label, points: [numbers], unit?}, " +
       "swatch {label, color: \"#rrggbb\", detail?} — a rendered color chip, " +
       "divider. Accents: gold|peach|lav|blue|red. Max 64 blocks, nesting ≤3 — load the " +

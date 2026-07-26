@@ -575,7 +575,17 @@ export interface CompositeStatusBlock {
   label: string;
   state: "on" | "off" | "warn" | "alert" | "idle";
   detail?: string;
+  /** Compact inline metric: a glyph from the renderer's set + short text
+      ("100%"). Cheaper than a gauge when the number IS the answer and a bar
+      would cost a whole row. Unknown glyph names render text-only. */
+  icon?: CompositeIcon;
+  value?: string;
+  /** Inline color chip — "#rrggbb" only, enforced server-side. The row's
+      answer to "what color", without spending a swatch block on it. */
+  swatch?: string;
 }
+/** Named glyphs the renderer draws itself — never a path from props. */
+export type CompositeIcon = "bulb" | "thermometer" | "droplet" | "bolt";
 export interface CompositeGaugeBlock {
   type: "gauge";
   label: string;
