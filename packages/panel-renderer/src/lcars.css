@@ -2824,3 +2824,94 @@ body {
   color: rgba(153, 153, 204, 0.55);
   letter-spacing: 0.2em;
 }
+
+/* ---------- QR panel (TNGC-57) ---------- */
+/* The code itself is deliberately NOT LCARS-tinted: modules are near-black on
+   near-white inside a gold frame, because phone cameras reject inverted and
+   low-contrast codes and an unscannable QR is a broken panel. Everything
+   around it carries the palette. */
+
+.qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: clamp(10px, 1.6vh, 24px);
+  padding-right: 24px;
+  text-align: center;
+}
+.qr-title {
+  font-size: clamp(26px, 3.4vw, 52px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+  line-height: 1;
+}
+.qr-code {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(8px, 1.2vh, 16px);
+  border-radius: 14px;
+  background: var(--lcars-gold);
+  box-shadow: 0 0 40px rgba(255, 153, 0, 0.28);
+}
+.qr-svg {
+  display: block;
+  height: min(52vh, 52vw);
+  width: min(52vh, 52vw);
+  border-radius: 6px;
+}
+.qr-code.expired {
+  background: var(--lcars-red);
+  box-shadow: none;
+}
+.qr-code.expired .qr-svg {
+  opacity: 0.18;
+  filter: grayscale(1);
+}
+.qr-expired-stamp {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(30px, 4.5vw, 72px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #000;
+}
+.qr-error {
+  padding: 40px 30px;
+  font-size: clamp(18px, 2vw, 28px);
+  color: #08080c;
+  max-width: 40ch;
+}
+.qr-caption {
+  font-size: clamp(20px, 2.4vw, 38px);
+  color: var(--lcars-cream);
+  line-height: 1.15;
+  max-width: 34ch;
+}
+.qr-caption.expired {
+  color: var(--lcars-red);
+}
+.qr-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 26px;
+  flex-wrap: wrap;
+  font-size: clamp(12px, 1.2vw, 19px);
+  letter-spacing: 0.14em;
+}
+.qr-hint {
+  color: var(--lcars-lavender);
+  text-transform: none;
+}
+.qr-expiry {
+  color: var(--lcars-blue);
+}

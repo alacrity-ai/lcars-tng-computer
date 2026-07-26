@@ -120,7 +120,10 @@ server.registerTool(
       "detail?}]}, keyvalue {pairs: [{k, v}]}, sparkline {label, points: [numbers], unit?}, " +
       "swatch {label, color: \"#rrggbb\", detail?} — a rendered color chip, " +
       "divider. Accents: gold|peach|lav|blue|red. Max 64 blocks, nesting ≤3 — load the " +
-      "composite skill for guidance. " +
+      "composite skill for guidance, " +
+      "qr {url, title?, caption?, expiresAt?, hint?} — a big scannable code, for handing a " +
+      "link to a phone in the room ('put that link on the wall so I can scan it'). For " +
+      "GUEST ACCESS use the guest_qr tool instead — it mints the invite too. " +
       "Props are view-specific. " +
       "VIEWSCREENS: the house can have several named walls; output automatically lands on " +
       "the viewscreen the current command came from — pass wall ONLY when the person names " +
@@ -858,6 +861,61 @@ server.registerTool(
         return textResult(JSON.stringify({ ok: true, removed: id }));
       }
     }
+  },
+);
+
+// ---- guest QR (TNGC-57) ----------------------------------------------------------
+// Mint an invite with the service token and put it on the wall in one call.
+// The invite URL is deliberately NOT returned: it is a live credential, and a
+// tool result gets compacted, logged, and relayed to phones. The hands hold
+// it just long enough to hand it to the display.
+
+server.registerTool(
+  "guest_qr",
+  {
+    description:
+      "Put a guest login QR code on the wall — 'display the guest QR code', 'let my guests " +
+      "in', 'my friends want to use the tricorder'. Anyone who scans it lands in the " +
+      "Tricorder PWA already signed in as the household guest: no password spoken at the " +
+      "door or typed on a phone. ONE call mints the invite and displays it. Showing it " +
+      "OPENS guest access until it expires — mention the window when you confirm. Defaults: " +
+      "60 minutes, up to 20 phones; pass minutes/maxClaims only when asked ('good for the " +
+      "night' → minutes: 480). Minting again invalidates the previous code, so re-run it " +
+      "freely; the household admin ends guest access early with Rotate guest password in " +
+      "the Tricorder admin console. NEVER save this panel to the library — the invite dies, " +
+      "the panel wouldn't.",
+    inputSchema: {
+      minutes: z.number().int().min(5).max(720).optional(),
+      maxClaims: z.number().int().min(1).max(50).optional(),
+      wall: z.string().optional(),
+    },
+  },
+  async ({ minutes, maxClaims, wall }) => {
+    const invite = await cloudFetch<{
+      url: string;
+      expiresAt: number;
+      minutes: number;
+      maxClaims: number;
+    }>("POST", "/api/guest-invite", { minutes, maxClaims });
+    const window =
+      invite.minutes >= 60
+        ? `${Math.round(invite.minutes / 60)} hour${invite.minutes >= 120 ? "s" : ""}`
+        : `${invite.minutes} minutes`;
+    await call("/api/console/display", {
+      view: "qr",
+      props: {
+        url: invite.url,
+        title: "Guest access",
+        caption: "Scan to join as a guest",
+        expiresAt: invite.expiresAt,
+        hint: `up to ${invite.maxClaims} phones`,
+      },
+      wall,
+    });
+    return textResult(
+      `Guest QR is on the wall — good for ${window}, up to ${invite.maxClaims} phones. ` +
+        `Guest access is open until it expires.`,
+    );
   },
 );
 

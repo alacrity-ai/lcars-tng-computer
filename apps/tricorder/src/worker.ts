@@ -16,6 +16,7 @@ import { CONTRACT_VERSION, EFFORT_LEVELS, MODEL_CHOICES, MODEL_VALUE_RE, type Tn
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
 import { calendarRoutes } from "./calendar";
+import { GUEST_SESSION_TTL_MS, guestRoutes } from "./guest";
 import { libraryRoutes } from "./library";
 import { mintPairCode, registerRoutes } from "./register";
 
@@ -25,7 +26,6 @@ const MAX_TRANSCRIPT_CHARS = 2000;
 const MAX_WALL_CHARS = 64;
 const MAX_FAILED_LOGINS = 5;
 const LOGIN_COOLDOWN_MS = 5 * 60_000;
-const GUEST_SESSION_TTL_MS = 24 * 60 * 60_000;
 const MAX_DEVICE_LABEL_CHARS = 40;
 const MAX_USERS_PER_TENANT = 8;
 
@@ -81,6 +81,11 @@ app.get("/link", async (c) => {
 // all throttled, mounted before the session gate like /api/login -------------
 
 app.route("/api", registerRoutes());
+
+// ---- guest QR invites (TNGC-57): mint (service token) / claim (public) — both
+// own their auth, so they mount here beside registration, ahead of the gate ---
+
+app.route("/api", guestRoutes());
 
 // ---- login (public — registered before the session gate) ---------------------
 
@@ -814,7 +819,8 @@ app.post("/api/admin/pair-code", async (c) => {
 
 // One tap at the door when the party ends: fresh word-pair password (shown to
 // the admin exactly once — it is never retrievable later) + every guest
-// session revoked, atomically.
+// session revoked + any live QR invite torn down (TNGC-57), atomically. A
+// scannable code left alive behind this button would be a hole in it.
 app.post("/api/admin/rotate-guest", async (c) => {
   const s = c.get("session");
   const guest = await c.env.DB.prepare("SELECT id FROM users WHERE tenant_id = ? AND role = 'guest'")
@@ -822,13 +828,18 @@ app.post("/api/admin/rotate-guest", async (c) => {
     .first<{ id: string }>();
   if (!guest) return c.json({ error: "no guest-role user exists" }, 404);
   const password = guestPassword();
-  const [, revoke] = await c.env.DB.batch([
+  const [, revoke, invites] = await c.env.DB.batch([
     c.env.DB.prepare(
       "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, disabled = 0 WHERE id = ?",
     ).bind(await hashPassword(password), guest.id),
     c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(guest.id),
+    c.env.DB.prepare("DELETE FROM guest_invites WHERE tenant_id = ?").bind(s.tenantId),
   ]);
-  return c.json({ password, revokedSessions: revoke.meta.changes ?? 0 });
+  return c.json({
+    password,
+    revokedSessions: revoke.meta.changes ?? 0,
+    revokedInvites: invites.meta.changes ?? 0,
+  });
 });
 
 export default app;

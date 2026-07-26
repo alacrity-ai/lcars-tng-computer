@@ -47,6 +47,7 @@ export const PANEL_VIEWS = [
   "calendar",
   "schedule-week",
   "schedule-day",
+  "qr",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -573,6 +574,24 @@ export interface MathPanelProps {
   title?: string;
   lines: MathLine[];
   caption?: string;
+}
+
+/** A scannable code on the wall (TNGC-57). The matrix is computed in the panel
+    from `url` — props stay tiny and a recalled panel is always honest about
+    whether the thing it encodes is still alive. First caller is the guest
+    invite (`guest_qr`), but it takes any URL worth handing to a phone. */
+export interface QrPanelProps {
+  /** What the phone gets. Any string scans, but URLs are the point. */
+  url: string;
+  /** Header line: "Guest access". */
+  title?: string;
+  /** The instruction under the code: "Scan to join as a guest". */
+  caption?: string;
+  /** Epoch ms after which `url` stops working — the panel counts it down and
+      then renders EXPIRED instead of a code that no longer opens anything. */
+  expiresAt?: number;
+  /** Small print beside the code (a host to type by hand, a claim cap…). */
+  hint?: string;
 }
 
 export type PanelProps = Record<string, unknown>;

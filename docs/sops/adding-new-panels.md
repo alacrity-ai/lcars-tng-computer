@@ -2,12 +2,17 @@
 
 A panel is a React component displayed on the LCARS wall. The Computer sends it via the `display` tool.
 
+> Panels live in **`packages/panel-renderer`** since TNGC-37 — the wall
+> (`apps/web`) and the Tricorder viewscreen stage (`apps/tricorder/renderer`)
+> both render from that one package, so a panel is written once and appears on
+> both. Styles are one file: `packages/panel-renderer/src/lcars.css`.
+
 ## Pattern overview
 
 Panels are built across **three layers** that must stay in sync:
 1. **Type definition** (`packages/shared/src/index.ts`) — shape of the panel's props
-2. **Panel component** (`apps/web/src/panels/YourPanel.tsx`) — React render
-3. **Registry** (`apps/web/src/panels/registry.tsx`) — wire it up
+2. **Panel component** (`packages/panel-renderer/src/panels/YourPanel.tsx`) — React render
+3. **Registry** (`packages/panel-renderer/src/panels/registry.tsx`) — wire it up
 
 The registry is typed as a total `Record<PanelView, ComponentType>`, so adding a view name without building a component **will not compile**. This guarantee means `display` can never advertise a panel the wall can't draw.
 
@@ -55,7 +60,7 @@ export const PANEL_VIEWS = [
 
 ### 3. Build the React component
 
-Create `apps/web/src/panels/MyPanel.tsx`:
+Create `packages/panel-renderer/src/panels/MyPanel.tsx`:
 
 ```typescript
 import type { MyPanelProps } from "@tng/shared";
@@ -82,7 +87,7 @@ export function MyPanel({ title, data }: MyPanelProps) {
 
 ### 4. Register in the component registry
 
-Open `apps/web/src/panels/registry.tsx` and add your component:
+Open `packages/panel-renderer/src/panels/registry.tsx` and add your component:
 
 ```typescript
 import { MyPanel } from "./MyPanel";
@@ -193,7 +198,7 @@ export const PANEL_VIEWS = [
   "clock",
 ] as const;
 
-// apps/web/src/panels/ClockPanel.tsx
+// packages/panel-renderer/src/panels/ClockPanel.tsx
 import type { ClockPanelProps } from "@tng/shared";
 
 export function ClockPanel({ time, timezone = "UTC" }: ClockPanelProps) {
@@ -205,7 +210,7 @@ export function ClockPanel({ time, timezone = "UTC" }: ClockPanelProps) {
   );
 }
 
-// apps/web/src/panels/registry.tsx
+// packages/panel-renderer/src/panels/registry.tsx
 import { ClockPanel } from "./ClockPanel";
 
 const REGISTRY: Record<PanelView, ComponentType<any>> = {

@@ -1111,6 +1111,32 @@ async function handleVerifyParam() {
   }
 }
 
+// Arriving by scanning the wall: /?guest=<invite> — trade it for a guest
+// session and land straight in the app. The guest never sees a credential;
+// the param is scrubbed before anything else so it can't be shared onward
+// from the URL bar, bookmarked, or captured in a screenshot.
+async function claimGuest(token) {
+  try {
+    const res = await fetch("/api/guest-claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, deviceLabel: guessDevice() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      $("login-err").textContent = data.error || "that guest code is invalid or expired";
+      return false;
+    }
+    store.token = data.token;
+    store.user = data.user;
+    enterMain({ user: data.user, deviceLabel: data.deviceLabel });
+    return true;
+  } catch {
+    $("login-err").textContent = "could not reach the Computer — try again";
+    return false;
+  }
+}
+
 // ---- viewscreen targeting (TNGC-35) ------------------------------------------
 // Which wall this user's commands paint. "" = let the Computer decide
 // (origin/primary). Persisted per user; the roster comes from /api/status.
@@ -3138,26 +3164,39 @@ if (savedHousehold) { $("in-household").value = savedHousehold; $("household-row
 (async () => {
   const params = new URLSearchParams(location.search);
   const deepLink = params.has("register") || params.has("login");
+  // A scanned guest QR (TNGC-57) is an entry param like the others — a guest's
+  // phone has never been here, so without it they'd be bounced to the
+  // marketing page holding a live invite.
+  const guestToken = params.get("guest");
   // Brand-new visitors land on the welcome page, not a cold login form.
-  // Anyone who has been here (or arrives via a welcome CTA / verify link)
-  // goes straight to the app.
-  if (!store.token && !deepLink && !params.has("verify") && !localStorage.getItem("tricorder.seen")) {
+  // Anyone who has been here (or arrives via a welcome CTA / verify / guest
+  // link) goes straight to the app.
+  if (!store.token && !deepLink && !guestToken && !params.has("verify") && !localStorage.getItem("tricorder.seen")) {
     location.replace("/welcome");
     return;
   }
   localStorage.setItem("tricorder.seen", "1");
-  if (deepLink) history.replaceState(null, "", location.pathname);
+  if (deepLink || guestToken) history.replaceState(null, "", location.pathname);
   await handleVerifyParam();
-  if (!store.token) {
-    show(params.has("register") ? "register" : "login");
+  if (store.token) {
+    try {
+      // A household member who scans the wall out of curiosity keeps their own
+      // session — being silently downgraded to guest would cost them the
+      // library, the calendar, plugins and the viewscreen.
+      const identity = await api("/api/me");
+      enterMain(identity);
+      if (guestToken) toast("Already signed in as " + identity.user.handle);
+      return;
+    } catch {
+      // Dead or expired token — fall through and use the invite if we have one.
+    }
+  }
+  if (guestToken) {
+    if (await claimGuest(guestToken)) return;
+    show("login");
     return;
   }
-  try {
-    const identity = await api("/api/me");
-    enterMain(identity);
-  } catch {
-    show("login");
-  }
+  show(params.has("register") ? "register" : "login");
 })();
 </script>
 </body>

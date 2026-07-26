@@ -21,7 +21,8 @@
     "@tng/shared": "workspace:*",
     "astronomy-engine": "^2.1.19",
     "katex": "^0.18.1",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",

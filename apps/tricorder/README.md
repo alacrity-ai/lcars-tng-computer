@@ -20,6 +20,11 @@ them — nothing on the internet ever connects into the house. Design docs:
   ("leif @ iPhone") — the same user holds any number concurrently. Session
   tokens and the service token are stored as SHA-256 hashes.
   Tenant `home`, users `leif` (admin) `ariel` (member) `guest` (guest).
+- Guest QR (TNGC-57): the house mints a hashed, TTL-bounded, claim-capped
+  invite (`guest_invites`) with the service token; the wall shows it as a QR
+  (`qr` panel); a phone trades it at `/api/guest-claim` for an ordinary guest
+  session. No password is spoken at the door or typed on a phone. Design:
+  `docs/GUEST_QR_IMPLEMENTATION_DESIGN.md`.
 
 ## Endpoints
 
@@ -47,7 +52,9 @@ them — nothing on the internet ever connects into the house. Design docs:
 | `POST /api/admin/users/:id/password` `{password}` | admin | set password + **revoke all that user's sessions atomically** |
 | `POST /api/admin/users/:id/disabled` `{disabled}` | admin | disable (revokes sessions) / re-enable; self-disable blocked |
 | `DELETE /api/admin/sessions/:id` | admin | revoke one session |
-| `POST /api/admin/rotate-guest` | admin | fresh word-pair guest password (returned **once**) + all guest sessions revoked |
+| `POST /api/admin/rotate-guest` | admin | fresh word-pair guest password (returned **once**) + all guest sessions revoked + **any live QR invite torn down** |
+| `POST /api/guest-invite` `{minutes?, maxClaims?}` | **service token** | TNGC-57 — mint the guest QR invite the wall shows. One live invite per tenant (minting deletes the last), default 60 min / 20 claims (max 720 min / 50), and it **opens guest access** (`disabled = 0`). → `{url, expiresAt, minutes, maxClaims, guestOpened}` |
+| `POST /api/guest-claim` `{token, deviceLabel?}` | public (10 / 15 min per IP) | trade a scanned invite for a 24 h guest session — same response shape as `/api/login`. Every failure is the same 401 |
 
 Day-to-day user/password management lives in the PWA's admin console
 (visible to admin sessions only); the endpoints above are what it calls.
