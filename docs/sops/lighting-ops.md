@@ -131,6 +131,19 @@ Consequences, wired into the plugin:
   claims.** Never claim success the room contradicts.
 - After a service restart, startup probes re-warm the cache in ~1 s
   (states aren't broker-retained).
+- **Availability (wall switch cut = offline)**: Z2M's availability feature
+  is ON (`availability.enabled` + `active.timeout: 3` — live config and the
+  compose seed, since TNGC-53). Z2M pings any bulb quiet for 3 min and
+  publishes retained `<name>/availability`; the service maps that to
+  `available` per device, the tricorder greys the row and shows
+  "Lightswitch is off", and the panel/effects skip offline bulbs.
+  Detection latency is the ping cycle: expect **up to ~4 min** (plus
+  backoff) before a flipped switch shows offline, and a few seconds after
+  power returns (the bulb announces itself). A bulb's `on`/color while
+  offline is frozen last-report — fiction; ignore it. Availability topics
+  are retained: after deleting/renaming a device or group, clear the old
+  topic (`mosquitto_pub -t 'zigbee2mqtt/<old>/availability' -r -n`) or a
+  ghost row haunts fresh subscribers.
 
 ## Recovery — stuck / strobing / possessed lights
 

@@ -330,6 +330,10 @@
   }
   .lt-row.all { border-color: var(--gold); background: #17110a; }
   .lt-row.unavail { opacity: .45; }
+  .lt-dead {
+    color: var(--peach); border: 1px solid #555; border-radius: 10px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 7px 12px; flex: none;
+  }
   .lt-name {
     flex: 1; min-width: 0; font-weight: 700; text-transform: uppercase; font-size: 13px;
     color: var(--peach); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2311,7 +2315,8 @@ function renderLights() {
     return;
   }
   list.innerHTML = "";
-  const anyOn = ltState.fixtures.some((f) => f.on);
+  // a switched-off bulb's last-reported "on" is frozen fiction — ignore it
+  const anyOn = ltState.fixtures.some((f) => f.on && f.available);
   list.appendChild(ltAllRow(anyOn));
   for (const f of ltState.fixtures) list.appendChild(ltRow(f));
 }
@@ -2344,17 +2349,16 @@ function ltAllRow(anyOn) {
 function ltRow(f) {
   const row = document.createElement("div");
   row.className = "lt-row" + (f.available ? "" : " unavail");
+  if (!f.available) return ltDeadRow(row, f);
   if (ltScrub === f.name) return ltScrubRow(row, f);
   const name = document.createElement("div");
   name.className = "lt-name";
   name.textContent = ltShortName(f.name);
   const sub = document.createElement("span");
   sub.className = "lt-sub";
-  sub.textContent = !f.available
-    ? "unreachable — wall switch?"
-    : f.on
-      ? (f.brightnessPct != null ? f.brightnessPct + "%" : "on") + (f.color ? " · " + f.color.label : "")
-      : "off";
+  sub.textContent = f.on
+    ? (f.brightnessPct != null ? f.brightnessPct + "%" : "on") + (f.color ? " · " + f.color.label : "")
+    : "off";
   name.appendChild(sub);
   row.appendChild(name);
   const sw = document.createElement("button");
@@ -2383,6 +2387,24 @@ function ltRow(f) {
     ltControl({ target: f.name, state: f.on ? "off" : "on" });
   };
   row.appendChild(swt);
+  return row;
+}
+
+// A bulb the mesh can't reach: in this house that means a wall switch got
+// flipped — say so instead of offering controls that can't work.
+function ltDeadRow(row, f) {
+  const name = document.createElement("div");
+  name.className = "lt-name";
+  name.textContent = ltShortName(f.name);
+  const sub = document.createElement("span");
+  sub.className = "lt-sub";
+  sub.textContent = "no response from bulb";
+  name.appendChild(sub);
+  row.appendChild(name);
+  const dead = document.createElement("div");
+  dead.className = "lt-dead";
+  dead.textContent = "Lightswitch is off";
+  row.appendChild(dead);
   return row;
 }
 

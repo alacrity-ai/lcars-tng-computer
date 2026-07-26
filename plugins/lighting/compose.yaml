@@ -62,6 +62,10 @@ services:
           pan_id: GENERATE
           ext_pan_id: GENERATE
           transmit_power: 20
+        availability:
+          enabled: true
+          active:
+            timeout: 3
         EOF
           echo "[lighting] seeded zigbee2mqtt config: channel 25, coordinator $${SLZB_ENDPOINT}"
         fi
