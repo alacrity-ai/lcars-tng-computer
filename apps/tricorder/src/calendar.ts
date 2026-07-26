@@ -2,10 +2,12 @@
  * The family calendar API (TNGC-46) — tenant-scoped events in D1.
  *
  * Two auth planes, mirroring the Library:
- *  - service (the tenant service token) — the house: full CRUD. The brain's
- *    `calendar` MCP tool is the only writer this era.
- *  - session (PWA bearer token) — household members read; guests are bounced.
- *    Member writes arrive with the deterministic tricorder plugin follow-up.
+ *  - service (the tenant service token) — the house: full CRUD via the
+ *    brain's `calendar` MCP tool.
+ *  - session (PWA bearer token) — household members (admin/member) get full
+ *    CRUD too since TNGC-52: the tricorder calendar plugin writes on the
+ *    member's own session, so created_by is their handle — never spoofable
+ *    from the body. Guests are bounced at the door.
  *
  * Times are WALL-CLOCK LOCAL strings (YYYY-MM-DD / HH:MM) — a house calendar
  * has one clock; timezone conversion would only invent bugs. Category is a
@@ -155,12 +157,9 @@ export function calendarRoutes(
     return c.json({ events: rows.results });
   });
 
-  // ---- create (service plane only, this era) -------------------------------
+  // ---- create (both planes; guests never reach here) ------------------------
   cal.post("/", async (c) => {
     const actor = c.get("actor");
-    if (actor.kind !== "service") {
-      return c.json({ error: "events are written by the Computer — service token only (for now)" }, 403);
-    }
     let body: Record<string, unknown>;
     try {
       body = (await c.req.json()) as Record<string, unknown>;
@@ -175,10 +174,14 @@ export function calendarRoutes(
     if ((count?.n ?? 0) >= MAX_EVENTS_PER_TENANT) {
       return c.json({ error: `calendar is full (${MAX_EVENTS_PER_TENANT} events)` }, 409);
     }
+    // Attribution: a session write IS the member — the body can't claim
+    // otherwise. The service plane passes the speaking user through.
     const createdBy =
-      typeof body.createdBy === "string" && body.createdBy.trim()
-        ? body.createdBy.trim().toLowerCase().slice(0, 40)
-        : "computer";
+      actor.kind === "session"
+        ? actor.userHandle.slice(0, 40)
+        : typeof body.createdBy === "string" && body.createdBy.trim()
+          ? body.createdBy.trim().toLowerCase().slice(0, 40)
+          : "computer";
     const id = `ev_${crypto.randomUUID().slice(0, 12)}`;
     const now = Date.now();
     const f = cleaned.fields;
@@ -207,12 +210,9 @@ export function calendarRoutes(
     return c.json({ event: row }, 201);
   });
 
-  // ---- update (service plane only, this era) -------------------------------
+  // ---- update (both planes) -------------------------------------------------
   cal.post("/:id", async (c) => {
     const actor = c.get("actor");
-    if (actor.kind !== "service") {
-      return c.json({ error: "events are written by the Computer — service token only (for now)" }, 403);
-    }
     let body: Record<string, unknown>;
     try {
       body = (await c.req.json()) as Record<string, unknown>;
@@ -246,12 +246,9 @@ export function calendarRoutes(
     return c.json({ event: row });
   });
 
-  // ---- delete (service plane only, this era) -------------------------------
+  // ---- delete (both planes) -------------------------------------------------
   cal.delete("/:id", async (c) => {
     const actor = c.get("actor");
-    if (actor.kind !== "service") {
-      return c.json({ error: "events are written by the Computer — service token only (for now)" }, 403);
-    }
     const res = await c.env.DB.prepare("DELETE FROM calendar_events WHERE tenant_id = ? AND id = ?")
       .bind(actor.tenantId, c.req.param("id"))
       .run();

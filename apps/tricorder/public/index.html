@@ -360,6 +360,57 @@
     font: inherit; font-size: 12px; padding: 7px 12px; cursor: pointer;
   }
 
+  /* calendar plugin (TNGC-51) */
+  .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+  .cal-seg { display: flex; border: 1px solid var(--gold); border-radius: 12px; overflow: hidden; }
+  .cal-seg button {
+    background: none; border: 0; color: var(--gold); font: inherit; font-size: 11px;
+    font-weight: 700; text-transform: uppercase; padding: 8px 14px; cursor: pointer;
+  }
+  .cal-seg button.on { background: var(--gold); color: var(--ink); }
+  .cal-new {
+    background: var(--lav); border: 0; color: var(--ink); border-radius: 12px;
+    font: inherit; font-size: 12px; font-weight: 700; padding: 8px 14px; cursor: pointer; text-transform: uppercase;
+  }
+  .cal-nav { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+  .cal-nav button {
+    background: none; border: 1px solid var(--blue); color: var(--blue); border-radius: 10px;
+    font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer;
+  }
+  .cal-lbl {
+    flex: 1; text-align: center; color: var(--peach); font-weight: 700;
+    text-transform: uppercase; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 12px; }
+  .cal-dow { text-align: center; color: #777; font-size: 10px; font-weight: 700; }
+  .cal-cell {
+    aspect-ratio: .85; border: 1px solid #2a2a3a; border-radius: 8px; background: #101018;
+    color: var(--peach); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; padding-top: 5px; gap: 3px;
+  }
+  .cal-cell.blank { border: 0; background: none; cursor: default; }
+  .cal-cell.today { border-color: var(--gold); color: var(--gold); }
+  .cal-dots { display: flex; gap: 2px; }
+  .cal-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--lav); }
+  .cal-more { font-size: 9px; color: var(--lav); }
+  .cal-ev {
+    display: flex; align-items: center; gap: 10px; background: #101018;
+    border: 1px solid #2a2a3a; border-radius: 14px; padding: 10px 12px; margin-top: 8px;
+  }
+  .cal-ev .t { color: var(--gold); font-size: 12px; font-weight: 700; min-width: 52px; flex: none; }
+  .cal-ev .body { flex: 1; min-width: 0; }
+  .cal-ev .title {
+    color: var(--peach); font-weight: 700; font-size: 13px; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cal-ev .sub { color: #777; font-size: 10px; }
+  .cal-wk-h {
+    display: block; background: none; border: 0; padding: 0; margin: 14px 0 0; cursor: pointer;
+    color: var(--blue); font: inherit; font-weight: 700; font-size: 12px; text-transform: uppercase;
+  }
+  .cal-wk-h.today { color: var(--gold); }
+  .cal-empty { color: #555; font-size: 11px; margin-top: 6px; }
+
   /* send sheet */
   #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: flex-end; z-index: 5; }
   #sheet.open { display: flex; }
@@ -724,6 +775,27 @@
     <div class="err" id="lights-err"></div>
   </div>
 
+  <!-- CALENDAR (TNGC-51): the family calendar, browsable + editable sans AI -->
+  <div class="view" id="view-cal">
+    <button class="link" id="btn-calback" style="text-align:left">&#9664; Plugins</button>
+    <div class="cal-head">
+      <div class="cal-seg">
+        <button id="cal-m">Month</button>
+        <button id="cal-w">Week</button>
+        <button id="cal-d">Day</button>
+      </div>
+      <button class="cal-new" id="btn-cal-new">+ Event</button>
+    </div>
+    <div class="cal-nav">
+      <button id="cal-prev" aria-label="Previous">&#9664;</button>
+      <div class="cal-lbl" id="cal-lbl"></div>
+      <button id="cal-today">Today</button>
+      <button id="cal-next" aria-label="Next">&#9654;</button>
+    </div>
+    <div id="cal-body"></div>
+    <div class="err" id="cal-err"></div>
+  </div>
+
   <!-- LIBRARY (TNGC-23) -->
   <div class="view" id="view-library">
     <div class="lib-head">
@@ -821,6 +893,24 @@
       <button class="btn red" id="btn-plugsheet-cancel">Cancel</button>
     </div>
     <div class="err" id="plugsheet-err"></div>
+  </div>
+</div>
+
+<!-- new calendar event (TNGC-51) -->
+<div id="calsheet" style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;z-index:5">
+  <div class="sheet-box">
+    <h3>New event</h3>
+    <label>Title</label><input id="ce-title" autocapitalize="sentences">
+    <label>Date</label><input id="ce-date" type="date">
+    <label>Time (optional)</label><input id="ce-time" type="time">
+    <label>Location (optional)</label><input id="ce-loc">
+    <label>Category (optional)</label>
+    <select id="ce-cat"></select>
+    <div style="display:flex;gap:10px">
+      <button class="btn" id="btn-calsheet-ok">Add</button>
+      <button class="btn red" id="btn-calsheet-cancel">Cancel</button>
+    </div>
+    <div class="err" id="calsheet-err"></div>
   </div>
 </div>
 
@@ -2142,10 +2232,8 @@ async function openPlugins() {
   try {
     const data = await api("/api/plugins");
     wrap.innerHTML = "";
-    if (!data.online) {
-      wrap.innerHTML = '<div class="pl-note">Computer offline — plugins are reported by your Computer when it connects.</div>';
-      return;
-    }
+    // Cloud plugins (calendar) stay usable with the Computer offline — only
+    // bridge-backed rows go dark, each via its own online flag.
     const usable = data.plugins.filter((p) => p.enabled);
     if (!usable.length) {
       wrap.innerHTML = '<div class="pl-note">No plugins enabled.' +
@@ -2160,7 +2248,10 @@ async function openPlugins() {
       b.style.marginTop = "0";
       b.textContent = p.name;
       b.disabled = !p.online;
-      b.onclick = () => { if (p.id === "lights") openLights(); };
+      b.onclick = () => {
+        if (p.id === "lights") openLights();
+        else if (p.id === "calendar") openCal();
+      };
       row.appendChild(b);
       if (!p.online) {
         const st = document.createElement("span");
@@ -2385,6 +2476,235 @@ $("btn-plugsheet-ok").onclick = async () => {
     plugPending = null;
     $("plugsheet").style.display = "none";
   } catch (e) { $("plugsheet-err").textContent = e.message; }
+};
+
+// ---- calendar plugin (TNGC-51) --------------------------------------------------
+// The family calendar without the AI brain: plain reads and writes against
+// /api/calendar on the member's own session. Dates are wall-clock local —
+// the phone shares the house clock, so device-local `new Date()` is "today".
+const CAL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const CAL_DOW = ["S","M","T","W","T","F","S"];
+const CAL_DAYNAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const CAL_CATS = ["medical","school","work","social","travel","birthday","family","chore","other"];
+
+let calMode = "month"; // month | week | day
+let calAnchor = null;  // Date at local midnight — the day/week/month in view
+
+const calPad = (n) => String(n).padStart(2, "0");
+const calISO = (d) => d.getFullYear() + "-" + calPad(d.getMonth() + 1) + "-" + calPad(d.getDate());
+const calToday = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
+const calShift = (d, days) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+function calFmtTime(hm) {
+  const [h, m] = hm.split(":").map(Number);
+  const ap = h < 12 ? "a" : "p";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return hr + ":" + calPad(m) + ap;
+}
+
+function openCal() { calAnchor = calToday(); calMode = "month"; show("cal"); calRefresh(); }
+$("btn-calback").onclick = () => openPlugins();
+$("cal-m").onclick = () => { calMode = "month"; calRefresh(); };
+$("cal-w").onclick = () => { calMode = "week"; calRefresh(); };
+$("cal-d").onclick = () => { calMode = "day"; calRefresh(); };
+$("cal-today").onclick = () => { calAnchor = calToday(); calRefresh(); };
+$("cal-prev").onclick = () => calStep(-1);
+$("cal-next").onclick = () => calStep(1);
+function calStep(dir) {
+  if (calMode === "month") calAnchor = new Date(calAnchor.getFullYear(), calAnchor.getMonth() + dir, 1);
+  else calAnchor = calShift(calAnchor, dir * (calMode === "week" ? 7 : 1));
+  calRefresh();
+}
+
+function calRange() {
+  if (calMode === "month") {
+    const a = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1);
+    return { from: a, to: new Date(a.getFullYear(), a.getMonth() + 1, 0) };
+  }
+  if (calMode === "week") {
+    const start = calShift(calAnchor, -calAnchor.getDay());
+    return { from: start, to: calShift(start, 6) };
+  }
+  return { from: calAnchor, to: calAnchor };
+}
+
+async function calRefresh() {
+  for (const [id, mode] of [["cal-m", "month"], ["cal-w", "week"], ["cal-d", "day"]]) {
+    $(id).classList.toggle("on", calMode === mode);
+  }
+  const { from, to } = calRange();
+  const today = calISO(calToday());
+  $("cal-lbl").textContent =
+    calMode === "month"
+      ? CAL_MONTHS[calAnchor.getMonth()].toUpperCase() + " " + calAnchor.getFullYear()
+      : calMode === "week"
+        ? calMonDay(from) + " – " + calMonDay(to)
+        : (calISO(calAnchor) === today ? "Today · " : "") + CAL_DAYNAMES[calAnchor.getDay()] + " · " + calMonDay(calAnchor);
+  $("cal-err").textContent = "";
+  try {
+    const data = await api("/api/calendar?from=" + calISO(from) + "&to=" + calISO(to));
+    const byDay = new Map();
+    for (const ev of data.events) {
+      if (!byDay.has(ev.date)) byDay.set(ev.date, []);
+      byDay.get(ev.date).push(ev);
+    }
+    if (calMode === "month") calRenderMonth(byDay, today);
+    else if (calMode === "week") calRenderWeek(from, byDay, today);
+    else calRenderDay(byDay.get(calISO(calAnchor)) ?? []);
+  } catch (e) { $("cal-err").textContent = e.message; }
+}
+const calMonDay = (d) => CAL_MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
+
+function calRenderMonth(byDay, today) {
+  const body = $("cal-body");
+  body.innerHTML = "";
+  const grid = document.createElement("div");
+  grid.className = "cal-grid";
+  for (const dow of CAL_DOW) {
+    const h = document.createElement("div");
+    h.className = "cal-dow";
+    h.textContent = dow;
+    grid.appendChild(h);
+  }
+  const first = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1);
+  const days = new Date(calAnchor.getFullYear(), calAnchor.getMonth() + 1, 0).getDate();
+  for (let i = 0; i < first.getDay(); i++) {
+    const b = document.createElement("div");
+    b.className = "cal-cell blank";
+    grid.appendChild(b);
+  }
+  for (let day = 1; day <= days; day++) {
+    const date = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), day);
+    const iso = calISO(date);
+    const evs = byDay.get(iso) ?? [];
+    const cell = document.createElement("button");
+    cell.className = "cal-cell" + (iso === today ? " today" : "");
+    cell.appendChild(document.createTextNode(String(day)));
+    if (evs.length) {
+      const dots = document.createElement("div");
+      dots.className = "cal-dots";
+      for (let i = 0; i < Math.min(evs.length, 3); i++) dots.appendChild(document.createElement("i"));
+      cell.appendChild(dots);
+      if (evs.length > 3) {
+        const more = document.createElement("div");
+        more.className = "cal-more";
+        more.textContent = "+" + (evs.length - 3);
+        cell.appendChild(more);
+      }
+    }
+    cell.onclick = () => { calAnchor = date; calMode = "day"; calRefresh(); };
+    grid.appendChild(cell);
+  }
+  body.appendChild(grid);
+}
+
+function calRenderWeek(start, byDay, today) {
+  const body = $("cal-body");
+  body.innerHTML = "";
+  for (let i = 0; i < 7; i++) {
+    const date = calShift(start, i);
+    const iso = calISO(date);
+    const h = document.createElement("button");
+    h.className = "cal-wk-h" + (iso === today ? " today" : "");
+    h.textContent = CAL_DAYNAMES[date.getDay()].slice(0, 3) + " · " + calMonDay(date) + (iso === today ? " · today" : "");
+    h.onclick = () => { calAnchor = date; calMode = "day"; calRefresh(); };
+    body.appendChild(h);
+    const evs = byDay.get(iso) ?? [];
+    if (!evs.length) {
+      const none = document.createElement("div");
+      none.className = "cal-empty";
+      none.textContent = "—";
+      body.appendChild(none);
+    }
+    for (const ev of evs) body.appendChild(calEvRow(ev));
+  }
+}
+
+function calRenderDay(evs) {
+  const body = $("cal-body");
+  body.innerHTML = "";
+  if (!evs.length) {
+    const none = document.createElement("div");
+    none.className = "pl-note";
+    none.textContent = "Nothing scheduled.";
+    body.appendChild(none);
+    return;
+  }
+  for (const ev of evs) body.appendChild(calEvRow(ev));
+}
+
+function calEvRow(ev) {
+  const row = document.createElement("div");
+  row.className = "cal-ev";
+  const t = document.createElement("div");
+  t.className = "t";
+  t.textContent = ev.time ? calFmtTime(ev.time) + (ev.endTime ? "–" + calFmtTime(ev.endTime) : "") : "all day";
+  row.appendChild(t);
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "body";
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = ev.title;
+  bodyEl.appendChild(title);
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = [ev.location, ev.category].filter(Boolean).join(" · ");
+  if (sub.textContent) bodyEl.appendChild(sub);
+  row.appendChild(bodyEl);
+  const x = document.createElement("button");
+  x.className = "lt-x";
+  x.textContent = "✕";
+  x.setAttribute("aria-label", "Remove " + ev.title);
+  x.onclick = async () => {
+    if (!confirm('Remove "' + ev.title + '"?')) return;
+    try {
+      await api("/api/calendar/" + ev.id, { method: "DELETE" });
+      toast("Event removed");
+      calRefresh();
+    } catch (e) { toast(e.message, true); }
+  };
+  row.appendChild(x);
+  return row;
+}
+
+// ---- new event sheet ------------------------------------------------------------
+{
+  const sel = $("ce-cat");
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "—";
+  sel.appendChild(blank);
+  for (const cat of CAL_CATS) {
+    const o = document.createElement("option");
+    o.value = cat;
+    o.textContent = cat;
+    sel.appendChild(o);
+  }
+}
+$("btn-cal-new").onclick = () => {
+  $("calsheet-err").textContent = "";
+  $("ce-title").value = "";
+  $("ce-date").value = calISO(calMode === "day" ? calAnchor : calToday());
+  $("ce-time").value = "";
+  $("ce-loc").value = "";
+  $("ce-cat").value = "";
+  $("calsheet").style.display = "flex";
+};
+$("btn-calsheet-cancel").onclick = () => { $("calsheet").style.display = "none"; };
+$("btn-calsheet-ok").onclick = async () => {
+  const title = $("ce-title").value.trim();
+  const date = $("ce-date").value;
+  if (!title) { $("calsheet-err").textContent = "A title is required."; return; }
+  if (!date) { $("calsheet-err").textContent = "A date is required."; return; }
+  const body = { title, date };
+  if ($("ce-time").value) body.time = $("ce-time").value.slice(0, 5);
+  if ($("ce-loc").value.trim()) body.location = $("ce-loc").value.trim();
+  if ($("ce-cat").value) body.category = $("ce-cat").value;
+  try {
+    await api("/api/calendar", { method: "POST", body: JSON.stringify(body) });
+    $("calsheet").style.display = "none";
+    toast("Event added");
+    calRefresh();
+  } catch (e) { $("calsheet-err").textContent = e.message; }
 };
 
 // ---- admin --------------------------------------------------------------------

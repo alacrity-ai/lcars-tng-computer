@@ -377,6 +377,11 @@ app.post("/api/queue/:id/withdraw", async (c) => {
 // bridge-reported available ∧ tenant-enabled ∧ online.
 
 const PLUGIN_ID_RE = /^[a-z0-9-]{1,32}$/;
+
+// Cloud-native plugins (TNGC-52) live behind the Worker itself — no bridge,
+// no sidecar — so they are always online, even when the Computer is not.
+// They merge into the roster the bridge reports; the bridge wins on id clash.
+const CLOUD_PLUGINS = [{ id: "calendar", name: "Calendar", online: true }];
 const CONTROL_LOG_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const COLOR_RE = /^[#a-zA-Z0-9 -]{1,32}$/;
 
@@ -398,9 +403,11 @@ app.get("/api/plugins", async (c) => {
   ]);
   const data = (await res.json()) as { online: boolean; plugins: Array<{ id: string; name: string; online: boolean }> };
   const enabled = new Map(rows.results.map((r) => [r.id, r.enabled === 1]));
+  const bridgeIds = new Set(data.plugins.map((p) => p.id));
+  const roster = [...data.plugins, ...CLOUD_PLUGINS.filter((p) => !bridgeIds.has(p.id))];
   return c.json({
     online: data.online,
-    plugins: data.plugins.map((p) => ({ ...p, enabled: enabled.get(p.id) === true })),
+    plugins: roster.map((p) => ({ ...p, enabled: enabled.get(p.id) === true })),
   });
 });
 
