@@ -83,6 +83,7 @@ lan:
 # one-time "local development" confirmation dialog at launch (and a browser
 # login on the very first run — credentials persist in a named volume).
 computer:
+	@echo "[computer] plugins: $(if $(PLUGIN_IDS),$(PLUGIN_IDS),none)  (set with TNG_PLUGINS=lighting,claudeops make computer)"
 	TNG_TRICORDER_TOKEN="$${TNG_TRICORDER_TOKEN:-$$(agentsecrets get tricorder_service_token 2>/dev/null)}" \
 	$(COMPOSE) run --rm --service-ports computer
 
