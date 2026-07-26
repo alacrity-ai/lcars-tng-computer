@@ -1,0 +1,14 @@
+{
+  "id": "claudeops",
+  "name": "Claude Ops",
+  "version": "0.1.0",
+  "minCore": "0.3.0",
+  "description": "Remote control of the host's claude-ops session (tmux + channels): the tricorder sends commands, model/effort/compact, and reads back status + result summaries. The ops-agent runs ON THE HOST (launched by `make claude-ops` in the claude_ops repo) — this plugin only opens the bridge's pinpoint hole to it and flags the bridge via TNG_CLAUDEOPS_URL.",
+  "services": [
+    {
+      "name": "claudeops-agent-on-host",
+      "internalEndpoints": [{ "host": "host.docker.internal", "port": 7102 }]
+    }
+  ],
+  "allowedDomains": []
+}

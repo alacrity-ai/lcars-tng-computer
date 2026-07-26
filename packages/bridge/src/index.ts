@@ -987,14 +987,23 @@ void pollRoster();
 // roster + state changes up the link; the cloud never guesses.
 
 const LIGHTING_URL = process.env.TNG_LIGHTING_URL ?? "http://lighting:7101";
+/** Set by the claudeops plugin's compose fragment (TNGC-54). Unset = the
+    household doesn't run the plugin: never probed, never in the roster. */
+const CLAUDEOPS_URL = process.env.TNG_CLAUDEOPS_URL;
 
 let lightsOnline = false;
 let lightsState: LightsState | null = null;
+let opsOnline = false;
+let opsState: Record<string, unknown> | null = null;
 let lastPluginsJson = "";
 let lastLightsJson = "";
+let lastOpsJson = "";
 
 function pluginRoster(): PluginStatus[] {
-  return [{ id: "lights", name: "Lights", online: lightsOnline }];
+  return [
+    { id: "lights", name: "Lights", online: lightsOnline },
+    ...(CLAUDEOPS_URL ? [{ id: "claudeops", name: "Claude Ops", online: opsOnline }] : []),
+  ];
 }
 
 function sendPlugins(): void {
@@ -1010,6 +1019,16 @@ function sendPlugins(): void {
 function sendLightsState(): void {
   if (!lightsState || cloudSocket?.readyState !== WebSocket.OPEN) return;
   const frame: LinkUpFrame = { v: 1, type: "plugin_state", plugin: "lights", state: lightsState };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // link recycling — the open handler re-syncs
+  }
+}
+
+function sendOpsState(): void {
+  if (!opsState || cloudSocket?.readyState !== WebSocket.OPEN) return;
+  const frame: LinkUpFrame = { v: 1, type: "plugin_state", plugin: "claudeops", state: opsState };
   try {
     cloudSocket.send(JSON.stringify(frame));
   } catch {
@@ -1063,6 +1082,36 @@ async function pollPlugins(force = false): Promise<void> {
     }
   }
   lightsOnline = online;
+
+  // claudeops (TNGC-54): the ops-agent on the host, when the plugin is on.
+  if (CLAUDEOPS_URL) {
+    let ops = false;
+    try {
+      const res = await fetch(`${CLAUDEOPS_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+      ops = res.ok;
+    } catch {
+      ops = false;
+    }
+    if (ops) {
+      try {
+        const res = await fetch(`${CLAUDEOPS_URL}/state`, { signal: AbortSignal.timeout(4_000) });
+        if (res.ok) {
+          const s = (await res.json()) as Record<string, unknown>;
+          delete s.ok;
+          const sj = JSON.stringify(s);
+          if (force || sj !== lastOpsJson) {
+            lastOpsJson = sj;
+            opsState = s;
+            sendOpsState();
+          }
+        }
+      } catch {
+        // agent mid-restart — keep the last snapshot, health already said online
+      }
+    }
+    opsOnline = ops;
+  }
+
   const pj = JSON.stringify(pluginRoster());
   if (force || pj !== lastPluginsJson) {
     lastPluginsJson = pj;
@@ -1071,6 +1120,16 @@ async function pollPlugins(force = false): Promise<void> {
 }
 setInterval(() => void pollPlugins(), 15_000).unref();
 void pollPlugins();
+
+// While the ops session is mid-turn the phone is watching for "finished" —
+// tighten the loop so the idle transition + result summary land in seconds,
+// not at the next 15s beat. Host-local HTTP; the push is change-gated anyway.
+if (CLAUDEOPS_URL) {
+  setInterval(() => {
+    const status = opsState?.status;
+    if (status === "working" || status === "compacting") void pollPlugins();
+  }, 3_000).unref();
+}
 
 /** Whitelist-rebuild of a lights `/set` body. The Worker validated already,
     but the bridge trusts nothing that rode the internet — same posture as
@@ -1102,29 +1161,76 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
     console.error(`[bridge] dropped stale control op (${Math.round((Date.now() - ctl.ts) / 1000)}s old) from ${ctl.user}`);
     return;
   }
-  if (ctl.plugin !== "lights" || ctl.op !== "set") {
-    console.error(`[bridge] refused control op ${ctl.plugin}/${ctl.op} — unknown plugin or op`);
+  if (ctl.plugin === "lights" && ctl.op === "set") {
+    const body = lightsSetBody(ctl.args ?? {});
+    if (!body) {
+      console.error(`[bridge] refused lights control from ${ctl.user} — no valid fields`);
+      return;
+    }
+    try {
+      const res = await fetch(`${LIGHTING_URL}/set`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
+      });
+      console.error(`[bridge] lights control by ${ctl.user}/${ctl.device}: ${JSON.stringify(body)} → ${res.status}`);
+    } catch (err) {
+      console.error(`[bridge] lights control failed: ${(err as Error).message}`);
+    }
+    // The phone's confirmation is reported state, not the 200: re-read after
+    // the fade has begun and push the fresh snapshot up the link.
+    setTimeout(() => void pollPlugins(true), 1_200).unref();
     return;
   }
-  const body = lightsSetBody(ctl.args ?? {});
-  if (!body) {
-    console.error(`[bridge] refused lights control from ${ctl.user} — no valid fields`);
+
+  // claudeops (TNGC-54): remote ops of the host's claude-ops session. The
+  // Worker already enforced ADMIN and validated; rebuilt from values anyway.
+  if (ctl.plugin === "claudeops" && CLAUDEOPS_URL) {
+    const args = ctl.args ?? {};
+    let path: string | null = null;
+    let body: Record<string, unknown> | null = null;
+    if (ctl.op === "send") {
+      const text = typeof args.text === "string" ? args.text.trim() : "";
+      if (text.length >= 1 && text.length <= 4000) {
+        path = "/command";
+        body = { text, user: ctl.user, device: ctl.device };
+      }
+    } else if (ctl.op === "compact") {
+      path = "/compact";
+      body = { by: ctl.user };
+    } else if (ctl.op === "set_pref") {
+      const kind = args.kind;
+      const value = args.value;
+      const valid =
+        typeof value === "string" &&
+        ((kind === "effort" && (EFFORT_LEVELS as readonly string[]).includes(value)) ||
+          (kind === "model" && MODEL_VALUE_RE.test(value)));
+      if (valid) {
+        path = "/set-pref";
+        body = { kind, value };
+      }
+    }
+    if (!path || !body) {
+      console.error(`[bridge] refused claudeops control ${ctl.op} from ${ctl.user} — invalid op or args`);
+      return;
+    }
+    try {
+      const res = await fetch(`${CLAUDEOPS_URL}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
+      });
+      console.error(`[bridge] claudeops ${ctl.op} by ${ctl.user}/${ctl.device} → ${res.status}`);
+    } catch (err) {
+      console.error(`[bridge] claudeops ${ctl.op} failed: ${(err as Error).message}`);
+    }
+    setTimeout(() => void pollPlugins(true), 1_200).unref();
     return;
   }
-  try {
-    const res = await fetch(`${LIGHTING_URL}/set`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(8_000),
-    });
-    console.error(`[bridge] lights control by ${ctl.user}/${ctl.device}: ${JSON.stringify(body)} → ${res.status}`);
-  } catch (err) {
-    console.error(`[bridge] lights control failed: ${(err as Error).message}`);
-  }
-  // The phone's confirmation is reported state, not the 200: re-read after
-  // the fade has begun and push the fresh snapshot up the link.
-  setTimeout(() => void pollPlugins(true), 1_200).unref();
+
+  console.error(`[bridge] refused control op ${ctl.plugin}/${ctl.op} — unknown plugin or op`);
 }
 
 // ---- tricorder viewscreens (TNGC-36) --------------------------------------------
@@ -1328,6 +1434,7 @@ function startCloudLink() {
       // link — re-send what we know now, then re-probe for freshness.
       sendPlugins();
       sendLightsState();
+      sendOpsState();
       void pollPlugins(true);
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {

@@ -415,6 +415,30 @@
   .cal-wk-h.today { color: var(--gold); }
   .cal-empty { color: #555; font-size: 11px; margin-top: 6px; }
 
+  /* claudeops plugin (TNGC-54) */
+  .ops-status { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .ops-dot { width: 12px; height: 12px; border-radius: 50%; background: #555; flex: none; }
+  .ops-dot.idle { background: var(--gold); }
+  .ops-dot.working { background: var(--blue); animation: ops-pulse 1.2s ease-in-out infinite; }
+  .ops-dot.compacting { background: var(--lav); animation: ops-pulse 1.2s ease-in-out infinite; }
+  .ops-dot.offline { background: var(--red); }
+  @keyframes ops-pulse { 50% { opacity: .35; } }
+  .ops-state { color: var(--peach); font-weight: 700; text-transform: uppercase; font-size: 13px; flex: 1; }
+  .ops-ctx { color: #888; font-size: 12px; }
+  #ops-text {
+    width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px 12px; min-height: 72px;
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 12px; color: #fff;
+    font: inherit; font-size: 14px; resize: vertical;
+  }
+  .ops-last { color: #888; font-size: 12px; margin-top: 8px; }
+  .ops-last b { color: var(--peach); font-weight: 700; }
+  .ops-result {
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 12px; padding: 10px 12px;
+    margin-top: 6px; color: #ddd; font-size: 13px; line-height: 1.45;
+    white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto;
+  }
+  .ops-result.stale { opacity: .55; }
+
   /* send sheet */
   #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: flex-end; z-index: 5; }
   #sheet.open { display: flex; }
@@ -800,6 +824,33 @@
     <div class="err" id="cal-err"></div>
   </div>
 
+  <!-- CLAUDE OPS (TNGC-54): remote control of the host's claude-ops session -->
+  <div class="view" id="view-ops">
+    <button class="link" id="btn-opsback" style="text-align:left">&#9664; Plugins</button>
+    <label>Claude Ops</label>
+    <div class="ops-status">
+      <span class="ops-dot" id="ops-dot"></span>
+      <span class="ops-state" id="ops-state">&mdash;</span>
+      <span class="ops-ctx" id="ops-ctx"></span>
+    </div>
+    <div class="ac-meter"><i id="ops-fill"></i></div>
+    <label>Command</label>
+    <textarea id="ops-text" placeholder="What should claude-ops do?"></textarea>
+    <button class="btn blue" id="btn-ops-send">Send to session</button>
+    <div class="ops-last" id="ops-last"></div>
+    <label>Last result</label>
+    <div class="ops-result" id="ops-result">&mdash;</div>
+    <div class="card">
+      <div class="ac-pref"><span class="lbl">Model</span><span class="val" id="ops-model">&mdash;</span></div>
+      <div class="ac-btns" id="ops-model-btns"></div>
+      <div class="ac-pref"><span class="lbl">Effort</span><span class="val" id="ops-effort">&mdash;</span></div>
+      <div class="ac-btns" id="ops-effort-btns"></div>
+      <button class="btn blue" id="btn-ops-compact">Consolidate memory</button>
+      <div class="muted" id="ops-note"></div>
+    </div>
+    <div class="err" id="ops-err"></div>
+  </div>
+
   <!-- LIBRARY (TNGC-23) -->
   <div class="view" id="view-library">
     <div class="lib-head">
@@ -959,6 +1010,7 @@ function logout() {
   stopReadouts();
   stopQueuePoll();
   stopLightsPoll();
+  stopOpsPoll();
   show("login");
 }
 
@@ -2237,8 +2289,12 @@ async function openPlugins() {
     const data = await api("/api/plugins");
     wrap.innerHTML = "";
     // Cloud plugins (calendar) stay usable with the Computer offline — only
-    // bridge-backed rows go dark, each via its own online flag.
-    const usable = data.plugins.filter((p) => p.enabled);
+    // bridge-backed rows go dark, each via its own online flag. claudeops
+    // drives a skip-permissions host session: admins only, invisible to
+    // everyone else (the worker 403s them regardless).
+    const usable = data.plugins.filter(
+      (p) => p.enabled && (p.id !== "claudeops" || me.user.role === "admin"),
+    );
     if (!usable.length) {
       wrap.innerHTML = '<div class="pl-note">No plugins enabled.' +
         (me.user.role === "admin" ? " Enable them from the Admin console." : " Ask your household admin to enable them.") + "</div>";
@@ -2255,6 +2311,7 @@ async function openPlugins() {
       b.onclick = () => {
         if (p.id === "lights") openLights();
         else if (p.id === "calendar") openCal();
+        else if (p.id === "claudeops") openOps();
       };
       row.appendChild(b);
       if (!p.online) {
@@ -2728,6 +2785,133 @@ $("btn-calsheet-ok").onclick = async () => {
     calRefresh();
   } catch (e) { $("calsheet-err").textContent = e.message; }
 };
+
+// ---- claudeops plugin (TNGC-54) -------------------------------------------------
+// Remote control of the host's claude-ops session. Status is HOOK truth
+// relayed by the bridge (idle/working/compacting), never optimism; the
+// result panel is the session's last assistant message, captured at turn
+// end. Admin-only — the worker enforces it, the plugins list hides it.
+let opsTimer = null, opsChoices = null, opsSentAt = 0;
+
+function openOps() {
+  show("ops");
+  $("ops-err").textContent = "";
+  stopOpsPoll();
+  pollOps();
+  opsTimer = setInterval(pollOps, 3000);
+}
+$("btn-opsback").onclick = () => { stopOpsPoll(); openPlugins(); };
+function stopOpsPoll() { if (opsTimer) { clearInterval(opsTimer); opsTimer = null; } }
+
+async function pollOps() {
+  if (document.hidden || !me) return;
+  try {
+    const d = await api("/api/plugins/claudeops/state");
+    if (d.choices) opsChoices = d.choices;
+    renderOps(d);
+    $("ops-err").textContent = "";
+  } catch (e) { $("ops-err").textContent = e.message; }
+}
+
+async function opsControl(body, note) {
+  try {
+    await api("/api/plugins/claudeops/control", { method: "POST", body: JSON.stringify(body) });
+    if (note) $("ops-note").textContent = note;
+    setTimeout(pollOps, 1500);
+    setTimeout(pollOps, 4500);
+    return true;
+  } catch (e) {
+    toast(e.message, true);
+    return false;
+  }
+}
+
+$("btn-ops-send").onclick = async () => {
+  const text = $("ops-text").value.trim();
+  if (!text) return;
+  $("btn-ops-send").disabled = true;
+  const ok = await opsControl({ op: "send", text });
+  $("btn-ops-send").disabled = false;
+  if (ok) {
+    opsSentAt = Date.now();
+    $("ops-text").value = "";
+    toast("Command sent to claude-ops");
+  }
+};
+$("btn-ops-compact").onclick = () => {
+  opsControl({ op: "compact" }, "Consolidation requested — status shows COMPACTING when it starts.");
+};
+
+function renderOps(d) {
+  const s = d.online && d.state ? d.state : null;
+  const status = !d.online ? "offline" : s ? s.status : "unknown";
+  const dot = $("ops-dot");
+  dot.className = "ops-dot " + (status === "idle" || status === "working" || status === "compacting" ? status : "offline");
+  $("ops-state").textContent = status === "offline" ? "session offline" : status;
+  const ctx = s && s.context;
+  $("ops-ctx").textContent = ctx ? Math.round(ctx.tokens / 1000) + "k / " + Math.round(ctx.window / 1000) + "k" : "";
+  const fill = $("ops-fill");
+  fill.style.width = (ctx ? ctx.percent : 0) + "%";
+  fill.className = ctx && ctx.percent >= 80 ? "warn" : "";
+  $("ops-model").textContent = (s && s.model) || "—";
+  $("ops-effort").textContent = (s && s.effort) || "—";
+  // Compact can be requested idle OR working (the agent queues it to the
+  // turn's end); only offline / already-compacting make it a no-op.
+  $("btn-ops-compact").disabled = status === "offline" || status === "compacting" || status === "unknown";
+
+  const last = $("ops-last");
+  last.innerHTML = "";
+  if (s && s.lastCommand) {
+    const b = document.createElement("b");
+    b.textContent = s.lastCommand.text;
+    last.appendChild(b);
+    last.appendChild(document.createTextNode(
+      " — " + s.lastCommand.status + " " + fmtAgo(s.lastCommand.ts) +
+      (s.queued ? " · " + s.queued + " queued" : ""),
+    ));
+  } else {
+    last.textContent = d.online ? "No commands sent yet." : "";
+  }
+
+  const result = $("ops-result");
+  if (s && s.lastResult) {
+    result.textContent = s.lastResult.text;
+    // Grey the panel while a newer command is still being worked — the text
+    // on screen is the PREVIOUS turn's outcome until status returns to idle.
+    result.className = "ops-result" + (status === "working" || s.lastResult.ts < opsSentAt ? " stale" : "");
+  } else {
+    result.textContent = "—";
+    result.className = "ops-result";
+  }
+
+  renderOpsPrefBtns(s);
+}
+
+function renderOpsPrefBtns(s) {
+  const model = (s && s.model) || "";
+  const effort = (s && s.effort) || "";
+  const mWrap = $("ops-model-btns");
+  mWrap.innerHTML = "";
+  for (const m of (opsChoices && opsChoices.models) || []) {
+    const b = document.createElement("button");
+    b.className = "btn small";
+    b.textContent = m.label;
+    const root = (m.value.match(/opus|fable|sonnet|haiku/) || [""])[0];
+    if (root && model.includes(root)) b.classList.add("on");
+    b.onclick = () => opsControl({ op: "set_pref", kind: "model", value: m.value }, "Model change sent — shows after the next reply.");
+    mWrap.appendChild(b);
+  }
+  const eWrap = $("ops-effort-btns");
+  eWrap.innerHTML = "";
+  for (const lvl of (opsChoices && opsChoices.efforts) || []) {
+    const b = document.createElement("button");
+    b.className = "btn small";
+    b.textContent = lvl;
+    if (lvl === effort) b.classList.add("on");
+    b.onclick = () => opsControl({ op: "set_pref", kind: "effort", value: lvl }, "Effort change sent — updates shortly.");
+    eWrap.appendChild(b);
+  }
+}
 
 // ---- admin --------------------------------------------------------------------
 function fmtAgo(ts) {

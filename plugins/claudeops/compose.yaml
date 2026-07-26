@@ -1,0 +1,13 @@
+# claudeops plugin (TNGC-54) — no sidecars: the ops-agent runs ON THE HOST,
+# spawned by `make claude-ops` in the claude_ops repo. This fragment only
+# teaches the computer container (where the bridge lives) how to reach it:
+#   - TNG_CLAUDEOPS_URL flags the bridge to probe/relay for the plugin
+#   - extra_hosts makes host.docker.internal work on plain Linux engines too
+#     (Docker Desktop provides it natively; the entry is harmless there)
+# The pinpoint egress hole for the fence is declared in plugin.json.
+services:
+  computer:
+    environment:
+      TNG_CLAUDEOPS_URL: ${TNG_CLAUDEOPS_URL:-http://host.docker.internal:7102}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

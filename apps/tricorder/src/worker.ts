@@ -11,7 +11,7 @@
  * itself lives in the per-tenant TenantHub Durable Object. Static assets under
  * ./public (the PWA) are served by the platform before this Worker runs.
  */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { CONTRACT_VERSION, EFFORT_LEVELS, MODEL_CHOICES, MODEL_VALUE_RE, type TngMessage } from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
@@ -479,6 +479,100 @@ app.post("/api/plugins/lights/control", async (c) => {
         c.env.DB.prepare(
           "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         ).bind(ctl.id, s.tenantId, s.userHandle, "lights", "set", JSON.stringify(args).slice(0, 200), ctl.ts),
+        c.env.DB.prepare("DELETE FROM control_log WHERE tenant_id = ? AND created_at < ?").bind(
+          s.tenantId,
+          ctl.ts - CONTROL_LOG_RETENTION_MS,
+        ),
+      ]),
+    );
+  }
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
+// ---- claudeops plugin (TNGC-54) --------------------------------------------------
+// Remote control of the host's claude-ops session. ADMIN ONLY on both read
+// and write: this drives a --dangerously-skip-permissions session on Leif's
+// host, so it carries the same trust bar as the admin Computer card — and
+// the state payload includes the session's own output.
+
+async function claudeopsGate(c: Context<{ Bindings: Env; Variables: Vars }>): Promise<Response | null> {
+  const s = c.get("session");
+  if (s.role !== "admin") return c.json({ error: "admin only" }, 403);
+  if (!(await pluginEnabled(c.env, s.tenantId, "claudeops"))) {
+    return c.json({ error: "the claudeops plugin is not enabled for this household" }, 403);
+  }
+  return null;
+}
+
+app.get("/api/plugins/claudeops/state", async (c) => {
+  const denied = await claudeopsGate(c);
+  if (denied) return denied;
+  const res = await hub(c, c.get("session").tenantId).fetch(new Request("https://hub/plugin-state?plugin=claudeops"));
+  const body = (await res.json()) as Record<string, unknown>;
+  // Same canonical picker lists as the admin Computer card (@tng/contract).
+  return c.json({ ...body, choices: { models: MODEL_CHOICES, efforts: EFFORT_LEVELS } });
+});
+
+// Three ops: send (a command for the session), compact, set_pref. Args are
+// validated and REBUILT here (and again bridge-side, and again agent-side).
+app.post("/api/plugins/claudeops/control", async (c) => {
+  const denied = await claudeopsGate(c);
+  if (denied) return denied;
+  const s = c.get("session");
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  let op: string;
+  const args: Record<string, unknown> = {};
+  if (body.op === "send") {
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text || text.length > 4000) return c.json({ error: "text (1..4000 chars) is required" }, 400);
+    op = "send";
+    args.text = text;
+  } else if (body.op === "compact") {
+    op = "compact";
+  } else if (body.op === "set_pref") {
+    const kind = body.kind;
+    const value = body.value;
+    const valid =
+      typeof value === "string" &&
+      ((kind === "effort" && (EFFORT_LEVELS as readonly string[]).includes(value)) ||
+        (kind === "model" && MODEL_VALUE_RE.test(value)));
+    if (!valid) return c.json({ error: "set_pref needs kind (model|effort) and a valid value" }, 400);
+    op = "set_pref";
+    args.kind = kind;
+    args.value = value;
+  } else {
+    return c.json({ error: "op must be send, compact, or set_pref" }, 400);
+  }
+  const ctl = {
+    id: crypto.randomUUID(),
+    plugin: "claudeops",
+    op,
+    args,
+    user: s.userHandle,
+    device: s.deviceLabel,
+    ts: Date.now(),
+  };
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/control", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(ctl),
+    }),
+  );
+  if (res.status === 202) {
+    const detail = JSON.stringify(
+      op === "send" ? { op, text: (args.text as string).slice(0, 140) } : { op, ...args },
+    ).slice(0, 200);
+    c.executionCtx.waitUntil(
+      c.env.DB.batch([
+        c.env.DB.prepare(
+          "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(ctl.id, s.tenantId, s.userHandle, "claudeops", op, detail, ctl.ts),
         c.env.DB.prepare("DELETE FROM control_log WHERE tenant_id = ? AND created_at < ?").bind(
           s.tenantId,
           ctl.ts - CONTROL_LOG_RETENTION_MS,
