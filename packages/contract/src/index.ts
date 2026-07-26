@@ -114,6 +114,51 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
     whitespace or metacharacters can ever reach the injected command line. */
 export const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
 
+// ---- tricorder plugins (TNGC-40) ----------------------------------------------
+// The deterministic control plane: basic operations (lights first) route
+// phone → Worker/DO → bridge → plugin sidecar, never the session. The bridge
+// probes each sidecar and reports the roster — the cloud never guesses what
+// a house has installed.
+
+/** One plugin as probed by the bridge (TNGC-40). `online` = the sidecar
+    answered its health check just now. */
+export interface PluginStatus {
+  id: string;
+  name: string;
+  online: boolean;
+}
+
+/** A plugin control op (TNGC-40). EPHEMERAL by design: no DO persistence,
+    no queue entry, no replay — a lights toggle from an hour ago must die,
+    not fire. The Worker validates args; the bridge re-validates and rebuilds
+    the sidecar request from them (never a pass-through). */
+export interface CloudControlCommand {
+  id: string;
+  plugin: string;
+  op: string;
+  args?: Record<string, unknown>;
+  user: string;
+  device: string;
+  ts: number;
+}
+
+/** One lighting fixture as reported up the link (TNGC-40). `color` is the
+    service's current-color read: {hex, label} — label is the human name
+    ("4000K", "#FF0000"). */
+export interface LightsFixture {
+  name: string;
+  available: boolean;
+  on: boolean;
+  brightnessPct: number | null;
+  color: { hex: string; label: string } | null;
+}
+
+/** The lights plugin's `plugin_state` payload (TNGC-40). */
+export interface LightsState {
+  fixtures: LightsFixture[];
+  updatedAt: number;
+}
+
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
     text "ping"/"pong" outside this framing (DO auto-response, never wakes
     the hub).
@@ -135,6 +180,9 @@ export const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
     - set_pref (TNGC-32 follow-up): an admin set the session model or
       effort — the bridge injects `/model <value>` / `/effort <value>`,
       value validated at the worker AND re-validated bridge-side.
+    - control (TNGC-40): a deterministic plugin op — the bridge POSTs it to
+      the plugin sidecar immediately (no queue, no session turn, even
+      mid-turn). Ephemeral: never stored, never replayed.
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
@@ -144,7 +192,8 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display_close"; name: string }
   | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
   | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string }
-  | { v: typeof CONTRACT_VERSION; type: "set_pref"; kind: "model" | "effort"; value: string; by?: string };
+  | { v: typeof CONTRACT_VERSION; type: "set_pref"; kind: "model" | "effort"; value: string; by?: string }
+  | { v: typeof CONTRACT_VERSION; type: "control"; ctl: CloudControlCommand };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub
@@ -160,6 +209,11 @@ export type LinkDownFrame =
       Viewscreen-mode sockets. Never stored; push-only.
     - computer (TNGC-32): the session's context usage + compaction state —
       the hub stores the latest for the admin console and the PWA badge.
+    - plugins (TNGC-40): the bridge-probed plugin roster — the hub stores
+      the latest; enablement is the cloud's half (tenant_plugins in D1).
+    - plugin_state (TNGC-40): one plugin's live state snapshot (for lights:
+      LightsState) — the hub stores the latest per plugin, the PWA's plugin
+      screens poll it. Stale-on-offline like queue/roster.
     Additive in v1: both ends ignore unknown frame types. */
 export type LinkUpFrame =
   | { v: typeof CONTRACT_VERSION; type: "ack"; id: string }
@@ -167,4 +221,6 @@ export type LinkUpFrame =
   | { v: typeof CONTRACT_VERSION; type: "queue"; items: QueueItem[] }
   | { v: typeof CONTRACT_VERSION; type: "roster"; displays: RosterDisplay[] }
   | { v: typeof CONTRACT_VERSION; type: "frame"; display: string; msg: unknown }
-  | { v: typeof CONTRACT_VERSION; type: "computer"; info: ComputerInfo };
+  | { v: typeof CONTRACT_VERSION; type: "computer"; info: ComputerInfo }
+  | { v: typeof CONTRACT_VERSION; type: "plugins"; plugins: PluginStatus[] }
+  | { v: typeof CONTRACT_VERSION; type: "plugin_state"; plugin: string; state: unknown };

@@ -19,11 +19,13 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import type {
+  CloudControlCommand,
   CloudDisplayCommand,
   CloudMessage,
   ComputerInfo,
   LinkDownFrame,
   LinkUpFrame,
+  PluginStatus,
   QueueItem,
   RosterDisplay,
   TngMessage,
@@ -58,6 +60,7 @@ const json = (body: unknown, status = 200) =>
 
 export class TenantHub extends DurableObject<Env> {
   private enqueueTimes: number[] = [];
+  private controlTimes: number[] = [];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -126,6 +129,8 @@ export class TenantHub extends DurableObject<Env> {
       await this.ctx.storage.delete("queue");
       await this.ctx.storage.delete("roster");
       await this.ctx.storage.delete("computer");
+      await this.ctx.storage.delete("plugins");
+      await this.ctx.storage.delete("plugin_state");
       this.ctx.acceptWebSocket(pair[1], ["link"]);
       await this.replay(pair[1]);
       // Re-attach every phone still in Viewscreen mode (TNGC-36): the new
@@ -249,6 +254,43 @@ export class TenantHub extends DurableObject<Env> {
       return json({ online: this.online(), items: await this.queueItems() });
     }
 
+    // ---- tricorder plugins (TNGC-40) ----------------------------------------
+    // The bridge-probed roster and per-plugin state snapshots. Offline reads
+    // as empty/absent, like the queue — stale plugin state is worse than none.
+
+    if (url.pathname === "/plugins") {
+      const plugins = this.online()
+        ? ((await this.ctx.storage.get<PluginStatus[]>("plugins")) ?? [])
+        : [];
+      return json({ online: this.online(), plugins });
+    }
+
+    if (url.pathname === "/plugin-state") {
+      const plugin = url.searchParams.get("plugin") ?? "";
+      const map = this.online()
+        ? ((await this.ctx.storage.get<Record<string, unknown>>("plugin_state")) ?? {})
+        : {};
+      return json({ online: this.online(), state: map[plugin] ?? null });
+    }
+
+    // A control op: ephemeral by contract — pushed down the live link or
+    // rejected, never stored, never replayed. Permissions and argument
+    // validation happened in the Worker; the bridge re-validates regardless.
+    if (url.pathname === "/control" && req.method === "POST") {
+      if (!this.online()) return json({ error: "Computer offline" }, 409);
+      // Same style of flood fuse as /enqueue, sized for a lights panel (a
+      // scrubber applies on release, so people generate a few ops a minute).
+      const now = Date.now();
+      this.controlTimes = this.controlTimes.filter((t) => now - t < 60_000);
+      if (this.controlTimes.length >= 60) {
+        return json({ error: "rate limit — slow down" }, 429);
+      }
+      this.controlTimes.push(now);
+      const ctl = (await req.json()) as CloudControlCommand;
+      this.sendDown({ v: 1, type: "control", ctl });
+      return json({ ok: true }, 202);
+    }
+
     if (url.pathname === "/withdraw" && req.method === "POST") {
       const { id, by } = (await req.json()) as { id?: string; by?: string };
       if (typeof id !== "string" || !id) return json({ error: "id is required" }, 400);
@@ -319,6 +361,16 @@ export class TenantHub extends DurableObject<Env> {
       } else if (frame.type === "computer" && frame.info && typeof frame.info === "object") {
         // TNGC-32: context meter + compaction state for the admin console.
         await this.ctx.storage.put("computer", frame.info);
+      } else if (frame.type === "plugins" && Array.isArray(frame.plugins)) {
+        // TNGC-40: the bridge-probed plugin roster. Bounded like the queue.
+        await this.ctx.storage.put("plugins", frame.plugins.slice(0, 16));
+      } else if (frame.type === "plugin_state" && typeof frame.plugin === "string" && frame.plugin.length <= 32) {
+        // TNGC-40: one plugin's live state snapshot, keyed in a single map.
+        const map = (await this.ctx.storage.get<Record<string, unknown>>("plugin_state")) ?? {};
+        if (frame.plugin in map || Object.keys(map).length < 16) {
+          map[frame.plugin] = frame.state;
+          await this.ctx.storage.put("plugin_state", map);
+        }
       } else if (frame.type === "frame" && typeof frame.display === "string") {
         // TNGC-36: push one server→display message to the user whose
         // tricorder viewscreen this is. Never stored — display frames are

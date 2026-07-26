@@ -298,6 +298,68 @@
   .li-actions { display: flex; gap: 8px; margin-top: 12px; }
   .li-actions .btn { flex: 1; margin-top: 0; padding: 12px 6px; font-size: 14px; }
 
+  /* main nav — one row of square icon buttons (TNGC-40) */
+  .action-row { display: flex; gap: 10px; margin-top: 16px; }
+  .icon-btn {
+    flex: 1; max-height: 76px; aspect-ratio: 1.4; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 14px;
+    background: var(--gold); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+  }
+  .icon-btn.blue { background: var(--blue); }
+  .icon-btn.lav { background: var(--lav); }
+  .icon-btn:active { filter: brightness(1.15); transform: scale(.97); }
+  .icon-btn svg { display: block; }
+  .icon-btn .cap { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* plugins + lights screens (TNGC-40) */
+  .pl-note { color: #888; font-size: 14px; margin-top: 12px; }
+  .plugrow { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .plugrow .btn { margin-top: 0; }
+  .plugrow .name { flex: 1; color: var(--peach); font-weight: 700; text-transform: uppercase; font-size: 14px; }
+  .plugrow .st { font-size: 11px; color: #888; text-transform: uppercase; }
+  .lt-offline {
+    margin-top: 12px; padding: 8px 12px; border: 1px solid var(--red); border-radius: 12px;
+    color: var(--red); font-size: 12px; font-weight: 700; text-transform: uppercase; text-align: center;
+  }
+  #lights-list.off .lt-row { opacity: .45; }
+  #lights-list.off .lt-row button, #lights-list.off .lt-row input { pointer-events: none; }
+  .lt-row {
+    display: flex; align-items: center; gap: 10px; min-height: 58px;
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 14px;
+    padding: 8px 12px; margin-top: 10px;
+  }
+  .lt-row.all { border-color: var(--gold); background: #17110a; }
+  .lt-row.unavail { opacity: .45; }
+  .lt-name {
+    flex: 1; min-width: 0; font-weight: 700; text-transform: uppercase; font-size: 13px;
+    color: var(--peach); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .lt-row.all .lt-name { color: var(--gold); font-size: 14px; }
+  .lt-sub { display: block; color: #777; font-size: 10px; font-weight: 400; }
+  .lt-onoff {
+    background: none; border: 1px solid var(--gold); color: var(--gold); border-radius: 12px;
+    font: inherit; font-size: 12px; font-weight: 700; padding: 8px 16px; cursor: pointer; text-transform: uppercase;
+  }
+  .lt-onoff.off { border-color: #666; color: #999; }
+  .lt-color {
+    width: 34px; height: 34px; border-radius: 50%; border: 2px solid #555;
+    cursor: pointer; padding: 0; background: #333; flex: none;
+  }
+  .lt-brt {
+    background: none; border: 1px solid var(--blue); color: var(--blue); border-radius: 12px;
+    font: inherit; font-size: 11px; padding: 8px 10px; cursor: pointer; text-transform: uppercase;
+  }
+  .lt-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--gold); }
+  .lt-pct { color: var(--gold); font-size: 13px; font-weight: 700; min-width: 40px; text-align: right; }
+  .lt-apply {
+    background: var(--gold); border: 0; color: var(--ink); border-radius: 12px;
+    font: inherit; font-size: 12px; font-weight: 700; padding: 8px 14px; cursor: pointer; text-transform: uppercase;
+  }
+  .lt-x {
+    background: none; border: 1px solid var(--red); color: var(--red); border-radius: 12px;
+    font: inherit; font-size: 12px; padding: 7px 12px; cursor: pointer;
+  }
+
   /* send sheet */
   #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: flex-end; z-index: 5; }
   #sheet.open { display: flex; }
@@ -322,10 +384,17 @@
      share ONE row (no scrolling to reach Library): exit icon ⅓, Library ⅔. */
   body.vs-on .rail, body.vs-on .toggle-row, body.vs-on .foot { display: none; }
   body.vs-on .action-row { display: flex; gap: 8px; }
-  body.vs-on .action-row .btn { margin-top: 10px; padding: 9px; font-size: 14px; }
-  body.vs-on #btn-viewscreen { flex: 1; display: flex; align-items: center; justify-content: center; }
+  body.vs-on .action-row .icon-btn {
+    margin-top: 10px; padding: 9px; font-size: 14px;
+    aspect-ratio: auto; max-height: none; flex-direction: row; gap: 8px;
+  }
+  body.vs-on .icon-btn .cap { font-size: 13px; }
+  body.vs-on #btn-viewscreen { flex: 1; }
   body.vs-on #btn-viewscreen svg { display: block; }
   body.vs-on #btn-library { flex: 2; }
+  /* Plugins are a portrait-main destination; in vs mode the row keeps the
+     TNGC-36 two-action shape (exit 1/3, Library 2/3). */
+  body.vs-on #btn-plugins { display: none; }
   #vs-render .vs-player-box { width: 100%; aspect-ratio: 16 / 9; }
   #vs-render .vs-player-box iframe { width: 100%; height: 100%; border: 0; border-radius: 8px; }
   body.vs-on .ptt-wrap { min-height: 150px; }
@@ -455,7 +524,7 @@
     body.on-main:not(.vs-on) .main-body > label { grid-column: 1; grid-row: 3; margin-top: 8px; }
     body.on-main:not(.vs-on) .typerow { grid-column: 1; grid-row: 4; align-self: start; }
     body.on-main:not(.vs-on) .action-row { grid-column: 1; grid-row: 5; display: flex; gap: 10px; align-self: end; }
-    body.on-main:not(.vs-on) .action-row .btn { margin-top: 0; padding: 10px; font-size: 15px; }
+    body.on-main:not(.vs-on) .action-row .icon-btn { margin-top: 0; max-height: 64px; }
     body.on-main:not(.vs-on) .foot { grid-column: 1; grid-row: 6; margin-top: 10px; }
     body.on-main:not(.vs-on) .ptt-wrap { grid-column: 2; grid-row: 1 / -1; min-height: 0; }
     /* the instrument shrinks to fit the short axis */
@@ -597,9 +666,29 @@
           <input id="in-type" placeholder="Computer, …" autocapitalize="sentences">
           <button class="btn" id="btn-send">Send</button>
         </div>
+        <!-- main nav (TNGC-40): one row of square icon buttons -->
         <div class="action-row">
-          <button class="btn blue" id="btn-viewscreen">Viewscreen mode</button>
-          <button class="btn bar" id="btn-library">Library</button>
+          <button class="icon-btn blue" id="btn-viewscreen" aria-label="Viewscreen mode">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+              stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span class="cap">Viewscreen</span>
+          </button>
+          <button class="icon-btn" id="btn-library" aria-label="Library">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+              stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span class="cap">Library</span>
+          </button>
+          <button class="icon-btn lav" id="btn-plugins" aria-label="Plugins">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+              stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 2v5"/><path d="M15 2v5"/>
+              <path d="M7 7h10v4a5 5 0 0 1-10 0z"/><line x1="12" y1="16" x2="12" y2="22"/></svg>
+            <span class="cap">Plugins</span>
+          </button>
         </div>
         <div class="foot">
           <button class="link" id="btn-admin" hidden>Admin console</button>
@@ -615,6 +704,24 @@
     <label>Command queue</label>
     <div id="queue-list"></div>
     <div class="err" id="queue-err"></div>
+  </div>
+
+  <!-- PLUGINS (TNGC-40) -->
+  <div class="view" id="view-plugins">
+    <button class="link" id="btn-plback" style="text-align:left">&#9664; Back</button>
+    <label>Plugins</label>
+    <div id="plugins-list"></div>
+    <div class="err" id="plugins-err"></div>
+  </div>
+
+  <!-- LIGHTS (TNGC-40): deterministic control — never touches the AI brain -->
+  <div class="view" id="view-lights">
+    <button class="link" id="btn-ltback" style="text-align:left">&#9664; Plugins</button>
+    <label>Lights</label>
+    <div class="lt-offline" id="lt-offline" hidden>Computer offline — controls disabled</div>
+    <div id="lights-list"></div>
+    <input type="color" id="lt-pick" style="position:fixed;left:-9999px;top:0" aria-hidden="true">
+    <div class="err" id="lights-err"></div>
   </div>
 
   <!-- LIBRARY (TNGC-23) -->
@@ -662,6 +769,7 @@
       <div class="muted" id="ac-note" style="margin-top:8px"></div>
     </div>
     <button class="btn" id="btn-pair">Pair your Computer</button>
+    <button class="btn blue" id="btn-plugmgr">Enable plugins&#8230;</button>
     <button class="btn lav" id="btn-rotate">Rotate guest password</button>
     <div id="admin-users"></div>
     <div class="card">
@@ -700,6 +808,19 @@
     <h3>Command target</h3>
     <div id="wallsheet-list"></div>
     <button class="btn red" id="btn-wallsheet-close" style="margin-top:14px">Cancel</button>
+  </div>
+</div>
+
+<!-- plugin enablement (TNGC-40): admin-only checkbox sheet -->
+<div id="plugsheet" style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;z-index:5">
+  <div class="sheet-box">
+    <h3>Enable plugins</h3>
+    <div id="plugsheet-list"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn" id="btn-plugsheet-ok">Confirm</button>
+      <button class="btn red" id="btn-plugsheet-cancel">Cancel</button>
+    </div>
+    <div class="err" id="plugsheet-err"></div>
   </div>
 </div>
 
@@ -743,6 +864,7 @@ function logout() {
   stopPolling();
   stopReadouts();
   stopQueuePoll();
+  stopLightsPoll();
   show("login");
 }
 
@@ -910,6 +1032,8 @@ function enterMain(identity) {
   $("btn-library").hidden = identity.user.role === "guest";
   // …and no personal viewscreen either
   $("btn-viewscreen").hidden = identity.user.role === "guest";
+  // …and no plugins (TNGC-40): control needs attribution, guests are shared
+  $("btn-plugins").hidden = identity.user.role === "guest";
   // Heal a stale selection: the app killed mid-Viewscreen-mode leaves the
   // tricorder targeted in normal mode — restore the remembered room wall.
   if (!vsOn && getWall() === "tricorder-" + identity.user.handle) {
@@ -1255,7 +1379,7 @@ const VS_EXIT_SVG =
 function enterViewscreen() {
   vsOn = true;
   document.body.classList.add("vs-on");
-  $("btn-viewscreen").innerHTML = VS_EXIT_SVG;
+  $("btn-viewscreen").innerHTML = VS_EXIT_SVG + '<span class="cap">Exit</span>';
   $("btn-viewscreen").setAttribute("aria-label", "Exit viewscreen mode");
   // Remember the ROOM selection to restore on exit. Never remember the
   // tricorder itself (a kill mid-mode leaves it selected; saving it here
@@ -1269,11 +1393,18 @@ function enterViewscreen() {
   vsConnect();
 }
 
+// The nav button's resting face (must match the static HTML markup).
+const ICON_VS =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="2" y="3" width="20" height="14" rx="2"/>' +
+  '<line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+
 function exitViewscreen() {
   vsOn = false;
   document.body.classList.remove("vs-on");
-  $("btn-viewscreen").textContent = "Viewscreen mode";
-  $("btn-viewscreen").removeAttribute("aria-label");
+  $("btn-viewscreen").innerHTML = ICON_VS + '<span class="cap">Viewscreen</span>';
+  $("btn-viewscreen").setAttribute("aria-label", "Viewscreen mode");
   if (me) setWall(localStorage.getItem("tricorder.wallPrev." + me.user.handle) || "");
   if (vsRetry) { clearTimeout(vsRetry); vsRetry = null; }
   const w = vsWs;
@@ -1991,6 +2122,270 @@ window.addEventListener("popstate", () => {
   if ($("view-libitem").classList.contains("active")) { libItem = null; show("library"); }
   else if ($("view-library").classList.contains("active")) show("main");
 });
+
+// ---- plugins (TNGC-40) ----------------------------------------------------------
+// The deterministic control plane's phone face: ops POST to the Worker and
+// ride a `control` frame straight to the plugin sidecar — the AI brain is
+// never involved. Rendered state is REPORTED state (the bridge re-reads the
+// fabric after each op); a tap gets optimistic paint only until the next poll.
+let ltTimer = null, ltState = null, ltOnline = false, ltScrub = null, ltPickTarget = null;
+
+$("btn-plugins").onclick = () => openPlugins();
+$("btn-plback").onclick = () => show("main");
+$("btn-ltback").onclick = () => { stopLightsPoll(); openPlugins(); };
+
+async function openPlugins() {
+  show("plugins");
+  const wrap = $("plugins-list");
+  $("plugins-err").textContent = "";
+  wrap.innerHTML = '<div class="pl-note">Scanning…</div>';
+  try {
+    const data = await api("/api/plugins");
+    wrap.innerHTML = "";
+    if (!data.online) {
+      wrap.innerHTML = '<div class="pl-note">Computer offline — plugins are reported by your Computer when it connects.</div>';
+      return;
+    }
+    const usable = data.plugins.filter((p) => p.enabled);
+    if (!usable.length) {
+      wrap.innerHTML = '<div class="pl-note">No plugins enabled.' +
+        (me.user.role === "admin" ? " Enable them from the Admin console." : " Ask your household admin to enable them.") + "</div>";
+      return;
+    }
+    for (const p of usable) {
+      const row = document.createElement("div");
+      row.className = "plugrow";
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.style.marginTop = "0";
+      b.textContent = p.name;
+      b.disabled = !p.online;
+      b.onclick = () => { if (p.id === "lights") openLights(); };
+      row.appendChild(b);
+      if (!p.online) {
+        const st = document.createElement("span");
+        st.className = "st";
+        st.textContent = "offline";
+        row.appendChild(st);
+      }
+      wrap.appendChild(row);
+    }
+  } catch (e) { $("plugins-err").textContent = e.message; }
+}
+
+function openLights() {
+  show("lights");
+  ltScrub = null;
+  $("lights-err").textContent = "";
+  $("lights-list").innerHTML = '<div class="pl-note">Reading the fabric…</div>';
+  stopLightsPoll();
+  pollLights();
+  ltTimer = setInterval(pollLights, 5000);
+}
+function stopLightsPoll() { if (ltTimer) { clearInterval(ltTimer); ltTimer = null; } }
+
+async function pollLights() {
+  if (document.hidden || !me) return;
+  try {
+    const d = await api("/api/plugins/lights/state");
+    ltOnline = d.online;
+    ltState = d.state;
+    // never yank a scrubber out from under a thumb — stale siblings are fine
+    if (ltScrub === null) renderLights();
+    else $("lt-offline").hidden = ltOnline;
+  } catch (e) { $("lights-err").textContent = e.message; }
+}
+
+function ltShortName(full) { return full.length > 16 ? full.slice(0, 15) + "…" : full; }
+
+async function ltControl(body) {
+  try {
+    await api("/api/plugins/lights/control", { method: "POST", body: JSON.stringify(body) });
+    // the bridge re-reads reported state ~1.2s after the op — poll on its heels
+    setTimeout(pollLights, 2000);
+    setTimeout(pollLights, 4500);
+  } catch (e) {
+    toast(e.message, true);
+    pollLights();
+  }
+}
+
+function renderLights() {
+  const list = $("lights-list");
+  $("lt-offline").hidden = ltOnline;
+  list.classList.toggle("off", !ltOnline);
+  if (!ltState || !Array.isArray(ltState.fixtures) || !ltState.fixtures.length) {
+    list.innerHTML = '<div class="pl-note">' +
+      (ltOnline ? "No fixtures reported yet — is the lighting fabric up?" : "Waiting for the Computer…") + "</div>";
+    return;
+  }
+  list.innerHTML = "";
+  const anyOn = ltState.fixtures.some((f) => f.on);
+  list.appendChild(ltAllRow(anyOn));
+  for (const f of ltState.fixtures) list.appendChild(ltRow(f));
+}
+
+// The away-from-home big switch: one group cast to everything.
+function ltAllRow(anyOn) {
+  const row = document.createElement("div");
+  row.className = "lt-row all";
+  const name = document.createElement("div");
+  name.className = "lt-name";
+  name.textContent = "All Lights";
+  const sub = document.createElement("span");
+  sub.className = "lt-sub";
+  sub.textContent = anyOn ? "some lights are on" : "all off";
+  name.appendChild(sub);
+  row.appendChild(name);
+  const on = document.createElement("button");
+  on.className = "lt-onoff";
+  on.textContent = "On";
+  on.onclick = () => ltControl({ target: "all", state: "on" });
+  const off = document.createElement("button");
+  off.className = "lt-onoff off";
+  off.textContent = "Off";
+  off.onclick = () => ltControl({ target: "all", state: "off" });
+  row.appendChild(on);
+  row.appendChild(off);
+  return row;
+}
+
+function ltRow(f) {
+  const row = document.createElement("div");
+  row.className = "lt-row" + (f.available ? "" : " unavail");
+  if (ltScrub === f.name) return ltScrubRow(row, f);
+  const name = document.createElement("div");
+  name.className = "lt-name";
+  name.textContent = ltShortName(f.name);
+  const sub = document.createElement("span");
+  sub.className = "lt-sub";
+  sub.textContent = !f.available
+    ? "unreachable — wall switch?"
+    : f.on
+      ? (f.brightnessPct != null ? f.brightnessPct + "%" : "on") + (f.color ? " · " + f.color.label : "")
+      : "off";
+  name.appendChild(sub);
+  row.appendChild(name);
+  const sw = document.createElement("button");
+  sw.className = "lt-color";
+  if (f.color && /^#[0-9a-fA-F]{6}$/.test(f.color.hex)) sw.style.background = f.color.hex;
+  sw.setAttribute("aria-label", "Color for " + f.name);
+  sw.onclick = () => {
+    ltPickTarget = f.name;
+    const pick = $("lt-pick");
+    pick.value = f.color && /^#[0-9a-fA-F]{6}$/.test(f.color.hex) ? f.color.hex.toLowerCase() : "#ffcc99";
+    pick.click();
+  };
+  row.appendChild(sw);
+  const brt = document.createElement("button");
+  brt.className = "lt-brt";
+  brt.textContent = "Brt";
+  brt.setAttribute("aria-label", "Brightness for " + f.name);
+  brt.onclick = () => { ltScrub = f.name; renderLights(); };
+  row.appendChild(brt);
+  const swt = document.createElement("button");
+  swt.className = "switch" + (f.on ? " on" : "");
+  swt.setAttribute("aria-label", (f.on ? "Turn off " : "Turn on ") + f.name);
+  swt.innerHTML = '<span class="knob"></span>';
+  swt.onclick = () => {
+    swt.classList.toggle("on");
+    ltControl({ target: f.name, state: f.on ? "off" : "on" });
+  };
+  row.appendChild(swt);
+  return row;
+}
+
+// The row turned sideways: a brightness scrubber that only fires on APPLY.
+function ltScrubRow(row, f) {
+  row.classList.add("scrub");
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = "1";
+  range.max = "100";
+  range.value = String(f.brightnessPct != null ? Math.max(1, f.brightnessPct) : 70);
+  const pct = document.createElement("div");
+  pct.className = "lt-pct";
+  pct.textContent = range.value + "%";
+  range.oninput = () => { pct.textContent = range.value + "%"; };
+  const ok = document.createElement("button");
+  ok.className = "lt-apply";
+  ok.textContent = "Apply";
+  ok.onclick = () => {
+    ltScrub = null;
+    // state:on so scrubbing a dark light lights it at the chosen level
+    ltControl({ target: f.name, brightness: Number(range.value), state: "on" });
+    renderLights();
+  };
+  const x = document.createElement("button");
+  x.className = "lt-x";
+  x.textContent = "✕";
+  x.setAttribute("aria-label", "Cancel brightness change");
+  x.onclick = () => { ltScrub = null; renderLights(); };
+  row.appendChild(range);
+  row.appendChild(pct);
+  row.appendChild(ok);
+  row.appendChild(x);
+  return row;
+}
+
+$("lt-pick").onchange = () => {
+  if (!ltPickTarget) return;
+  ltControl({ target: ltPickTarget, color: $("lt-pick").value, state: "on" });
+  ltPickTarget = null;
+};
+
+// ---- plugin enablement sheet (admin, TNGC-40) -----------------------------------
+let plugPending = null;
+
+$("btn-plugmgr").onclick = async () => {
+  $("plugsheet-err").textContent = "";
+  const wrap = $("plugsheet-list");
+  wrap.innerHTML = '<div class="pl-note">Scanning…</div>';
+  $("plugsheet").style.display = "flex";
+  try {
+    const data = await api("/api/plugins");
+    plugPending = new Map();
+    wrap.innerHTML = "";
+    if (!data.plugins.length) {
+      wrap.innerHTML = '<div class="pl-note">' +
+        (data.online
+          ? "Your Computer reports no plugins installed."
+          : "Computer offline — available plugins are reported by your Computer when it connects.") + "</div>";
+      return;
+    }
+    for (const p of data.plugins) {
+      plugPending.set(p.id, p.enabled);
+      const row = document.createElement("div");
+      row.className = "plugrow";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = p.name + (p.online ? "" : " (offline)");
+      const sw = document.createElement("button");
+      sw.className = "switch" + (p.enabled ? " on" : "");
+      sw.setAttribute("aria-label", "Enable " + p.name);
+      sw.innerHTML = '<span class="knob"></span>';
+      sw.onclick = () => {
+        const v = !plugPending.get(p.id);
+        plugPending.set(p.id, v);
+        sw.classList.toggle("on", v);
+      };
+      row.appendChild(name);
+      row.appendChild(sw);
+      wrap.appendChild(row);
+    }
+  } catch (e) { $("plugsheet-err").textContent = e.message; }
+};
+$("btn-plugsheet-cancel").onclick = () => { $("plugsheet").style.display = "none"; plugPending = null; };
+$("btn-plugsheet-ok").onclick = async () => {
+  if (!plugPending) { $("plugsheet").style.display = "none"; return; }
+  try {
+    for (const [id, enabled] of plugPending) {
+      await api("/api/admin/plugins", { method: "POST", body: JSON.stringify({ plugin: id, enabled }) });
+    }
+    plugPending = null;
+    $("plugsheet").style.display = "none";
+  } catch (e) { $("plugsheet-err").textContent = e.message; }
+};
 
 // ---- admin --------------------------------------------------------------------
 function fmtAgo(ts) {

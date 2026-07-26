@@ -49,7 +49,17 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
-import type { ComputerInfo, LinkDownFrame, LinkUpFrame, QueueItem, RosterDisplay, TngMessage } from "@tng/contract";
+import type {
+  CloudControlCommand,
+  ComputerInfo,
+  LightsState,
+  LinkDownFrame,
+  LinkUpFrame,
+  PluginStatus,
+  QueueItem,
+  RosterDisplay,
+  TngMessage,
+} from "@tng/contract";
 import { EFFORT_LEVELS, MODEL_VALUE_RE } from "@tng/contract";
 import { getItem } from "@tng/library-client";
 
@@ -809,6 +819,8 @@ const http = createServer((req, res) => {
       effort: lastEffort ?? null,
       pendingPrefs: Object.fromEntries(pendingPrefs),
       transcript: sessionTranscript,
+      // TNGC-40: plugin control plane visibility
+      plugins: pluginRoster(),
     });
   }
   if (req.method === "GET" && req.url === "/queue") {
@@ -964,6 +976,156 @@ async function pollRoster(): Promise<void> {
 }
 setInterval(() => void pollRoster(), 10_000).unref();
 void pollRoster();
+
+// ---- tricorder plugins (TNGC-40) ------------------------------------------------
+// The deterministic control plane. `control` down-frames POST straight to the
+// plugin sidecar — no queue, no session turn, dispatched even mid-turn: a
+// lights toggle touches nothing the session owns, and making it wait behind a
+// busy brain would recreate the latency this plane exists to remove. The
+// bridge is also the availability truth: it probes the sidecar (the fence
+// hole to lighting:7101 already exists for the lights MCP tool) and pushes
+// roster + state changes up the link; the cloud never guesses.
+
+const LIGHTING_URL = process.env.TNG_LIGHTING_URL ?? "http://lighting:7101";
+
+let lightsOnline = false;
+let lightsState: LightsState | null = null;
+let lastPluginsJson = "";
+let lastLightsJson = "";
+
+function pluginRoster(): PluginStatus[] {
+  return [{ id: "lights", name: "Lights", online: lightsOnline }];
+}
+
+function sendPlugins(): void {
+  if (cloudSocket?.readyState !== WebSocket.OPEN) return;
+  const frame: LinkUpFrame = { v: 1, type: "plugins", plugins: pluginRoster() };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // link recycling — the open handler re-syncs
+  }
+}
+
+function sendLightsState(): void {
+  if (!lightsState || cloudSocket?.readyState !== WebSocket.OPEN) return;
+  const frame: LinkUpFrame = { v: 1, type: "plugin_state", plugin: "lights", state: lightsState };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // link recycling — the open handler re-syncs
+  }
+}
+
+async function pollPlugins(force = false): Promise<void> {
+  let online = false;
+  try {
+    const res = await fetch(`${LIGHTING_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+    online = res.ok;
+  } catch {
+    online = false;
+  }
+  if (online) {
+    try {
+      const res = await fetch(`${LIGHTING_URL}/state`, { signal: AbortSignal.timeout(4_000) });
+      if (res.ok) {
+        const s = (await res.json()) as {
+          devices?: Array<{
+            name?: unknown;
+            available?: unknown;
+            on?: unknown;
+            brightnessPct?: unknown;
+            color?: { hex?: unknown; label?: unknown } | null;
+          }>;
+        };
+        const fixtures = (s.devices ?? [])
+          .filter((d) => typeof d.name === "string")
+          .slice(0, 64)
+          .map((d) => ({
+            name: d.name as string,
+            available: d.available !== false,
+            on: d.on === true,
+            brightnessPct: typeof d.brightnessPct === "number" ? d.brightnessPct : null,
+            color:
+              d.color && typeof d.color.hex === "string" && typeof d.color.label === "string"
+                ? { hex: d.color.hex, label: d.color.label }
+                : null,
+          }));
+        const fj = JSON.stringify(fixtures);
+        if (force || fj !== lastLightsJson) {
+          lastLightsJson = fj;
+          lightsState = { fixtures, updatedAt: Date.now() };
+          sendLightsState();
+        }
+      }
+    } catch {
+      // sidecar mid-restart — keep the last snapshot, health already said online
+    }
+  }
+  lightsOnline = online;
+  const pj = JSON.stringify(pluginRoster());
+  if (force || pj !== lastPluginsJson) {
+    lastPluginsJson = pj;
+    sendPlugins();
+  }
+}
+setInterval(() => void pollPlugins(), 15_000).unref();
+void pollPlugins();
+
+/** Whitelist-rebuild of a lights `/set` body. The Worker validated already,
+    but the bridge trusts nothing that rode the internet — same posture as
+    set_pref: the sidecar request is BUILT from the values, never relayed. */
+function lightsSetBody(args: Record<string, unknown>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (typeof args.target === "string" && args.target.length > 0 && args.target.length <= 64) out.target = args.target;
+  if (args.state === "on" || args.state === "off") out.state = args.state;
+  if (typeof args.brightness === "number" && args.brightness >= 0 && args.brightness <= 100) {
+    out.brightness = Math.round(args.brightness);
+  }
+  if (typeof args.color === "string" && /^[#a-zA-Z0-9 -]{1,32}$/.test(args.color)) out.color = args.color;
+  if (typeof args.colorTemp === "number" && args.colorTemp >= 2000 && args.colorTemp <= 6500) {
+    out.colorTemp = Math.round(args.colorTemp);
+  } else if (args.colorTemp === "warm" || args.colorTemp === "neutral" || args.colorTemp === "cool") {
+    out.colorTemp = args.colorTemp;
+  }
+  if (typeof args.transition === "number" && args.transition >= 0 && args.transition <= 30) {
+    out.transition = args.transition;
+  }
+  // A body with only a target does nothing — require at least one actual change.
+  return Object.keys(out).some((k) => k !== "target" && k !== "transition") ? out : null;
+}
+
+async function executeControl(ctl: CloudControlCommand): Promise<void> {
+  // Same ephemerality as voice: a control op that aged out in transit must
+  // die, not fire — nobody wants the lights obeying an hour-old tap.
+  if (Date.now() - ctl.ts > TTL_MS) {
+    console.error(`[bridge] dropped stale control op (${Math.round((Date.now() - ctl.ts) / 1000)}s old) from ${ctl.user}`);
+    return;
+  }
+  if (ctl.plugin !== "lights" || ctl.op !== "set") {
+    console.error(`[bridge] refused control op ${ctl.plugin}/${ctl.op} — unknown plugin or op`);
+    return;
+  }
+  const body = lightsSetBody(ctl.args ?? {});
+  if (!body) {
+    console.error(`[bridge] refused lights control from ${ctl.user} — no valid fields`);
+    return;
+  }
+  try {
+    const res = await fetch(`${LIGHTING_URL}/set`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
+    });
+    console.error(`[bridge] lights control by ${ctl.user}/${ctl.device}: ${JSON.stringify(body)} → ${res.status}`);
+  } catch (err) {
+    console.error(`[bridge] lights control failed: ${(err as Error).message}`);
+  }
+  // The phone's confirmation is reported state, not the 200: re-read after
+  // the fade has begun and push the fresh snapshot up the link.
+  setTimeout(() => void pollPlugins(true), 1_200).unref();
+}
 
 // ---- tricorder viewscreens (TNGC-36) --------------------------------------------
 // A phone in Viewscreen mode is one more named display whose transport is the
@@ -1162,6 +1324,11 @@ function startCloudLink() {
       pushState();
       sendRoster(true);
       sendComputerInfo(true);
+      // Plugins (TNGC-40): the DO cleared its stored roster/state for the new
+      // link — re-send what we know now, then re-probe for freshness.
+      sendPlugins();
+      sendLightsState();
+      void pollPlugins(true);
       // App-level keepalive: the DO answers "ping" with "pong" without waking.
       keepalive = setInterval(() => {
         if (Date.now() - lastActivity > 90_000) {
@@ -1211,6 +1378,10 @@ function startCloudLink() {
           // inside — the injected line is built from the value, never trusted).
           const result = requestSetPref(frame.kind, frame.value, typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
           console.error(`[bridge] cloud set_pref ${frame.kind}: ${result.state}`);
+        } else if (frame.type === "control" && frame.ctl && typeof frame.ctl === "object") {
+          // Deterministic plugin op (TNGC-40): straight to the sidecar, even
+          // mid-turn — never queued, never near the session.
+          void executeControl(frame.ctl);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

@@ -363,11 +363,146 @@ app.post("/api/queue/:id/withdraw", async (c) => {
   return new Response(res.body, { status: res.status, headers: res.headers });
 });
 
+// ---- tricorder plugins (TNGC-40) ------------------------------------------------
+// The deterministic control plane: plugin ops route phone → hub → bridge →
+// plugin sidecar, never the session. Household members only (the guest
+// identity is a rotating shared login — attribution doesn't fit). Usable =
+// bridge-reported available ∧ tenant-enabled ∧ online.
+
+const PLUGIN_ID_RE = /^[a-z0-9-]{1,32}$/;
+const CONTROL_LOG_RETENTION_MS = 30 * 24 * 60 * 60_000;
+const COLOR_RE = /^[#a-zA-Z0-9 -]{1,32}$/;
+
+async function pluginEnabled(env: Env, tenantId: string, pluginId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT enabled FROM tenant_plugins WHERE tenant_id = ? AND plugin_id = ?")
+    .bind(tenantId, pluginId)
+    .first<{ enabled: number }>();
+  return row?.enabled === 1;
+}
+
+app.get("/api/plugins", async (c) => {
+  const s = c.get("session");
+  if (s.role === "guest") return c.json({ error: "the guest account has no plugins" }, 403);
+  const [res, rows] = await Promise.all([
+    hub(c, s.tenantId).fetch(new Request("https://hub/plugins")),
+    c.env.DB.prepare("SELECT plugin_id AS id, enabled FROM tenant_plugins WHERE tenant_id = ?")
+      .bind(s.tenantId)
+      .all<{ id: string; enabled: number }>(),
+  ]);
+  const data = (await res.json()) as { online: boolean; plugins: Array<{ id: string; name: string; online: boolean }> };
+  const enabled = new Map(rows.results.map((r) => [r.id, r.enabled === 1]));
+  return c.json({
+    online: data.online,
+    plugins: data.plugins.map((p) => ({ ...p, enabled: enabled.get(p.id) === true })),
+  });
+});
+
+app.get("/api/plugins/lights/state", async (c) => {
+  const s = c.get("session");
+  if (s.role === "guest") return c.json({ error: "the guest account has no plugins" }, 403);
+  if (!(await pluginEnabled(c.env, s.tenantId, "lights"))) {
+    return c.json({ error: "the lights plugin is not enabled for this household" }, 403);
+  }
+  return hub(c, s.tenantId).fetch(new Request("https://hub/plugin-state?plugin=lights"));
+});
+
+// One op: "set" — mirrors the lighting service's /set. Args are validated
+// and REBUILT here (and again bridge-side); free-form JSON never rides the
+// control frame. Every accepted op lands in control_log with attribution.
+app.post("/api/plugins/lights/control", async (c) => {
+  const s = c.get("session");
+  if (s.role === "guest") return c.json({ error: "the guest account has no plugins" }, 403);
+  if (!(await pluginEnabled(c.env, s.tenantId, "lights"))) {
+    return c.json({ error: "the lights plugin is not enabled for this household" }, 403);
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const args: Record<string, unknown> = {};
+  if (typeof body.target === "string" && body.target.length > 0 && body.target.length <= 64) args.target = body.target;
+  if (body.state === "on" || body.state === "off") args.state = body.state;
+  if (typeof body.brightness === "number" && body.brightness >= 0 && body.brightness <= 100) {
+    args.brightness = Math.round(body.brightness);
+  }
+  if (typeof body.color === "string" && COLOR_RE.test(body.color)) args.color = body.color;
+  if (typeof body.colorTemp === "number" && body.colorTemp >= 2000 && body.colorTemp <= 6500) {
+    args.colorTemp = Math.round(body.colorTemp);
+  } else if (body.colorTemp === "warm" || body.colorTemp === "neutral" || body.colorTemp === "cool") {
+    args.colorTemp = body.colorTemp;
+  }
+  if (typeof body.transition === "number" && body.transition >= 0 && body.transition <= 30) {
+    args.transition = body.transition;
+  }
+  if (!("state" in args) && !("brightness" in args) && !("color" in args) && !("colorTemp" in args)) {
+    return c.json({ error: "nothing to do — pass state, brightness, color, or colorTemp" }, 400);
+  }
+  const ctl = {
+    id: crypto.randomUUID(),
+    plugin: "lights",
+    op: "set",
+    args,
+    user: s.userHandle,
+    device: s.deviceLabel,
+    ts: Date.now(),
+  };
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/control", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(ctl),
+    }),
+  );
+  // Attribution ("who turned the house dark") — only ops the hub ACCEPTED;
+  // a 409/429 never reached the house and doesn't belong in the record.
+  // Best-effort, never blocks the response; prune past retention in the
+  // same stroke.
+  if (res.status === 202) {
+    c.executionCtx.waitUntil(
+      c.env.DB.batch([
+        c.env.DB.prepare(
+          "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(ctl.id, s.tenantId, s.userHandle, "lights", "set", JSON.stringify(args).slice(0, 200), ctl.ts),
+        c.env.DB.prepare("DELETE FROM control_log WHERE tenant_id = ? AND created_at < ?").bind(
+          s.tenantId,
+          ctl.ts - CONTROL_LOG_RETENTION_MS,
+        ),
+      ]),
+    );
+  }
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
 // ---- admin console (admin-role sessions only) ----------------------------------
 
 app.use("/api/admin/*", async (c, next) => {
   if (c.get("session").role !== "admin") return c.json({ error: "admin only" }, 403);
   await next();
+});
+
+// Enable/disable a plugin for this household (TNGC-40). The roster of what
+// EXISTS comes from the bridge; this only flips the tenant's switch.
+app.post("/api/admin/plugins", async (c) => {
+  let body: { plugin?: unknown; enabled?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  if (typeof body.plugin !== "string" || !PLUGIN_ID_RE.test(body.plugin)) {
+    return c.json({ error: "plugin (id) is required" }, 400);
+  }
+  if (typeof body.enabled !== "boolean") return c.json({ error: "enabled (boolean) is required" }, 400);
+  const s = c.get("session");
+  await c.env.DB.prepare(
+    `INSERT INTO tenant_plugins (tenant_id, plugin_id, enabled, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (tenant_id, plugin_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
+  )
+    .bind(s.tenantId, body.plugin, body.enabled ? 1 : 0, Date.now())
+    .run();
+  return c.json({ ok: true, plugin: body.plugin, enabled: body.enabled });
 });
 
 // ---- Computer management (TNGC-32) ----------------------------------------------
