@@ -2585,3 +2585,242 @@ body {
   color: var(--peach); font-size: 14px; text-transform: uppercase; letter-spacing: .08em;
   border: 1px dashed #444; border-radius: 8px; padding: 8px 12px; text-align: center;
 }
+
+/* ---------- Family calendar (TNGC-46) ---------- */
+.cal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 12px;
+  padding-right: 24px;
+  overflow: hidden;
+}
+.cal-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: clamp(26px, 3vw, 44px);
+  font-weight: 700;
+  color: var(--lcars-peach);
+  letter-spacing: 0.04em;
+}
+.cal-title-count {
+  font-size: clamp(13px, 1.2vw, 18px);
+  color: var(--lcars-lavender);
+  font-weight: 400;
+  letter-spacing: 0.12em;
+}
+.cal-grid-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal-dow {
+  font-size: clamp(12px, 1.1vw, 17px);
+  color: var(--lcars-blue);
+  letter-spacing: 0.14em;
+  padding: 2px 8px;
+}
+.cal-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal-cell {
+  border: 1px solid rgba(153, 153, 204, 0.25);
+  border-radius: 10px;
+  padding: 4px 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+}
+.cal-cell-blank {
+  border-color: rgba(153, 153, 204, 0.08);
+}
+.cal-cell-today {
+  border: 2px solid var(--lcars-gold);
+  background: rgba(255, 153, 0, 0.08);
+}
+.cal-daynum {
+  font-size: clamp(14px, 1.4vw, 22px);
+  font-weight: 700;
+  color: var(--lcars-gold);
+  line-height: 1.1;
+}
+.cal-cell-today .cal-daynum {
+  color: #fff;
+}
+.cal-chip {
+  font-size: clamp(11px, 1vw, 16px);
+  line-height: 1.25;
+  color: #eee;
+  background: rgba(153, 153, 204, 0.18);
+  border-left: 4px solid var(--lcars-lavender);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: none;
+}
+.cal-chip-time {
+  color: var(--lcars-gold);
+  font-weight: 700;
+  margin-right: 5px;
+}
+.cal-chip-more {
+  color: var(--lcars-blue);
+  background: none;
+  border-left-color: transparent;
+  font-style: italic;
+}
+/* category accents — chip edge + week/day rows key off the same classes */
+.cal-cat-medical { border-left-color: var(--lcars-red); }
+.cal-cat-school { border-left-color: var(--lcars-blue); }
+.cal-cat-work { border-left-color: var(--lcars-gold); }
+.cal-cat-social { border-left-color: var(--lcars-lavender); }
+.cal-cat-travel { border-left-color: var(--lcars-peach); }
+.cal-cat-birthday { border-left-color: #ff66cc; }
+.cal-cat-family { border-left-color: #66cc99; }
+.cal-cat-chore { border-left-color: #999; }
+.cal-cat-other { border-left-color: #777; }
+
+.week-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+.week-col {
+  border: 1px solid rgba(153, 153, 204, 0.25);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.week-col-today {
+  border: 2px solid var(--lcars-gold);
+  background: rgba(255, 153, 0, 0.07);
+}
+.week-col-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 10px;
+  background: rgba(153, 153, 204, 0.14);
+}
+.week-dow {
+  font-size: clamp(13px, 1.2vw, 19px);
+  color: var(--lcars-blue);
+  letter-spacing: 0.12em;
+}
+.week-col-today .week-dow {
+  color: var(--lcars-gold);
+}
+.week-date {
+  font-size: clamp(16px, 1.6vw, 26px);
+  font-weight: 700;
+  color: var(--lcars-gold);
+}
+.week-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.week-event {
+  border-left: 4px solid var(--lcars-lavender);
+  border-radius: 4px;
+  background: rgba(153, 153, 204, 0.14);
+  padding: 3px 7px;
+  font-size: clamp(12px, 1.15vw, 18px);
+  line-height: 1.3;
+}
+.week-event-time {
+  display: block;
+  color: var(--lcars-gold);
+  font-weight: 700;
+  font-size: 0.85em;
+}
+.week-event-title {
+  color: #eee;
+  overflow-wrap: anywhere;
+}
+.week-empty {
+  color: rgba(153, 153, 204, 0.4);
+  text-align: center;
+  margin-top: 10px;
+}
+
+.day-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.day-row {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  border-left: 6px solid var(--lcars-lavender);
+  border-radius: 6px;
+  background: rgba(153, 153, 204, 0.1);
+  padding: 10px 16px;
+}
+.day-row.cal-cat-medical { border-left-color: var(--lcars-red); }
+.day-row.cal-cat-school { border-left-color: var(--lcars-blue); }
+.day-row.cal-cat-work { border-left-color: var(--lcars-gold); }
+.day-row.cal-cat-social { border-left-color: var(--lcars-lavender); }
+.day-row.cal-cat-travel { border-left-color: var(--lcars-peach); }
+.day-row.cal-cat-birthday { border-left-color: #ff66cc; }
+.day-row.cal-cat-family { border-left-color: #66cc99; }
+.day-row.cal-cat-chore { border-left-color: #999; }
+.day-time {
+  flex: none;
+  min-width: 5.5em;
+  font-size: clamp(18px, 2vw, 30px);
+  font-weight: 700;
+  color: var(--lcars-gold);
+}
+.day-time-end {
+  display: block;
+  font-size: 0.7em;
+  color: var(--lcars-blue);
+  font-weight: 400;
+}
+.day-body {
+  min-width: 0;
+}
+.day-title {
+  font-size: clamp(20px, 2.2vw, 34px);
+  color: #fff;
+}
+.day-meta {
+  font-size: clamp(13px, 1.3vw, 20px);
+  color: var(--lcars-lavender);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.day-none {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(24px, 2.6vw, 40px);
+  color: var(--lcars-blue);
+}
+.cal-foot {
+  font-size: clamp(11px, 1vw, 15px);
+  color: rgba(153, 153, 204, 0.55);
+  letter-spacing: 0.2em;
+}

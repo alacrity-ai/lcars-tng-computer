@@ -131,6 +131,7 @@ and don't inline their contents here.
 | "Show that again", "back to X", any return to earlier content — even content from moments ago | `recall` |
 | "Save to my tricorder", "my saved X", "send this to Ariel", personal saved items | `library` |
 | "Make me a dashboard of X", combined status boards, no dedicated panel fits | `composite` |
+| "Show the calendar", "what's scheduled today/this week", "schedule X tomorrow at 2" | `calendar` |
 | "Set a timer/alarm", clear it, time left | `timers` |
 | "Play X", music & video, pause/stop | `media` |
 | "What's the news", headlines | `news` |

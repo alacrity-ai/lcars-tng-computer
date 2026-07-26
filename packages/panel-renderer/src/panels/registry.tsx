@@ -22,6 +22,9 @@ import { TimelinePanel } from "./TimelinePanel";
 import { ScoreboardPanel } from "./ScoreboardPanel";
 import { MathPanel } from "./MathPanel";
 import { CompositePanel } from "./CompositePanel";
+import { CalendarMonthPanel } from "./CalendarMonthPanel";
+import { ScheduleWeekPanel } from "./ScheduleWeekPanel";
+import { ScheduleDayPanel } from "./ScheduleDayPanel";
 
 function BlankPanel() {
   return null;
@@ -66,6 +69,9 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   scoreboard: ScoreboardPanel,
   math: MathPanel,
   composite: CompositePanel,
+  calendar: CalendarMonthPanel,
+  "schedule-week": ScheduleWeekPanel,
+  "schedule-day": ScheduleDayPanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

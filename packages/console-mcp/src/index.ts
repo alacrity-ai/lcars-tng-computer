@@ -11,7 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DEFAULT_SERVER_PORT, PANEL_VIEWS } from "@tng/shared";
-import { deleteItem, getItem, saveItem, searchItems, sendItem } from "@tng/library-client";
+import { cloudFetch, deleteItem, getItem, saveItem, searchItems, sendItem } from "@tng/library-client";
 
 const BASE = process.env.TNG_SERVER_URL ?? `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
 
@@ -678,6 +678,187 @@ server.registerTool(
     },
   },
   async ({ to, from }) => textResult(await call("/api/console/rename-display", { to, from })),
+);
+
+// ---- family calendar (TNGC-46) --------------------------------------------------
+// Events live in the tricorder cloud (tenant-scoped D1) behind the service
+// token; panels are composed HERE from a fresh fetch, so the model never
+// shuttles or hand-builds event JSON for rendering — display can't garble a
+// date it never touched. `list` is the deliberate exception: compact clean
+// context so the model can answer questions over the events.
+
+const CAL_TZ = process.env.TNG_TZ ?? process.env.TZ ?? "America/New_York";
+const CAL_CATEGORIES = ["medical", "school", "work", "social", "travel", "birthday", "family", "chore", "other"] as const;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+interface CalEvent {
+  id: string;
+  title: string;
+  date: string;
+  time: string | null;
+  endTime: string | null;
+  location: string | null;
+  category: string | null;
+  notes: string | null;
+  createdBy: string;
+}
+
+/** Today as YYYY-MM-DD in the HOUSE's timezone — the container's clock may
+    be UTC, and a calendar that flips days at 8pm is worse than no calendar. */
+function houseToday(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: CAL_TZ }).format(new Date());
+}
+
+function calDayTs(s: string): number {
+  const [y, m, d] = s.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+function calAddDays(s: string, n: number): string {
+  return new Date(calDayTs(s) + n * 86_400_000).toISOString().slice(0, 10);
+}
+
+function fetchEvents(from: string, to: string): Promise<{ events: CalEvent[] }> {
+  return cloudFetch("GET", `/api/calendar?from=${from}&to=${to}`);
+}
+
+/** Compact clean-context row: everything the model needs, nothing else. */
+function calRow(ev: CalEvent): Record<string, unknown> {
+  return {
+    id: ev.id,
+    date: ev.date,
+    ...(ev.time ? { time: ev.time } : {}),
+    ...(ev.endTime ? { endTime: ev.endTime } : {}),
+    title: ev.title,
+    ...(ev.location ? { location: ev.location } : {}),
+    ...(ev.category ? { category: ev.category } : {}),
+    ...(ev.notes ? { notes: ev.notes } : {}),
+  };
+}
+
+server.registerTool(
+  "calendar",
+  {
+    description:
+      "The family calendar (shared by the whole household; guests excluded). Dates are " +
+      "YYYY-MM-DD and times HH:MM 24h, house-local — resolve relative speech ('tomorrow', " +
+      "'next Tuesday', 'the 11th of next month') to concrete dates yourself before calling. " +
+      "Actions: " +
+      "display {view: month|week|day, date?, wall?} — put the calendar on the wall: month = " +
+      "the monthly grid for date's month ('show the calendar' → today's month, 'calendar for " +
+      "next month' → any date in that month), week = the week containing date starting " +
+      "Sunday ('what's scheduled this week'), day = one day's agenda ('what's scheduled " +
+      "today'). Events are fetched and composed server-side — you never pass them. " +
+      "list {from?, to?} — the events as compact JSON (defaults: today .. +60 days). Use " +
+      "for questions ('any doctor's appointments coming up?' — scan the list; the category " +
+      "field helps but is optional, so ALSO read titles/locations). " +
+      "create {title, date, time?, endTime?, location?, category?, notes?, user?} — add an " +
+      "event; user = the channel event's user (attribution). category (optional, when " +
+      "obvious): medical|school|work|social|travel|birthday|family|chore|other. Confirm " +
+      "what you scheduled, speaking the date naturally. " +
+      "update {id, ...fields} / remove {id} — change or delete (list first to find the id; " +
+      "setting time to \"\" clears it). After a write, re-display the relevant panel if one " +
+      "is on screen.",
+    inputSchema: {
+      action: z.enum(["display", "list", "create", "update", "remove"]),
+      view: z.enum(["month", "week", "day"]).optional(),
+      date: z.string().optional(),
+      wall: z.string().optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      id: z.string().optional(),
+      title: z.string().optional(),
+      time: z.string().optional(),
+      endTime: z.string().optional(),
+      location: z.string().optional(),
+      category: z.enum(CAL_CATEGORIES).optional(),
+      notes: z.string().optional(),
+      user: z.string().optional(),
+    },
+  },
+  async ({ action, view, date, wall, from, to, id, title, time, endTime, location, category, notes, user }) => {
+    const today = houseToday();
+    switch (action) {
+      case "display": {
+        const anchorRaw = date && DATE_RE.test(date) ? date : today;
+        const kind = view ?? "month";
+        let panelView: string;
+        let props: Record<string, unknown>;
+        let spoken: string;
+        if (kind === "month") {
+          const [y, m] = anchorRaw.split("-").map(Number);
+          const first = `${y}-${String(m).padStart(2, "0")}-01`;
+          const last = calAddDays(`${m === 12 ? y + 1 : y}-${String((m % 12) + 1).padStart(2, "0")}-01`, -1);
+          const { events } = await fetchEvents(first, last);
+          panelView = "calendar";
+          props = { year: y, month: m, events, today };
+          spoken = `${first.slice(0, 7)}: ${events.length} event${events.length === 1 ? "" : "s"}`;
+        } else if (kind === "week") {
+          // Sunday-start week containing the anchor.
+          const dow = new Date(calDayTs(anchorRaw)).getUTCDay();
+          const start = calAddDays(anchorRaw, -dow);
+          const end = calAddDays(start, 6);
+          const { events } = await fetchEvents(start, end);
+          panelView = "schedule-week";
+          props = { start, events, today };
+          spoken = `week of ${start}: ${events.length} event${events.length === 1 ? "" : "s"}`;
+        } else {
+          const { events } = await fetchEvents(anchorRaw, anchorRaw);
+          panelView = "schedule-day";
+          props = { date: anchorRaw, events, today };
+          spoken = `${anchorRaw}: ${events.length} event${events.length === 1 ? "" : "s"}`;
+        }
+        await call("/api/console/display", { view: panelView, props, ...(wall ? { wall } : {}) });
+        return textResult(`Calendar on the wall — ${spoken}.`);
+      }
+      case "list": {
+        const f = from && DATE_RE.test(from) ? from : today;
+        const t = to && DATE_RE.test(to) ? to : calAddDays(f, 60);
+        const { events } = await fetchEvents(f, t);
+        return textResult(JSON.stringify({ from: f, to: t, today, events: events.map(calRow) }));
+      }
+      case "create": {
+        if (!title?.trim()) throw new Error("create needs a title");
+        if (!date || !DATE_RE.test(date)) throw new Error("create needs date as YYYY-MM-DD");
+        if (time && !TIME_RE.test(time)) throw new Error("time must be HH:MM (24h)");
+        if (endTime && !TIME_RE.test(endTime)) throw new Error("endTime must be HH:MM (24h)");
+        const { event } = await cloudFetch<{ event: CalEvent }>("POST", "/api/calendar", {
+          title: title.trim(),
+          date,
+          ...(time ? { time } : {}),
+          ...(endTime ? { endTime } : {}),
+          ...(location ? { location } : {}),
+          ...(category ? { category } : {}),
+          ...(notes ? { notes } : {}),
+          createdBy: user ?? "computer",
+        });
+        return textResult(JSON.stringify(calRow(event)));
+      }
+      case "update": {
+        if (!id) throw new Error("update needs id (list first)");
+        const fields: Record<string, unknown> = {};
+        if (title !== undefined) fields.title = title;
+        if (date !== undefined) fields.date = date;
+        if (time !== undefined) fields.time = time;
+        if (endTime !== undefined) fields.endTime = endTime;
+        if (location !== undefined) fields.location = location;
+        if (category !== undefined) fields.category = category;
+        if (notes !== undefined) fields.notes = notes;
+        const { event } = await cloudFetch<{ event: CalEvent }>(
+          "POST",
+          `/api/calendar/${encodeURIComponent(id)}`,
+          fields,
+        );
+        return textResult(JSON.stringify(calRow(event)));
+      }
+      case "remove": {
+        if (!id) throw new Error("remove needs id (list first)");
+        await cloudFetch("DELETE", `/api/calendar/${encodeURIComponent(id)}`);
+        return textResult(JSON.stringify({ ok: true, removed: id }));
+      }
+    }
+  },
 );
 
 await server.connect(new StdioServerTransport());

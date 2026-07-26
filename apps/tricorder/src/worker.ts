@@ -15,6 +15,7 @@ import { Hono } from "hono";
 import { CONTRACT_VERSION, EFFORT_LEVELS, MODEL_CHOICES, MODEL_VALUE_RE, type TngMessage } from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
+import { calendarRoutes } from "./calendar";
 import { libraryRoutes } from "./library";
 import { mintPairCode, registerRoutes } from "./register";
 
@@ -216,6 +217,12 @@ async function lookupSession(env: Env, req: Request): Promise<SessionIdentity | 
 // speaks two auth planes (service token OR session); see library.ts ----------
 
 app.route("/api/library", libraryRoutes(lookupSession, hub));
+
+// ---- the family calendar (TNGC-46) — same two-plane pattern as the library:
+// service token (the house) has full CRUD, member sessions read, guests are
+// bounced; registered BEFORE the session gate because it owns its own auth.
+
+app.route("/api/calendar", calendarRoutes(lookupSession));
 
 // ---- Viewscreen mode socket (TNGC-36) — registered BEFORE the session gate:
 // browser WebSockets can't set Authorization headers, so the session token

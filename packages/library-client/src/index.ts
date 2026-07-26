@@ -104,3 +104,10 @@ export function sendItem(id: string, to: string): Promise<{ id: string; to: stri
 export function deleteItem(id: string): Promise<{ ok: boolean }> {
   return callCloud("DELETE", `/api/library/${encodeURIComponent(id)}`);
 }
+
+/** Generic service-plane call for OTHER cloud surfaces that share this
+    container's credentials (first consumer: the calendar tool, TNGC-46).
+    Same env, same auth, same error shape — just not library-shaped. */
+export function cloudFetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return callCloud<T>(method, path, body);
+}

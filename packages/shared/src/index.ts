@@ -16,7 +16,7 @@
  * component is a compile error, and the MCP tool derives its enum from it.
  * Grow this list only when the panel lands.
  *
- * Roadmap panels (now-playing, calendar, web) are deliberately absent:
+ * Roadmap panels (now-playing, web) are deliberately absent:
  * advertising them let `display` succeed while the wall showed a stub.
  */
 export const PANEL_VIEWS = [
@@ -44,9 +44,71 @@ export const PANEL_VIEWS = [
   "scoreboard",
   "math",
   "composite",
+  "calendar",
+  "schedule-week",
+  "schedule-day",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
+
+// ---------- Family calendar (TNGC-46) ----------
+
+/** Category vocabulary — color accents on the calendar panels, suggested (not
+    enforced) at event creation. The cloud stores unknown categories as null;
+    keep apps/tricorder/src/calendar.ts's copy in sync when editing. */
+export const CALENDAR_CATEGORIES = [
+  "medical",
+  "school",
+  "work",
+  "social",
+  "travel",
+  "birthday",
+  "family",
+  "chore",
+  "other",
+] as const;
+export type CalendarCategory = (typeof CALENDAR_CATEGORIES)[number];
+
+/** One event as the panels receive it. Wall-clock local: `date` is
+    YYYY-MM-DD, times are HH:MM 24h; no time = all-day. */
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  time?: string | null;
+  endTime?: string | null;
+  location?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  createdBy?: string | null;
+}
+
+/** The monthly grid. `month` is 1-12; `today` (YYYY-MM-DD) rings the current
+    day when it falls inside the displayed month. Events outside the month are
+    ignored by the renderer, so callers can pass a padded range safely. */
+export interface CalendarMonthPanelProps {
+  year: number;
+  month: number;
+  events: CalendarEvent[];
+  today?: string;
+  title?: string;
+}
+
+/** Seven day columns starting at `start` (YYYY-MM-DD, any weekday). */
+export interface ScheduleWeekPanelProps {
+  start: string;
+  events: CalendarEvent[];
+  today?: string;
+  title?: string;
+}
+
+/** One day's agenda, time-ordered (all-day items first). */
+export interface ScheduleDayPanelProps {
+  date: string;
+  events: CalendarEvent[];
+  today?: string;
+  title?: string;
+}
 
 export interface TextPanelProps {
   title?: string;
