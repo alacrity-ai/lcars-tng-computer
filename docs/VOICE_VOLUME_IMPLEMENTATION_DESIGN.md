@@ -16,6 +16,21 @@
   the media (unchanged); explicit "voice" phrasing = the voice; "quieter" with
   nothing playing = the voice.
 
+## 1b. Scope — per viewscreen (TNGC-77, 2026-07-27)
+
+Shipped house-wide ("one Computer, one voice, N mouths") and that was wrong in
+a house with more than one screen: muting at the office wall muted the bedroom
+too. The voice is now **per viewscreen**, like every other screen knob since
+TNGC-35 — `DisplayEntry.voice`, `setVoice(volume, muted, wall)` broadcasting to
+that wall alone, `voiceFor(wall)` feeding the route and `screen_state`, and a
+`wall` param on `/api/console/voice` + the MCP tool resolved by the usual
+explicit → origin → primary rule. `null` on the entry means "follow the house
+default", so an unadjusted screen isn't born at 100 in a household that keeps
+the Computer at 40; the old house-wide pair migrates into that default. A
+tricorder in Viewscreen mode is a wall by the same rule — distinct from the
+handset's own speaker toggle (TNGC-75), which never leaves the device.
+"Silence the whole house" is now one call per wall in the roster.
+
 ## 2. Persistence — the fix over the draft
 
 The Computer's draft said "store it in hub state" — memory-only, so a stack
@@ -39,7 +54,10 @@ same .cache as yt-dlp), reloaded at boot. A *setting*, not a session value.
   "voice_state", volume, muted}` (broadcast on change and to late joiners via
   `hub.add()`); `ScreenStateResponse += voice` so the agent knows it's
   speaking into silence.
-- **Server**: `voiceVolume`/`voiceMuted` on the hub + settings file;
+- **Server**: the hub's default + per-entry `voice` (TNGC-77) and the settings
+  file's `voiceByWall` (written whole — the store merges only one level deep;
+  a rename re-persists, or a restart would hand the setting back to the old
+  screen name);
   `POST /api/console/voice {action: volume|volume_up|volume_down|mute|unmute,
   level?}` mirroring the media route's validation.
 - **Wall**: a module-scope `voiceAudio {volume, muted}` (videoFullscreen

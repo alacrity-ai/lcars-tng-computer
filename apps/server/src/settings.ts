@@ -11,8 +11,15 @@ import path from "node:path";
 const FILE = path.join(import.meta.dirname, "..", ".cache", "settings.json");
 
 export interface PersistedSettings {
+  /** TNGC-27, house-wide. Superseded by `voiceByWall` (TNGC-77) and read only
+      once more, as the seed for the house default — an upgrade must not make
+      a whispering household loud again. */
   voiceVolume?: number;
   voiceMuted?: boolean;
+  /** TNGC-77: per viewscreen, and only the screens somebody set. Written
+      whole (the store merges one level deep, so a partial map would drop the
+      walls it omits). */
+  voiceByWall?: Record<string, { volume: number; muted: boolean }>;
 }
 
 export async function loadSettings(): Promise<PersistedSettings> {

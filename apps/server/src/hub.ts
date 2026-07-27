@@ -60,7 +60,18 @@ interface DisplayEntry {
       thrown away with it — a position outliving its track would draw a
       scrubber pointing at the wrong song. */
   progress: { videoId: string; position: number; duration?: number; at: number } | null;
+  /** TNGC-77: this screen's own voice level. null = follow the house default,
+      which is what a wall nobody has adjusted does — so a new screen isn't
+      born at 100 in a household that keeps the Computer down at 40. */
+  voice: VoiceState | null;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** The Computer's voice on one screen: a persistent setting, not session
+    state (TNGC-27), and per viewscreen since TNGC-77. */
+export interface VoiceState {
+  volume: number;
+  muted: boolean;
 }
 
 /**
@@ -82,10 +93,10 @@ export class DisplayHub {
   private globalWidgetSources = new Map<string, Widget[]>();
   private speakWaiters = new Map<string, () => void>();
   /** TNGC-27: the Computer's voice — a persistent setting (console routes
-      own the disk file; the hub owns the live value + broadcast). Global:
-      one Computer, one voice, N mouths. */
-  private voiceVolume = 100;
-  private voiceMuted = false;
+      own the disk file; the hub owns the live value + broadcast). Per
+      viewscreen since TNGC-77 (see DisplayEntry.voice); this is what a screen
+      nobody has adjusted uses. */
+  private defaultVoice: VoiceState = { volume: 100, muted: false };
   /** The wall of the voice command currently being served (bridge-posted at
       dispatch, cleared at turn end). THE default that makes routing work
       with zero tool-schema knowledge. */
@@ -116,6 +127,7 @@ export class DisplayHub {
         playback: null,
         paused: false,
         progress: null,
+        voice: null,
         idleTimer: undefined,
       };
       this.displays.set(name, e);
@@ -209,7 +221,8 @@ export class DisplayHub {
     this.send(socket, { type: "display", view: e.view, props: e.props });
     const widgets = this.composedWidgets(e);
     if (widgets.length > 0) this.send(socket, { type: "widgets", widgets });
-    this.send(socket, { type: "voice_state", volume: this.voiceVolume, muted: this.voiceMuted });
+    const voice = this.voiceFor(name);
+    this.send(socket, { type: "voice_state", volume: voice.volume, muted: voice.muted });
     // a screen joining mid-consolidation must show the badge too (TNGC-32)
     if (this.compacting) this.send(socket, { type: "compaction", active: true });
     // a wall reload mid-music resumes the track (position resets — accepted)
@@ -517,16 +530,38 @@ export class DisplayHub {
     this.setWidgets("nowplaying", wanted, e.name);
   }
 
-  /** TNGC-27: set + broadcast the voice setting (persistence is the console
-      route's job). One voice — every wall hears the same setting. */
-  setVoice(volume: number, muted: boolean) {
-    this.voiceVolume = Math.max(0, Math.min(100, Math.round(volume)));
-    this.voiceMuted = muted;
-    this.broadcastAll({ type: "voice_state", volume: this.voiceVolume, muted: this.voiceMuted });
+  /** TNGC-27/77: set + broadcast one screen's voice setting (persistence is
+      the console route's job). Addressed like everything else a viewscreen
+      carries — muting the office must leave the bedroom talking. */
+  setVoice(volume: number, muted: boolean, wall: string) {
+    const e = this.entry(wall);
+    e.voice = { volume: Math.max(0, Math.min(100, Math.round(volume))), muted };
+    this.broadcast({ type: "voice_state", volume: e.voice.volume, muted: e.voice.muted }, wall);
   }
 
-  get voice() {
-    return { volume: this.voiceVolume, muted: this.voiceMuted };
+  /** What this screen sounds like: its own setting, or the house default for
+      a screen nobody has adjusted. */
+  voiceFor(wall: string): VoiceState {
+    return this.entry(wall).voice ?? { ...this.defaultVoice };
+  }
+
+  /** The house default, from settings at boot (TNGC-77 migrates the old
+      house-wide value into it, so a quiet household stays quiet). Screens
+      still following the default hear the change. */
+  setDefaultVoice(volume: number, muted: boolean) {
+    this.defaultVoice = { volume: Math.max(0, Math.min(100, Math.round(volume))), muted };
+    for (const e of this.displays.values()) {
+      if (e.voice) continue;
+      this.broadcast({ type: "voice_state", ...this.defaultVoice }, e.name);
+    }
+  }
+
+  /** Only the screens somebody actually set — what belongs on disk. A wall
+      following the default must not be pinned to today's default value. */
+  voiceOverrides(): Record<string, VoiceState> {
+    const out: Record<string, VoiceState> = {};
+    for (const e of this.displays.values()) if (e.voice) out[e.name] = { ...e.voice };
+    return out;
   }
 
   /** Idle revert is OPT-IN since TNGC-64 review: content snapping back to

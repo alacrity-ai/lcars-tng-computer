@@ -172,25 +172,37 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
         histories.delete(result.from);
         histories.set(result.to, h);
       }
+      // The voice setting moved with the entry in memory; re-persist under
+      // the new key or a restart would hand it back to the old name and this
+      // screen would wake up at the house default (TNGC-77).
+      saveSettings({ voiceByWall: hub.voiceOverrides() });
       return result;
     },
   );
 
   // TNGC-27: the voice setting survives everything — load at boot, persist
-  // on every change. hub.setVoice broadcasts voice_state to the wall(s).
+  // on every change. TNGC-77: per viewscreen, so the old house-wide pair is
+  // read once more as the DEFAULT every unset screen follows; the upgrade
+  // must not make a whispering household loud again.
   void loadSettings().then((s) => {
     if (s.voiceVolume !== undefined || s.voiceMuted !== undefined) {
-      hub.setVoice(s.voiceVolume ?? 100, s.voiceMuted ?? false);
+      hub.setDefaultVoice(s.voiceVolume ?? 100, s.voiceMuted ?? false);
+    }
+    for (const [wall, v] of Object.entries(s.voiceByWall ?? {})) {
+      if (typeof v?.volume === "number") hub.setVoice(v.volume, v.muted === true, wall);
     }
   });
 
-  app.post<{ Body: { action?: string; level?: number } }>("/api/console/voice", async (req, reply) => {
+  app.post<{ Body: { action?: string; level?: number; wall?: string } }>("/api/console/voice", async (req, reply) => {
     const { action, level } = req.body ?? {};
     const actions = ["volume", "volume_up", "volume_down", "mute", "unmute"];
     if (!action || !actions.includes(action)) {
       return reply.code(400).send({ error: `action must be one of: ${actions.join(", ")}` });
     }
-    const cur = hub.voice;
+    // Routed like every other screen-touching route (TNGC-77): "quieter" in
+    // the bedroom is about the bedroom, not the whole house.
+    const wall = hub.resolveWall(req.body?.wall);
+    const cur = hub.voiceFor(wall);
     let volume = cur.volume;
     let muted = cur.muted;
     if (action === "volume") {
@@ -210,9 +222,11 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     } else if (action === "unmute") {
       muted = false;
     }
-    hub.setVoice(volume, muted);
-    saveSettings({ voiceVolume: volume, voiceMuted: muted });
-    return { ok: true, volume, muted };
+    hub.setVoice(volume, muted, wall);
+    // Written whole: the store merges one level deep, so half a map would
+    // silently forget the walls it left out.
+    saveSettings({ voiceByWall: hub.voiceOverrides() });
+    return { ok: true, volume, muted, wall };
   });
 
   // Full (view, title, props) of what the wall shows RIGHT NOW — the library
@@ -665,7 +679,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     async (req): Promise<ScreenStateResponse> => {
       const wall = hub.resolveWall(req.query?.wall);
       const s = hub.stateFor(wall);
-      const extras = { voice: hub.voice, playback: hub.playbackState(wall) };
+      const extras = { voice: hub.voiceFor(wall), playback: hub.playbackState(wall) };
       if (s.view === "article" && Array.isArray(s.props.paragraphs)) {
         const pages = paginateArticle(s.props.paragraphs as string[]);
         const page = Math.min(Math.max(Number(s.props.page ?? 1), 1), pages.length);

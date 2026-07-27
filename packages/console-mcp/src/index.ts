@@ -295,13 +295,18 @@ server.registerTool(
       "level). This is a PERSISTENT setting (survives restarts) unlike per-video media " +
       "volume. Disambiguation: 'turn it down' while media plays = the media tool; explicit " +
       "'voice'/'your voice' = this tool; 'quieter' with nothing playing = this tool. " +
-      "Alarms and red alerts sound even when the voice is muted.",
+      "Alarms and red alerts sound even when the voice is muted. PER VIEWSCREEN: the " +
+      "setting belongs to one screen (the speaker's, unless they name another room), so " +
+      "muting where you are leaves the rest of the house talking — to quiet everywhere, " +
+      "call this once per wall in screen_state's roster.",
     inputSchema: {
       action: z.enum(["volume", "volume_up", "volume_down", "mute", "unmute"]),
       level: z.number().min(0).max(100).optional(),
+      wall: z.string().optional(),
     },
   },
-  async ({ action, level }) => textResult(await call("/api/console/voice", { action, level })),
+  async ({ action, level, wall }) =>
+    textResult(await call("/api/console/voice", { action, level, wall })),
 );
 
 server.registerTool(

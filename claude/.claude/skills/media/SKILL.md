@@ -74,6 +74,13 @@ Disambiguation: "turn it down" while media plays = media volume; explicit
 "voice"/"your voice" = voice; "quieter" with nothing playing = voice.
 Alarms and red alerts sound regardless of voice mute.
 
+The setting is **per viewscreen** (TNGC-77), like every other screen knob:
+it lands on the speaker's own wall unless they name a room (`wall`), so
+muting the office leaves the bedroom talking and a tricorder in Viewscreen
+mode mutes only that phone. "Silence everywhere" means one call per wall in
+`screen_state`'s roster — say so rather than muting one screen and claiming
+the house is quiet.
+
 ## Play now vs. queue — the intent call
 
 The queue is **opt-in**. Something already playing does NOT mean a new
