@@ -120,7 +120,25 @@ npm run dev
 
 Watch for TypeScript errors. The type system guarantees the wall can render what you send.
 
-### 6. Teach the Computer to use it — write or update a skill
+### 6. Rebuild the viewscreen stage — the wall is only half the audience
+
+The wall runs Vite in dev (HMR picks the panel up; an already-open kiosk tab
+may need one reload). The **Tricorder viewscreen** does not: it renders from a
+**prebuilt, deployed** bundle of the same package. Skip this and the panel
+works on the wall while every phone in Viewscreen mode shows
+*"Panel <view> is not yet installed"*:
+
+```bash
+pnpm -C apps/tricorder build:vs      # rebuilds public/vs/ (gitignored artifact)
+cd apps/tricorder && CLOUDFLARE_API_TOKEN=$(agentsecrets get cloudflare_api_token) \
+  CLOUDFLARE_ACCOUNT_ID=$(agentsecrets get cloudflare_account_id) pnpm exec wrangler deploy
+```
+
+**Any change to `packages/panel-renderer` — new panel, restyle, bug fix —
+needs this.** It is not part of `wrangler deploy`; the deploy just uploads
+whatever `public/vs/` currently holds. (Learned the hard way in TNGC-57.)
+
+### 7. Teach the Computer to use it — write or update a skill
 
 Runtime usage rules live in `claude/.claude/skills/`, NOT in CLAUDE.md (which
 holds only persona and reflexes — see its "Where knowledge lives" section).

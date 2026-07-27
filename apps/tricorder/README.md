@@ -63,6 +63,11 @@ Day-to-day user/password management lives in the PWA's admin console
 
 ```bash
 cd apps/tricorder
+# FIRST, if anything in packages/panel-renderer changed (new panel, restyle,
+# fix): rebuild the viewscreen stage. `wrangler deploy` only uploads whatever
+# public/vs/ already holds — a stale bundle ships a "not yet installed" stub to
+# every phone in Viewscreen mode while the wall looks fine (TNGC-57).
+pnpm build:vs
 CLOUDFLARE_API_TOKEN=$(agentsecrets get cloudflare_api_token) \
 CLOUDFLARE_ACCOUNT_ID=$(agentsecrets get cloudflare_account_id) \
   pnpm exec wrangler deploy

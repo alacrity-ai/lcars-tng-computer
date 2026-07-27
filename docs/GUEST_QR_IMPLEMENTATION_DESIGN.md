@@ -287,11 +287,17 @@ member).
 ## Landing
 
 1. Merge to `main` (repo persona `leifktaylor`, GitHub `alacrity-ai/lcars-tng-computer`).
-2. `wrangler d1 migrations apply tricorder --remote` then `wrangler deploy`
+2. **`pnpm -C apps/tricorder build:vs`** — rebuild the viewscreen stage. This
+   bit me: `public/vs/` is a gitignored prebuilt bundle of `panel-renderer`,
+   `wrangler deploy` just uploads whatever is sitting there, so the first
+   deploy shipped a stale renderer and every phone in Viewscreen mode showed
+   *"Panel qr is not yet installed"* while the wall was fine. Now written into
+   `docs/sops/adding-new-panels.md` step 6 and the tricorder README.
+3. `wrangler d1 migrations apply tricorder --remote` then `wrangler deploy`
    (creds per `apps/tricorder/README.md`).
-3. The wall picks the panel up from Vite HMR; a full `make dev` restart is only
-   needed if the container is rebuilt.
-4. **The Computer session must be restarted (`make computer`) to see the new
+4. The wall picks the panel up from Vite HMR; a kiosk tab that was already open
+   when the panel landed needs one reload (or a stack restart).
+5. **The Computer session must be restarted (`make computer`) to see the new
    `guest_qr` tool and the `guests` skill** — MCP tool lists are read at launch.
 
 ## Deferred (not this ticket)
