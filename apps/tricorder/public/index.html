@@ -215,12 +215,26 @@
   .tp-btn:active { transform: scale(.92); filter: brightness(1.2); }
   .tp-btn[disabled] { opacity: .25; border-color: #555; color: #777; pointer-events: none; }
   .tp-btn.play { width: 54px; height: 54px; background: var(--gold); color: var(--ink); border-color: var(--gold); }
-  .tp-meta { flex: 1; min-width: 0; }
+  /* The label is a doorway into the full player (TNGC-71) — a button, not a
+     div, so it is reachable by keyboard and reads as tappable to a screen
+     reader the way it looks to an eye. */
+  .tp-meta {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+    background: none; border: 0; padding: 4px 2px; margin: 0; font: inherit;
+    color: inherit; text-align: left; cursor: pointer; border-radius: 10px;
+    transition: background .15s;
+  }
+  .tp-meta:active { background: #1b1b28; }
+  .tp-meta-text { flex: 1; min-width: 0; }
+  .tp-chev { flex: none; color: #555; }
   .tp-title {
-    color: var(--peach); font-size: 13px; font-weight: 700;
+    display: block; color: var(--peach); font-size: 13px; font-weight: 700;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .tp-sub { color: #777; font-size: 10px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tp-sub {
+    display: block; color: #777; font-size: 10px; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .tp-wall {
     flex: none; color: var(--blue); font-size: 10px; font-weight: 700; text-transform: uppercase;
     border: 1px solid #2a2a3a; border-radius: 10px; padding: 4px 8px;
@@ -970,10 +984,15 @@
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
               <path d="M5 5.5v13L14.5 12z"/><path d="M15.5 5H18v14h-2.5z"/></svg>
           </button>
-          <div class="tp-meta">
-            <div class="tp-title" id="tp-title"></div>
-            <div class="tp-sub" id="tp-sub"></div>
-          </div>
+          <button class="tp-meta" id="tp-meta" aria-label="Open the media player">
+            <span class="tp-meta-text">
+              <span class="tp-title" id="tp-title"></span>
+              <span class="tp-sub" id="tp-sub"></span>
+            </span>
+            <svg class="tp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+              stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6"/></svg>
+          </button>
           <span class="tp-wall" id="tp-wall" hidden></span>
         </div>
         <div class="toggle-row">
@@ -1644,6 +1663,11 @@ async function mediaOp(op, extra) {
 
 $("tp-prev").onclick = () => mediaOp("prev");
 $("tp-next").onclick = () => mediaOp("next");
+// Tapping the track label opens the full player on the wall the bar is
+// driving (TNGC-71). The bar only exists when the plugin is enabled and this
+// session may use it, so reaching the screen this way needs no extra check —
+// the same gate that drew the label authorized the screen behind it.
+$("tp-meta").onclick = () => openMd({ from: "main", wall: tpWall });
 $("tp-play").onclick = () => {
   // Flip locally first: a transport button that waits a round trip feels dead.
   const paused = $("tp-play-icon").innerHTML.includes("15L");
@@ -4100,16 +4124,27 @@ $("btn-fl-delete").onclick = async () => {
 // tap-to-jump, loop, volume. Same deterministic plane as the transport bar —
 // no op here ever wakes the Computer. State is bridge-reported, so the screen
 // polls (3s) rather than guessing; taps paint optimistically for one beat.
-let mdTimer = null, mdWall = null, mdState = null, mdOptimistic = 0;
+let mdTimer = null, mdWall = null, mdState = null, mdOptimistic = 0, mdBackTo = "plugins";
 
-function openMd() {
+/** opts.from: where Back should return to — the plugin grid when opened from
+    the tile, the main screen when opened from the transport bar's label, so
+    Back always undoes the step that got you here. opts.wall pins the screen
+    to the wall the label was showing. */
+function openMd(opts) {
+  mdBackTo = (opts && opts.from) || "plugins";
+  if (opts && opts.wall) mdWall = opts.wall;
   show("md");
+  $("btn-mdback").textContent = mdBackTo === "main" ? "◀ Back" : "◀ Plugins";
   $("md-err").textContent = "";
   stopMdPoll();
   pollMd();
   mdTimer = setInterval(pollMd, 3000);
 }
-$("btn-mdback").onclick = () => { stopMdPoll(); openPlugins(); };
+$("btn-mdback").onclick = () => {
+  stopMdPoll();
+  if (mdBackTo === "main") { show("main"); pollStatus(); }
+  else openPlugins();
+};
 function stopMdPoll() { if (mdTimer) { clearInterval(mdTimer); mdTimer = null; } }
 
 async function pollMd() {
