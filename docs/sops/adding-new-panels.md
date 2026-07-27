@@ -7,6 +7,20 @@ A panel is a React component displayed on the LCARS wall. The Computer sends it 
 > both render from that one package, so a panel is written once and appears on
 > both. Styles are one file: `packages/panel-renderer/src/lcars.css`.
 
+## Where a panel actually has to land
+
+Writing the component is step one of **three surfaces**, and they ship by
+completely different routes. Miss one and the panel looks finished while being
+broken somewhere you weren't looking:
+
+| Surface | How it gets your code | Miss it and… |
+|---|---|---|
+| **The wall** (`apps/web`) | imports `panel-renderer` **as source** through Vite — appears the moment you save | (a kiosk tab that was already open still holds the old bundle: reload it) |
+| **The Tricorder viewscreen** (`apps/tricorder/renderer`) | a **prebuilt bundle** in `apps/tricorder/public/vs/`, uploaded by `wrangler deploy`, which does **not** build it | every phone in Viewscreen mode draws *"Panel `<view>` is not yet installed"* while the wall is fine (TNGC-57 shipped exactly this) |
+| **The Computer's reach** (`claude/.claude/skills/`) | a skill that tells the model when to use it | the panel exists and nothing ever displays it (this happened to `news`) |
+
+Steps 6 and 7 below are those last two. They are not optional polish.
+
 ## Pattern overview
 
 Panels are built across **three layers** that must stay in sync:
@@ -15,6 +29,11 @@ Panels are built across **three layers** that must stay in sync:
 3. **Registry** (`packages/panel-renderer/src/panels/registry.tsx`) — wire it up
 
 The registry is typed as a total `Record<PanelView, ComponentType>`, so adding a view name without building a component **will not compile**. This guarantee means `display` can never advertise a panel the wall can't draw.
+
+**What that guarantee does NOT cover:** it is a *compile-time* check against the
+`PanelView` union. A deployed viewscreen bundle built before your panel existed
+still renders the `UnknownPanel` stub at runtime — the type system can't reach
+an artifact that was compiled last week. Hence step 6.
 
 ## Step-by-step
 
@@ -138,6 +157,17 @@ cd apps/tricorder && CLOUDFLARE_API_TOKEN=$(agentsecrets get cloudflare_api_toke
 needs this.** It is not part of `wrangler deploy`; the deploy just uploads
 whatever `public/vs/` currently holds. (Learned the hard way in TNGC-57.)
 
+Verify it actually shipped, rather than assuming — the bundle is
+content-hashed, so this is one command:
+
+```bash
+VS=$(curl -s https://myhome.computer/vs/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js')
+curl -s "https://myhome.computer/vs/$VS" | grep -c "<your panel's class name>"
+```
+
+A phone that already had the PWA open needs one reload; the service worker
+does no caching, so that's enough.
+
 ### 7. Teach the Computer to use it — write or update a skill
 
 Runtime usage rules live in `claude/.claude/skills/`, NOT in CLAUDE.md (which
@@ -160,6 +190,37 @@ the `news` panel; don't repeat it.)
 - **Forgetting to export the component as named export**: The registry import will fail
 - **Not handling missing/empty data**: A panel that crashes on incomplete props will crash the wall
 - **CSS that assumes a specific viewport size**: The LCARS display is full-screen; use responsive units
+- **"It works on the wall" ≠ it works**: the wall reads source, the viewscreen reads a built artifact. Do step 6 (TNGC-57)
+- **A panel that encodes something perishable** (a login code, a signed URL, anything with an expiry) must render its own dead state — the Library and `recall` can put it back on the wall long after the thing it shows stopped working. The `qr` panel counts down `expiresAt` and flips to EXPIRED for exactly this reason, and the `guests` skill forbids saving one
+
+### Proving a panel renders, without a wall
+
+Two checks worth the five minutes, both used to land `qr` (TNGC-57):
+
+**Headless render of the real component** — catches crashes on edge-case props
+that TypeScript can't see (the model sends what it sends):
+
+```bash
+# a throwaway entry under apps/web/src (inside the tsconfig's include, so JSX
+# compiles), rendered with vite's own SSR build, then deleted
+pnpm -C apps/web exec vite build --ssr src/your-smoke.tsx --outDir .smoke && \
+  node apps/web/.smoke/your-smoke.js
+```
+
+Feed it the ugly cases deliberately: empty, missing, wrong type, oversized,
+unicode. Every one must render *something* legible rather than throw.
+
+**Real render on a real display** — `POST /api/console/display` with your view
+to a named wall, check `/api/console/screen`, then put the wall back:
+
+```bash
+curl -s -X POST http://127.0.0.1:3789/api/console/display -H 'content-type: application/json' \
+  -d '{"view":"my-panel","wall":"office","props":{…}}'
+curl -s -X POST http://127.0.0.1:3789/api/console/display -H 'content-type: application/json' \
+  -d '{"view":"boot","props":{},"wall":"office"}'   # restore it
+```
+
+Use a *side* wall, not the primary, and restore it — someone may be looking.
 
 ## Prebuilt SVG assets — the diagram cache
 

@@ -21,7 +21,7 @@ Design rationale and the full security model: [`../PLUGIN_SYSTEM_DESIGN.md`](../
                          talks to the hardware/world
 ```
 
-Five extension points, all optional, all declared in one manifest:
+Six extension points, all optional, all declared in one manifest:
 
 | Extension point | Mechanism | Runs where |
 |---|---|---|
@@ -30,6 +30,7 @@ Five extension points, all optional, all declared in one manifest:
 | **MCP tool(s)** | Merged into the generated `claude/.mcp.json` at boot | INSIDE the fenced brain |
 | **Skills** | Synced as `plugin-<id>-<name>` at boot | Brain's skill dir |
 | **Wall panels** | The `composite` block language, POSTed by your service | The wall renders; **no plugin code ever executes in the wall** |
+| **Tricorder face** (step 7) | Bridge roster + Worker endpoints + a PWA screen; the tile's look comes from the manifest | Phone → Worker → bridge → your service, **skipping the brain** |
 
 The loader is `docker/plugin-merge.sh` — it runs in BOTH computer entrypoints
 (dev + appliance) before `init-firewall.sh`, is driven entirely by
@@ -37,6 +38,39 @@ The loader is `docker/plugin-merge.sh` — it runs in BOTH computer entrypoints
 scratch every boot**: an enabled plugin is exactly `TNG_PLUGINS`; a disabled
 plugin leaves ZERO trace (no tool, no skill, no fence hole, no container). A
 broken manifest is skipped loudly — a plugin must never brick boot.
+
+## Three kinds of plugin — decide which you are FIRST
+
+The diagram above is the house-side case. It is no longer the only one, and
+the kind determines what you build, where the code lives, and — the part
+households actually feel — **whether it still works when the Computer is off**.
+
+| Kind | Exemplar | Where the work happens | Alive when the Computer is off? | Manifest? |
+|---|---|---|---|---|
+| **Sidecar** | `plugins/lighting/` | Your container on the compose network; the brain reaches it through a pinpoint fence hole | ✗ — the bridge is the only path in | yes, the full one |
+| **Host service** | `plugins/claudeops/` | A process on the HOST, outside every fence; the plugin declares only the hole to it (`host.docker.internal:PORT`) and flags the bridge with an env var | ✗ | yes, but no `compose.yaml` services of its own |
+| **Cloud-native** | `calendar` (TNGC-52) | Behind the Worker itself — D1/R2, no bridge, no sidecar | **✓ always online** | **none** — it has no folder in `plugins/` |
+
+Choosing:
+
+- Does it touch **hardware, the LAN, or the host**? → sidecar (or host service
+  if the process must live outside the fences, like a tmux session).
+- Is it **household data with no local dependency** (a calendar, a list, a
+  budget)? → cloud-native. It survives a power cut to the office box, phones
+  keep working on the road, and it needs no fence holes at all.
+- Split systems are fine and normal: `lights` is a sidecar plugin whose
+  *deterministic* controls skip the brain entirely (step 7) while its *spoken*
+  controls go through the MCP tool.
+
+**A cloud-native plugin does not use this SOP's steps 1–6.** It has no
+manifest, no loader entry, and `TNG_PLUGINS` has nothing to do with it. It is:
+routes in `apps/tricorder/src/<name>.ts`, a migration, an entry in
+`CLOUD_PLUGINS` in `apps/tricorder/src/worker.ts` (id + name + `online: true` +
+its tile, since there's no manifest to read one from), a PWA screen, and —
+if the Computer should be able to speak it too — an MCP tool in
+`packages/console-mcp` that reaches the cloud with the tenant service token
+via `cloudFetch` (see the `calendar` tool). It still respects the same
+household switch: `tenant_plugins` + the admin's Enable-plugins sheet.
 
 ## Hard rules (learned the hard way — do not relearn them)
 
@@ -76,7 +110,7 @@ plugins/<id>/
     package.json
     src/
   mcp/
-    server.mjs         # MCP server, zero-dependency (see step 4)
+    server.mjs         # MCP server, zero-dependency (see step 5)
   skills/<name>/
     SKILL.md
   README.md            # what it needs, how to enable, ops procedures
@@ -228,7 +262,7 @@ State-cache lessons (these WILL bite you otherwise):
   `stop_colorloop` before any color-intent command). The model cannot fix
   what it cannot see.
 - **Reconnect forever**: broker restarts must self-heal (mqtt.js
-  `reconnectPeriod`, re-probe on connect). Test it (step 7).
+  `reconnectPeriod`, re-probe on connect). Test it (step 8).
 
 ## Step 4 — the wall panel (composite)
 
@@ -333,7 +367,79 @@ plugin is disabled. Never touch core `claude/CLAUDE.md` — plugin capability
 must vanish with the plugin. (`claude/.claude/skills/plugin-*/` is gitignored;
 the copy in your plugin folder is the source of truth.)
 
-## Step 7 — the verification battery
+## Step 7 — the tricorder face (optional, and NOT manifest-driven)
+
+Steps 1–6 buy you a plugin the *brain* can drive. Appearing on the phone's
+plugin grid — where a tap reaches your service **without waking the model** —
+is a separate, deliberate build. The manifest supplies the tile's look and
+nothing else; every wire below is hand-written in core, once per plugin.
+
+Know this before you start: **it is five edits in four repos-worth of code.**
+That is the price of a control plane that answers in 200 ms with the brain
+mid-turn, and of a cloud that can never be talked into an op the house didn't
+declare.
+
+```
+phone → POST /api/plugins/<id>/control ──▶ Worker: validate + REBUILD args
+                                             │  (never a pass-through)
+                                             ▼ control frame down the link
+                                          bridge: validate AGAIN, rebuild
+                                             ▼ HTTP
+                                          your service
+```
+
+1. **Bridge — roster + probe** (`packages/bridge/src/index.ts`)
+   - probe your service's `/health` on a timer; keep an `online` flag and a
+     cached state object
+   - add an entry to `pluginRoster()`, and push `plugins` / `plugin_state`
+     up-frames when either changes (the cloud never guesses what a house has)
+   - **the roster id is not automatically your folder name.** The `lighting`
+     plugin exposes the control-plane plugin `lights`; the tile lookup reads
+     `plugins/<folder>/plugin.json`, so a mismatched id silently costs your
+     plugin its color. Add the pair to `TILE_MANIFEST_DIR` when they differ
+     (TNGC-58 shipped grey once for exactly this).
+2. **Contract** (`packages/contract/src/index.ts`) — extend `PluginStatus` /
+   the frame types only if your plugin needs a shape the existing ones can't
+   carry. Additive and optional, so an older bridge still rosters.
+3. **Worker** (`apps/tricorder/src/worker.ts`) — `GET /api/plugins/<id>/state`
+   and `POST /api/plugins/<id>/control`. Non-negotiable rules, all visible in
+   the `lights` and `claudeops` handlers:
+   - gate on `pluginEnabled(tenant, id)` — the household switch, not a global
+   - gate on role. **Guests never reach a plugin** (the identity is shared, so
+     attribution is impossible). Anything that can touch the host — like
+     `claudeops`, which drives a `--dangerously-skip-permissions` session —
+     is **admin only on read as well as write**, because the state payload is
+     itself sensitive.
+   - **validate and REBUILD every arg.** Free-form JSON must never ride a
+     control frame; construct a fresh object from checked primitives.
+   - log accepted ops to `control_log` with the caller's handle (`who turned
+     the house dark`), best-effort, never blocking the response, pruning past
+     retention in the same stroke.
+4. **PWA** (`apps/tricorder/public/index.html`) — a `view-<id>` screen, an
+   `open<Id>()` opener wired in `openPlugins()`'s tap handler, a poll while
+   the screen is open and stopped in `logout()`. Render **reported** state
+   (the bridge re-reads after each op); a tap gets optimistic paint only until
+   the next poll.
+5. **Manifest** — the `ui` block from step 1 gives the tile its color and
+   glyph. Nothing else about the grid is yours to edit.
+
+Enablement is per household and per plugin: the admin's **Enable plugins**
+sheet writes `tenant_plugins`, and every endpoint above checks it. A plugin
+that exists, is online, and is switched off is invisible — that is the switch
+working.
+
+### Which restart applies to what
+
+The single most common "I shipped it and nothing changed":
+
+| You changed | It takes effect on |
+|---|---|
+| Plugin manifest, MCP server, bridge, skills | **`make computer`** — the session spawns MCP servers and the bridge at launch and holds their schemas/reads |
+| Your sidecar service | restart that container alone |
+| Worker routes, cloud plugin, PWA | `wrangler deploy`, then **reload the PWA** |
+| Anything in `packages/panel-renderer` | `pnpm -C apps/tricorder build:vs` **and then** deploy — see [adding-new-panels.md](adding-new-panels.md) |
+
+## Step 8 — the verification battery
 
 Run ALL of these before calling it landed (lighting's exact drills, in
 order — every one caught something at least once):
@@ -382,15 +488,28 @@ docker compose exec -T -e TNG_PLUGINS=<id> \
 
 # 9. service restart amnesia — restart YOUR service alone; /state must
 #    re-warm itself (retained topics + your probe), not report empty/off
+
+# 10. tricorder face (only if you built step 7) — the tile lookup is the
+#     trap: assert every id your roster can EMIT resolves a real manifest,
+#     not just that the manifest you hand the parser is valid.
+docker compose exec -T -w /home/node/tng-computer/packages/bridge stack \
+  npx tsx -e 'import {pluginTile} from "./src/index.js";
+    for (const id of ["lights","<your roster id>"])
+      console.log(id, pluginTile(id) ?? "NO TILE — check TILE_MANIFEST_DIR")'
+#     then, against a local worker: guest → 403, member → 403 if admin-only,
+#     enabled=false → 403, and a control op with junk args → 400 (never a
+#     pass-through to your service)
 ```
 
 Then the live pass: `TNG_PLUGINS=<id> make computer`, check the boot banner
-(`[plugins] <id> vX.Y.Z — mcp: …, skills: …, fence: …`), drive the tool by
+(`[plugins] <id> vX.Y.Z — mcp: …, skills: …, fence: …, ui ✓` — `ui MISSING`
+means the tile will be grey), drive the tool by
 voice, watch the panel refresh in place — and verify **physical reality
 matches reported state**, not just that commands return 200 (see: optimistic
-upstreams).
+upstreams). If you built a tricorder face, open the plugin grid on a phone and
+confirm your tile carries **your** color, not the grey fallback.
 
-## Step 8 — enabling & shipping
+## Step 9 — enabling & shipping
 
 - **Dev**: `TNG_PLUGINS=<id> make dev` + `TNG_PLUGINS=<id> make computer`
   (comma-separate multiple ids).
@@ -406,11 +525,34 @@ upstreams).
   groups) are **cards on the household board, not commits** — code defines
   capability; volumes hold reality.
 
-## Reference
+## Reference — one exemplar per kind
 
-`plugins/lighting/` is the exemplar for every pattern above: sidecar
-first-boot seeding (zigbee2mqtt config), state mirroring + startup probes,
-panel with visibility-marker refresh, zero-dep MCP server, routing skill,
-scenes/effects with server-side conflict resolution, and a README whose
-naming contract survived a hardware scale-out. When in doubt, do what
-lighting does.
+**`plugins/lighting/` — the sidecar plugin, and the exemplar for steps 1–8.**
+Sidecar first-boot seeding (zigbee2mqtt config), state mirroring + startup
+probes, panel with visibility-marker refresh, zero-dep MCP server, routing
+skill, scenes/effects with server-side conflict resolution, a tricorder face
+with a full control screen, and a README whose naming contract survived a
+hardware scale-out. When in doubt, do what lighting does.
+
+**`plugins/claudeops/` — the host-service plugin.** No sidecars of its own:
+the agent runs on the HOST (launched from the `claude_ops` repo), and the
+manifest's entire job is declaring the pinpoint hole to
+`host.docker.internal:7102` plus the env flag that tells the bridge the
+plugin exists. Read it when your capability can't live inside a fence. It is
+also the reference for an **admin-only** face — read *and* write — because
+its state payload exposes a skip-permissions session.
+
+**`calendar` (TNGC-52) — the cloud-native plugin.** No folder in `plugins/`
+at all: routes in `apps/tricorder/src/calendar.ts`, a D1 migration, an entry
+in `CLOUD_PLUGINS`, PWA screens, three wall panels in `panel-renderer`, and a
+`calendar` MCP tool in `packages/console-mcp` that reaches the cloud with the
+service token. Read it when the capability is household *data* — it keeps
+working with the Computer unplugged, which is the whole reason the kind
+exists.
+
+**Two traps that have already cost a shipped release** (don't relearn them):
+a roster id that isn't the plugin folder name silently greys your tile
+(step 7.1), and a `panel-renderer` change that isn't followed by
+`build:vs` + deploy works on the wall while every phone in Viewscreen mode
+draws a "not yet installed" stub
+([adding-new-panels.md](adding-new-panels.md) step 6).
