@@ -22,6 +22,31 @@ const OFFLINE = "Lighting control is offline.";
 
 const log = (m) => console.error(`[lighting] ${m}`);
 
+/**
+ * Fabric order: room alphabetically, then fixture within the room — numeric,
+ * so fan-10 follows fan-9 instead of fan-1.
+ *
+ * Z2M hands devices back in JOIN order, which dumps every newly paired bulb at
+ * the bottom of the tricorder's list, away from the room it belongs to
+ * (living-room/lamp, 2026-07-27). Sorting once here fixes BOTH surfaces: the
+ * phone renders this array directly, and the wall's byRoom() Map takes its
+ * section order from the same array's insertion order.
+ */
+const NAME_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+/** ["living-room", "lamp"] — or ["\uffff", name] for a device with no room,
+    which sorts a freshly paired 0x… bulb to the end instead of interleaving. */
+function splitFixture(name) {
+  const i = String(name ?? "").indexOf("/");
+  return i < 0 ? ["\uffff", String(name ?? "")] : [name.slice(0, i), name.slice(i + 1)];
+}
+
+function byRoomThenFixture(a, b) {
+  const [ra, fa] = splitFixture(a.friendly_name);
+  const [rb, fb] = splitFixture(b.friendly_name);
+  return NAME_COLLATOR.compare(ra, rb) || NAME_COLLATOR.compare(fa, fb);
+}
+
 // ---------------------------------------------------------------- fabric cache
 const cache = {
   bridge: "offline", // zigbee2mqtt/bridge/state
@@ -85,7 +110,7 @@ client.on("message", (topic, buf) => {
   }
   if (sub === "bridge/devices") {
     const list = json();
-    if (Array.isArray(list)) cache.devices = list.filter((d) => d.type !== "Coordinator");
+    if (Array.isArray(list)) cache.devices = list.filter((d) => d.type !== "Coordinator").sort(byRoomThenFixture);
     probeStates();
     scheduleRefresh();
     return;
