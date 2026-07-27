@@ -34,7 +34,7 @@ const TOOL = {
       },
       scene: {
         type: "string",
-        description: "Scene name for action=scene: evening | movie | all-off | red-alert | party",
+        description: "Scene name for action=scene: default | evening | movie | all-off | red-alert | party | reset. `default` is the bulbs' own bright off-white — the house baseline for \"I just need to see things\". `reset` is the recovery path for a stuck or strobing bulb, not a look.",
       },
       effect: {
         type: "string",
