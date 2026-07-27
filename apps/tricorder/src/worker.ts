@@ -664,7 +664,9 @@ async function sendLightsOp(
 /** Ops a phone may send. Args are validated and REBUILT here, re-validated
     bridge-side, and every one of them maps to a wall-server route that
     already existed — this plane adds verbs, never new authority. */
-const MEDIA_OPS = ["next", "prev", "pause", "play", "stop", "volume_up", "volume_down", "jump", "loop"];
+const MEDIA_OPS = [
+  "next", "prev", "pause", "play", "stop", "volume_up", "volume_down", "jump", "loop", "clear",
+];
 const MEDIA_MAX_QUEUE = 25;
 
 async function mediaGate(c: Context<{ Bindings: Env; Variables: Vars }>): Promise<Response | null> {

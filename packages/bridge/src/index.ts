@@ -1469,6 +1469,32 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
       path = "/api/console/media";
       body = { action: ctl.op };
     }
+    // "Clear everything" is two server calls, so it is ONE op rather than two
+    // frames: the phone can't half-apply it, it lands as a single attributed
+    // action, and there is no window where playback stopped but the queue
+    // survived. Stop first — clearing under a live player would just let the
+    // queue drain into it.
+    if (ctl.op === "clear") {
+      const post = async (p: string, b: Record<string, unknown>) => {
+        if (wall) b.wall = wall;
+        const res = await fetch(`${SERVER_URL}${p}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(b),
+          signal: AbortSignal.timeout(8_000),
+        });
+        return res.status;
+      };
+      try {
+        const s1 = await post("/api/console/media", { action: "stop" });
+        const s2 = await post("/api/console/queue", { action: "clear" });
+        console.error(`[bridge] media clear by ${ctl.user}/${ctl.device} → stop ${s1}, clear ${s2}`);
+      } catch (err) {
+        console.error(`[bridge] media clear failed: ${(err as Error).message}`);
+      }
+      setTimeout(() => void pollMedia(true), 900).unref();
+      return;
+    }
     if (!path || !body) {
       console.error(`[bridge] refused media control ${ctl.op} from ${ctl.user} — invalid op or args`);
       return;

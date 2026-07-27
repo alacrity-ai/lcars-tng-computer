@@ -1212,6 +1212,10 @@
         <button class="btn small lav" id="md-loop">Loop</button>
         <button class="btn small red" id="md-stop">Stop</button>
       </div>
+      <!-- The reset: Stop halts what's playing and leaves up-next alone;
+           this empties the whole session. Separated from the row above so a
+           thumb reaching for Stop can't land on it. -->
+      <button class="btn red" id="md-clear">Clear queue &amp; stop everything</button>
     </div>
     <div id="md-list"></div>
     <div class="muted" id="md-hint"></div>
@@ -4212,6 +4216,9 @@ function renderMd() {
   $("md-prev").disabled = !(w && w.history && w.history.length);
   $("md-next").disabled = !(w && w.queue && w.queue.length);
   $("md-loop").style.opacity = w && w.loop ? "1" : ".55";
+  // Nothing to reset once the session is empty — greying it also confirms
+  // the clear landed, without a toast.
+  $("md-clear").disabled = !w || (!now && !(w.queue && w.queue.length));
 
   // One list, in listening order: what played (dimmed), what plays, what's next.
   const list = $("md-list");
@@ -4292,6 +4299,15 @@ $("md-play").onclick = () => {
 $("md-vup").onclick = () => mdOp("volume_up");
 $("md-vdown").onclick = () => mdOp("volume_down");
 $("md-stop").onclick = () => mdOp("stop");
+$("md-clear").onclick = () => {
+  // Confirm: a queue is often minutes of voice work, and nothing here undoes.
+  const w = mdCurrent();
+  const n = w && w.queue ? w.queue.length : 0;
+  const what = n ? "Stop playback and clear " + n + " queued track" + (n === 1 ? "" : "s") + "?"
+                 : "Stop playback and clear the queue?";
+  if (!confirm(what)) return;
+  mdOp("clear");
+};
 $("md-loop").onclick = () => {
   const w = mdCurrent();
   mdOp("loop", { enabled: !(w && w.loop) });
