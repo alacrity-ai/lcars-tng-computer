@@ -1806,18 +1806,41 @@ function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
 function forwardDisplayClient(name: string, msg: unknown): void {
   const entry = tricorderDisplays.get(name);
   if (!entry?.ws || entry.ws.readyState !== WebSocket.OPEN) return;
-  const m = msg as { type?: unknown; videoId?: unknown; code?: unknown; audio?: unknown };
-  if (m?.type !== "video_ended" && m?.type !== "video_error") return;
-  if (typeof m.videoId !== "string") return;
-  const clean =
-    m.type === "video_ended"
-      ? { type: "video_ended", videoId: m.videoId }
-      : {
-          type: "video_error",
-          videoId: m.videoId,
-          ...(typeof m.code === "number" ? { code: m.code } : {}),
-          ...(m.audio === true ? { audio: true } : {}),
-        };
+  const m = msg as {
+    type?: unknown;
+    videoId?: unknown;
+    code?: unknown;
+    audio?: unknown;
+    position?: unknown;
+    duration?: unknown;
+  };
+  if (typeof m?.videoId !== "string") return;
+  // Rebuilt, never relayed — a phone speaks to the house only in the shapes
+  // listed here. TNGC-73 added playback_progress: a Viewscreen phone IS the
+  // wall for whatever it is playing, so it owes the house its playhead the
+  // same way a room wall does.
+  let clean: Record<string, unknown> | null = null;
+  if (m.type === "video_ended") {
+    clean = { type: "video_ended", videoId: m.videoId };
+  } else if (m.type === "video_error") {
+    clean = {
+      type: "video_error",
+      videoId: m.videoId,
+      ...(typeof m.code === "number" ? { code: m.code } : {}),
+      ...(m.audio === true ? { audio: true } : {}),
+    };
+  } else if (m.type === "playback_progress") {
+    if (typeof m.position !== "number" || !Number.isFinite(m.position) || m.position < 0) return;
+    clean = {
+      type: "playback_progress",
+      videoId: m.videoId,
+      position: m.position,
+      ...(typeof m.duration === "number" && Number.isFinite(m.duration) && m.duration > 0
+        ? { duration: m.duration }
+        : {}),
+    };
+  }
+  if (!clean) return;
   try {
     entry.ws.send(JSON.stringify(clean));
   } catch {
