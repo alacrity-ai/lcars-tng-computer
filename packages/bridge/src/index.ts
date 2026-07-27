@@ -1049,17 +1049,24 @@ export function parseTile(raw: unknown, id: string): PluginTile | undefined {
   return { color: color.toLowerCase(), icon: { viewBox, paths, ...(icon.fill === true ? { fill: true } : {}) } };
 }
 
+/** Roster id → the plugin FOLDER that ships it. They are not always the same
+    word: the `lighting` plugin exposes the control-plane plugin `lights`, and
+    looking up plugins/lights/ silently cost that tile its color (TNGC-58).
+    A roster id absent here is assumed to name its own folder. */
+const TILE_MANIFEST_DIR: Record<string, string> = { lights: "lighting" };
+
 /** Manifests change only on deploy — read once, remember the verdict. */
 const tileCache = new Map<string, PluginTile | undefined>();
 
-function pluginTile(id: string): PluginTile | undefined {
+export function pluginTile(id: string): PluginTile | undefined {
   if (tileCache.has(id)) return tileCache.get(id);
+  const dir = TILE_MANIFEST_DIR[id] ?? id;
   let tile: PluginTile | undefined;
   try {
-    const manifest = JSON.parse(readFileSync(join(PLUGINS_DIR, id, "plugin.json"), "utf8")) as { ui?: unknown };
+    const manifest = JSON.parse(readFileSync(join(PLUGINS_DIR, dir, "plugin.json"), "utf8")) as { ui?: unknown };
     tile = parseTile(manifest.ui, id);
   } catch {
-    console.error(`[bridge] plugin ${id}: no readable plugin.json under ${PLUGINS_DIR} — tile falls back`);
+    console.error(`[bridge] plugin ${id}: no readable ${join(PLUGINS_DIR, dir, "plugin.json")} — tile falls back`);
   }
   tileCache.set(id, tile);
   return tile;
