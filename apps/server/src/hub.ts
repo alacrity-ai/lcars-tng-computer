@@ -17,7 +17,10 @@ const IDLE_REVERT_MS = 2 * 60_000;
  * article mid-read must not snap back to the clock underneath the user.
  * (results is deliberately NOT exempt: if no result was picked in two
  * minutes, the search is over.) A quiz waits on the user's answer for as
- * long as they care to think — it must never snap away mid-question. */
+ * long as they care to think — it must never snap away mid-question.
+ * The gallery (TNGC-64) is the picture-frame mode: indefinite by design —
+ * without the exemption it would flip back to the clock every two minutes
+ * and the idle takeover would fight the revert timer forever. */
 const IDLE_EXEMPT_VIEWS: PanelView[] = [
   "status",
   "alert",
@@ -26,6 +29,7 @@ const IDLE_EXEMPT_VIEWS: PanelView[] = [
   "youtube",
   "article",
   "quiz",
+  "gallery",
 ];
 
 /** Everything one named viewscreen carries (TNGC-35). Entries persist after
@@ -431,13 +435,37 @@ export class DisplayHub {
     return { volume: this.voiceVolume, muted: this.voiceMuted };
   }
 
+  /** Idle revert is OPT-IN since TNGC-64 review: content snapping back to
+      the clock mid-look was a lived annoyance, so walls now keep whatever
+      was last displayed until someone (or the Computer) changes it. Toggle
+      at runtime via /api/console/idle-revert; in-memory, so a stack restart
+      returns to OFF. */
+  private idleRevertEnabled = false;
+
+  get idleRevert(): boolean {
+    return this.idleRevertEnabled;
+  }
+
+  setIdleRevert(enabled: boolean) {
+    this.idleRevertEnabled = enabled;
+    for (const e of this.displays.values()) {
+      if (enabled) this.armIdleRevert(e);
+      else if (e.idleTimer) {
+        clearTimeout(e.idleTimer);
+        e.idleTimer = undefined;
+      }
+    }
+  }
+
   /**
    * (Re)start a display's fallback-to-status countdown. Any screen change
-   * resets it; exempt views cancel it outright.
+   * resets it; exempt views cancel it outright. A no-op while the feature
+   * is toggled off.
    */
   private armIdleRevert(e: DisplayEntry) {
     if (e.idleTimer) clearTimeout(e.idleTimer);
     e.idleTimer = undefined;
+    if (!this.idleRevertEnabled) return;
     if (IDLE_EXEMPT_VIEWS.includes(e.view)) return;
     e.idleTimer = setTimeout(() => {
       e.idleTimer = undefined;

@@ -341,6 +341,15 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     return { ok: true, active };
   });
 
+  // Idle revert toggle (TNGC-64 review): OFF by default — walls keep their
+  // last panel indefinitely. Turning it on restores the old two-minute
+  // fall-back-to-status behavior (exempt views unaffected either way).
+  app.post<{ Body: { enabled?: boolean } }>("/api/console/idle-revert", async (req) => {
+    hub.setIdleRevert(req.body?.enabled === true);
+    return { ok: true, enabled: hub.idleRevert };
+  });
+  app.get("/api/console/idle-revert", async () => ({ enabled: hub.idleRevert }));
+
   // Hit by the bridge (not the model) on every command delivery and on the
   // session's turn-end hook: the wall's pending-commands badge mirrors how
   // many voice commands are waiting on the busy session (TNGC-21).

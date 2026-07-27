@@ -1118,6 +1118,33 @@ server.registerTool(
   },
 );
 
+// ---- idle revert toggle (TNGC-64 review) -----------------------------------------
+// Walls keep their last panel forever by default. This flips the optional
+// old behavior (non-exempt panels fall back to the status board after two
+// idle minutes) on or off at runtime.
+
+server.registerTool(
+  "idle_revert",
+  {
+    description:
+      "Control whether wall displays automatically fall back to the status board after " +
+      "two idle minutes. OFF by default — walls keep their last panel until changed. " +
+      "'Enable/disable the idle screen timeout', 'stop screens going back to the clock' " +
+      "→ action accordingly; 'is the idle timeout on?' → status. The setting is " +
+      "house-wide, in-memory, and returns to OFF when the stack restarts.",
+    inputSchema: { action: z.enum(["enable", "disable", "status"]) },
+  },
+  async ({ action }) => {
+    if (action === "status") {
+      const res = await call("/api/console/idle-revert");
+      const { enabled } = JSON.parse(res) as { enabled: boolean };
+      return textResult(`Idle screen timeout is ${enabled ? "ON (screens fall back to status after 2 minutes)" : "OFF (screens keep their last panel)"}.`);
+    }
+    await call("/api/console/idle-revert", { enabled: action === "enable" });
+    return textResult(`Idle screen timeout ${action === "enable" ? "enabled — non-exempt panels fall back to status after 2 idle minutes" : "disabled — screens keep whatever is on them"}.`);
+  },
+);
+
 // ---- family photos (TNGC-64) -----------------------------------------------------
 // The photo library lives in the tricorder cloud (D1 index + R2 bytes); the
 // gallery panel consumes capability URLs, so the model never touches image
