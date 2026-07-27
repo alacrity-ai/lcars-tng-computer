@@ -49,6 +49,7 @@ export const PANEL_VIEWS = [
   "schedule-day",
   "qr",
   "pictionary",
+  "list",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -123,6 +124,26 @@ export interface ScheduleDayPanelProps {
   events: CalendarEvent[];
   today?: string;
   title?: string;
+}
+
+/** Family lists (TNGC-63). Same lenient posture as calendar categories:
+    an unknown value stores as NULL and only ever costs the color accent. */
+export const LIST_CATEGORIES = ["shopping", "chores", "todo", "packing", "other"] as const;
+export type ListCategory = (typeof LIST_CATEGORIES)[number];
+
+export interface ListPanelItem {
+  text: string;
+  checked: boolean;
+  /** Who claimed/completed it — rendered as a small tag on checked rows. */
+  checkedBy?: string | null;
+}
+
+/** One family list as a checklist panel: unchecked first ("what's left"),
+    checked items follow, struck but visible until clear-completed. */
+export interface ListPanelProps {
+  title: string;
+  category?: string | null;
+  items: ListPanelItem[];
 }
 
 export interface TextPanelProps {

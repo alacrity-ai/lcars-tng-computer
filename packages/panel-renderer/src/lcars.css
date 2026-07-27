@@ -3151,3 +3151,93 @@ body {
   font-size: clamp(12px, 1.4vw, 24px);
   color: #b8b8c8;
 }
+
+/* ---- family list panel (TNGC-63) ---------------------------------------- */
+.list-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 2vh 3vw;
+  font-family: var(--lcars-mono);
+}
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2vw;
+  border-bottom: 0.4vh solid var(--lcars-gold);
+  padding-bottom: 1vh;
+}
+.list-title {
+  color: var(--lcars-gold);
+  font-size: clamp(20px, 3.2vw, 52px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-count {
+  color: var(--lcars-peach);
+  font-size: clamp(13px, 1.6vw, 28px);
+  white-space: nowrap;
+}
+.list-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 1.4vh;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  column-gap: 3vw;
+  align-content: flex-start;
+}
+.list-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8vw;
+  width: 46%;
+  min-width: 320px;
+  max-width: 100%;
+  padding: 0.55vh 0;
+  font-size: clamp(15px, 1.9vw, 32px);
+  color: var(--lcars-cream);
+}
+.list-row .list-box { color: var(--lcars-blue); flex: none; }
+.list-row.done { color: #77778a; }
+.list-row.done .list-box { color: #77778a; }
+.list-row.done .list-text { text-decoration: line-through; }
+.list-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.list-by {
+  flex: none;
+  font-size: 0.62em;
+  color: var(--lcars-lavender);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.list-more { color: var(--lcars-lavender); font-size: clamp(13px, 1.5vw, 26px); padding-top: 0.6vh; }
+.list-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #77778a;
+  font-size: clamp(16px, 2vw, 34px);
+}
+.list-foot {
+  border-top: 0.4vh solid var(--lcars-gold);
+  padding-top: 0.8vh;
+  color: var(--lcars-peach);
+  font-size: clamp(11px, 1.2vw, 20px);
+  letter-spacing: 0.12em;
+}
+.list-cat-shopping .list-head, .list-cat-shopping .list-foot { border-color: var(--lcars-gold); }
+.list-cat-chores .list-head, .list-cat-chores .list-foot { border-color: var(--lcars-blue); }
+.list-cat-todo .list-head, .list-cat-todo .list-foot { border-color: var(--lcars-lavender); }
+.list-cat-packing .list-head, .list-cat-packing .list-foot { border-color: var(--lcars-tan); }

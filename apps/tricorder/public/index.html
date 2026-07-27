@@ -466,6 +466,37 @@
   }
   .ops-result.stale { opacity: .55; }
 
+  /* family lists plugin (TNGC-63) */
+  .fl-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 14px;
+    padding: 14px; margin-top: 10px; cursor: pointer; font: inherit;
+  }
+  .fl-row .name { flex: 1; color: var(--peach); font-weight: 700; text-transform: uppercase; font-size: 14px; }
+  .fl-row .prog { color: #888; font-size: 12px; }
+  .fl-row .prog.done { color: var(--gold); }
+  .fl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 10px; }
+  .fl-title { color: var(--gold); font-weight: 700; text-transform: uppercase; font-size: 16px; }
+  .fl-cnt { color: #888; font-size: 12px; white-space: nowrap; }
+  .fli-row {
+    display: flex; align-items: center; gap: 10px; background: #101018;
+    border: 1px solid #2a2a3a; border-radius: 12px; padding: 4px 6px 4px 0; margin-top: 8px;
+  }
+  .fli-main {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: none;
+    border: 0; font: inherit; color: var(--cream, #eee); cursor: pointer; text-align: left; padding: 8px 0 8px 12px;
+  }
+  .fli-box { color: var(--blue); font-size: 18px; flex: none; }
+  .fli-row.done .fli-box { color: #666; }
+  .fli-text { font-size: 14px; color: #eee; overflow-wrap: anywhere; }
+  .fli-row.done .fli-text { color: #777; text-decoration: line-through; }
+  .fli-by { flex: none; color: var(--lav); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  .fl-addrow { display: flex; gap: 8px; margin-top: 12px; }
+  .fl-addrow input { flex: 1; min-width: 0; }
+  .fl-addrow .btn { width: auto; margin-top: 0; padding: 12px 18px; }
+  .fl-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .fl-actions .btn { margin-top: 0; }
+
   /* send sheet */
   #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: flex-end; z-index: 5; }
   #sheet.open { display: flex; }
@@ -966,6 +997,34 @@
     <div class="err" id="ops-err"></div>
   </div>
 
+  <!-- LISTS (TNGC-63): family checklists, editable sans AI -->
+  <div class="view" id="view-fl">
+    <button class="link" id="btn-flback" style="text-align:left">&#9664; Plugins</button>
+    <label>Lists</label>
+    <div id="fl-index"></div>
+    <button class="btn lav" id="btn-fl-new">+ New list</button>
+    <div class="err" id="fl-err"></div>
+  </div>
+
+  <!-- one list -->
+  <div class="view" id="view-flist">
+    <button class="link" id="btn-fliback" style="text-align:left">&#9664; Lists</button>
+    <div class="fl-head">
+      <span class="fl-title" id="fl-title"></span>
+      <span class="fl-cnt" id="fl-cnt"></span>
+    </div>
+    <div id="fl-items"></div>
+    <div class="fl-addrow">
+      <input id="fl-newitem" placeholder="Add an item&hellip;" autocapitalize="sentences">
+      <button class="btn blue" id="btn-fli-add">Add</button>
+    </div>
+    <div class="fl-actions">
+      <button class="btn" id="btn-fl-clear">Clear completed</button>
+      <button class="btn red" id="btn-fl-delete">Delete list</button>
+    </div>
+    <div class="err" id="flist-err"></div>
+  </div>
+
   <!-- LIBRARY (TNGC-23) -->
   <div class="view" id="view-library">
     <div class="lib-head">
@@ -1126,6 +1185,7 @@ function logout() {
   stopQueuePoll();
   stopLightsPoll();
   stopOpsPoll();
+  stopFlPoll();
   show("login");
 }
 
@@ -2507,6 +2567,7 @@ async function openPlugins() {
         else if (p.id === "calendar") openCal();
         else if (p.id === "claudeops") openOps();
         else if (p.id === "games") openGames();
+        else if (p.id === "lists") openFl();
       };
       grid.appendChild(b);
     }
@@ -3603,6 +3664,164 @@ function renderOps(d) {
 
   renderOpsPrefBtns(s);
 }
+
+// ---- family lists plugin (TNGC-63) ----------------------------------------------
+// Deterministic checklist CRUD on the member's own session — same plane the
+// voice path writes to, so the wall panel and this screen can never disagree.
+let flId = null, flTimer = null, flBusy = false;
+
+function openFl() {
+  show("fl");
+  stopFlPoll();
+  $("fl-err").textContent = "";
+  flRenderIndex();
+}
+$("btn-flback").onclick = () => { stopFlPoll(); openPlugins(); };
+$("btn-fliback").onclick = () => { stopFlPoll(); openFl(); };
+function stopFlPoll() { if (flTimer) { clearInterval(flTimer); flTimer = null; } }
+
+async function flRenderIndex() {
+  const wrap = $("fl-index");
+  try {
+    const d = await api("/api/lists");
+    wrap.innerHTML = "";
+    if (!d.lists.length) {
+      wrap.innerHTML = '<div class="pl-note">No lists yet — start one.</div>';
+      return;
+    }
+    for (const l of d.lists) {
+      const row = document.createElement("button");
+      row.className = "fl-row";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = l.name;
+      const prog = document.createElement("span");
+      prog.className = "prog" + (l.total > 0 && l.done === l.total ? " done" : "");
+      prog.textContent = l.total === 0 ? "empty" : l.done + " / " + l.total;
+      row.appendChild(name);
+      row.appendChild(prog);
+      row.onclick = () => openFlist(l.id);
+      wrap.appendChild(row);
+    }
+  } catch (e) { $("fl-err").textContent = e.message; }
+}
+
+$("btn-fl-new").onclick = async () => {
+  const name = prompt("List name:");
+  if (!name || !name.trim()) return;
+  try {
+    const d = await api("/api/lists", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+    openFlist(d.list.id);
+  } catch (e) { toast(e.message, true); }
+};
+
+function openFlist(id) {
+  flId = id;
+  show("flist");
+  $("flist-err").textContent = "";
+  $("fl-items").innerHTML = '<div class="pl-note">Loading…</div>';
+  stopFlPoll();
+  flRefresh();
+  flTimer = setInterval(flRefresh, 6000);
+}
+
+async function flRefresh() {
+  if (document.hidden || !me || flBusy) return;
+  try {
+    const d = await api("/api/lists/" + flId);
+    $("fl-title").textContent = d.list.name;
+    const done = d.items.filter((i) => i.checked).length;
+    $("fl-cnt").textContent = d.items.length === 0 ? "empty"
+      : done === d.items.length ? "all done" : done + " of " + d.items.length + " done";
+    const wrap = $("fl-items");
+    wrap.innerHTML = "";
+    const ordered = [...d.items.filter((i) => !i.checked), ...d.items.filter((i) => i.checked)];
+    for (const it of ordered) wrap.appendChild(flItemRow(it));
+    $("flist-err").textContent = "";
+  } catch (e) { $("flist-err").textContent = e.message; }
+}
+
+function flItemRow(it) {
+  const row = document.createElement("div");
+  row.className = "fli-row" + (it.checked ? " done" : "");
+  const main = document.createElement("button");
+  main.className = "fli-main";
+  const box = document.createElement("span");
+  box.className = "fli-box";
+  box.textContent = it.checked ? "▣" : "□";
+  const text = document.createElement("span");
+  text.className = "fli-text";
+  text.textContent = it.text;
+  main.appendChild(box);
+  main.appendChild(text);
+  main.setAttribute("aria-label", (it.checked ? "Uncheck " : "Check ") + it.text);
+  main.onclick = () => flToggle(it, row, box);
+  row.appendChild(main);
+  if (it.checked && it.checkedBy) {
+    const by = document.createElement("span");
+    by.className = "fli-by";
+    by.textContent = it.checkedBy;
+    row.appendChild(by);
+  }
+  const x = document.createElement("button");
+  x.className = "lt-x";
+  x.textContent = "✕";
+  x.setAttribute("aria-label", "Remove " + it.text);
+  x.onclick = async () => {
+    if (!confirm('Remove "' + it.text + '"?')) return;
+    try {
+      await api("/api/lists/" + flId + "/items/" + it.id, { method: "DELETE" });
+      flRefresh();
+    } catch (e) { toast(e.message, true); }
+  };
+  row.appendChild(x);
+  return row;
+}
+
+async function flToggle(it, row, box) {
+  // optimistic paint; truth on the refresh right after
+  row.classList.toggle("done", !it.checked);
+  box.textContent = it.checked ? "□" : "▣";
+  flBusy = true;
+  try {
+    await api("/api/lists/" + flId + "/items/" + it.id, {
+      method: "POST",
+      body: JSON.stringify({ checked: !it.checked }),
+    });
+  } catch (e) { toast(e.message, true); }
+  flBusy = false;
+  flRefresh();
+}
+
+$("btn-fli-add").onclick = async () => {
+  const text = $("fl-newitem").value.trim();
+  if (!text) return;
+  flBusy = true;
+  try {
+    await api("/api/lists/" + flId + "/items", { method: "POST", body: JSON.stringify({ text }) });
+    $("fl-newitem").value = "";
+  } catch (e) { toast(e.message, true); }
+  flBusy = false;
+  flRefresh();
+};
+$("fl-newitem").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("btn-fli-add").click(); }
+});
+$("btn-fl-clear").onclick = async () => {
+  if (!confirm("Clear all completed items?")) return;
+  try {
+    await api("/api/lists/" + flId + "/clear-completed", { method: "POST", body: "{}" });
+    flRefresh();
+  } catch (e) { toast(e.message, true); }
+};
+$("btn-fl-delete").onclick = async () => {
+  if (!confirm("Delete this whole list?")) return;
+  try {
+    await api("/api/lists/" + flId, { method: "DELETE" });
+    stopFlPoll();
+    openFl();
+  } catch (e) { toast(e.message, true); }
+};
 
 function renderOpsPrefBtns(s) {
   const model = (s && s.model) || "";

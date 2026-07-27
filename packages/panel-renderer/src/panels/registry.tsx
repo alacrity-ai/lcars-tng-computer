@@ -27,6 +27,7 @@ import { ScheduleWeekPanel } from "./ScheduleWeekPanel";
 import { ScheduleDayPanel } from "./ScheduleDayPanel";
 import { PictionaryPanel } from "./PictionaryPanel";
 import { QrPanel } from "./QrPanel";
+import { ListPanel } from "./ListPanel";
 
 function BlankPanel() {
   return null;
@@ -76,6 +77,7 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   "schedule-day": ScheduleDayPanel,
   qr: QrPanel,
   pictionary: PictionaryPanel,
+  list: ListPanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

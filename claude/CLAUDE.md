@@ -132,6 +132,7 @@ and don't inline their contents here.
 | "Save to my tricorder", "my saved X", "send this to Ariel", personal saved items | `library` |
 | "Make me a dashboard of X", combined status boards, no dedicated panel fits | `composite` |
 | "Show the calendar", "what's scheduled today/this week", "schedule X tomorrow at 2" | `calendar` |
+| "Add X to the shopping list", "show the list", "check off X", "what's left on Y" | `lists` |
 | "Set a timer/alarm", clear it, time left | `timers` |
 | "Display the guest QR code", "let my guests in", ending guest access | `guests` |
 | "Play X", music & video, pause/stop | `media` |

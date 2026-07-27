@@ -866,6 +866,258 @@ server.registerTool(
   },
 );
 
+// ---- family lists (TNGC-63) ------------------------------------------------------
+// Checklists in the tricorder cloud, same posture as the calendar: the panel
+// is composed HERE from a fresh fetch (the model never shuttles item JSON for
+// rendering); `read` is the clean-context exception for answering questions.
+// Lists resolve by NAME, case-insensitively, so speech maps straight on.
+
+const LIST_CATEGORIES = ["shopping", "chores", "todo", "packing", "other"] as const;
+
+interface ListIndexRow {
+  id: string;
+  name: string;
+  category: string | null;
+  total: number;
+  done: number;
+}
+
+interface ListItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  checkedBy: string | null;
+  createdBy: string;
+}
+
+const fetchLists = () => cloudFetch<{ lists: ListIndexRow[] }>("GET", "/api/lists");
+const fetchListDetail = (id: string) =>
+  cloudFetch<{ list: ListIndexRow; items: ListItem[] }>("GET", `/api/lists/${encodeURIComponent(id)}`);
+
+/** Resolve a spoken list name to its row: exact (case-insensitive), then
+    with a trailing "list" stripped, then unique substring. */
+async function resolveList(spoken: string): Promise<{ row?: ListIndexRow; all: ListIndexRow[] }> {
+  const { lists } = await fetchLists();
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const wanted = norm(spoken);
+  const bare = wanted.replace(/\s+list$/, "");
+  for (const candidate of [wanted, bare]) {
+    const exact = lists.filter((l) => norm(l.name) === candidate || norm(l.name) === `${candidate} list`);
+    if (exact.length === 1) return { row: exact[0], all: lists };
+  }
+  const subs = lists.filter((l) => norm(l.name).includes(bare));
+  if (subs.length === 1) return { row: subs[0], all: lists };
+  return { all: lists };
+}
+
+function noSuchList(spoken: string, all: ListIndexRow[]): Error {
+  const names = all.map((l) => l.name).join(", ") || "none yet";
+  return new Error(`No list matches "${spoken}". Existing lists: ${names}.`);
+}
+
+/** Resolve a spoken item within a list: exact text, then unique substring. */
+function resolveItem(items: ListItem[], spoken: string): { item?: ListItem; candidates: ListItem[] } {
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const wanted = norm(spoken);
+  const exact = items.filter((i) => norm(i.text) === wanted);
+  if (exact.length === 1) return { item: exact[0], candidates: items };
+  const subs = items.filter((i) => norm(i.text).includes(wanted));
+  if (subs.length === 1) return { item: subs[0], candidates: items };
+  return { candidates: subs.length ? subs : items };
+}
+
+const listItemRow = (i: ListItem) => ({
+  text: i.text,
+  ...(i.checked ? { checked: true, by: i.checkedBy ?? undefined } : {}),
+});
+
+async function displayList(row: ListIndexRow, wall?: string): Promise<string> {
+  const { list, items } = await fetchListDetail(row.id);
+  await call("/api/console/display", {
+    view: "list",
+    props: {
+      title: list.name,
+      category: list.category,
+      items: items.map((i) => ({ text: i.text, checked: i.checked, checkedBy: i.checkedBy })),
+    },
+    ...(wall ? { wall } : {}),
+  });
+  const open = items.filter((i) => !i.checked).length;
+  return `${list.name} on the wall — ${items.length === 0 ? "empty" : open === 0 ? "everything done" : `${open} item${open === 1 ? "" : "s"} left`}.`;
+}
+
+server.registerTool(
+  "lists",
+  {
+    description:
+      "Family lists (shopping, chores, todo, packing — shared by the household; guests " +
+      "excluded). Lists are resolved by NAME, case-insensitively — pass what was said " +
+      "('shopping', 'the packing list'). Actions: " +
+      "display {list, wall?} — put the checklist on the wall ('show the shopping list'). " +
+      "read {list?} — without list: every list with progress counts; with list: its full " +
+      "items as compact JSON. Use for questions ('what's left on the packing list?'). " +
+      "add {list, text, user} — add an item; if the list doesn't exist yet it is CREATED " +
+      "with that name (say so when it happens). " +
+      "check / uncheck {list, item, user} — complete or reopen an item, matched by its " +
+      "text ('check off the milk'). check records who did it. " +
+      "remove_item {list, item, user} — delete one item. " +
+      "create {name, category?, user} — start an empty list; category (when obvious): " +
+      "shopping|chores|todo|packing|other — it colors the panel. " +
+      "clear_completed {list} — sweep checked items ('clear the done ones'). " +
+      "remove_list {list} — delete a whole list; confirm with the person first. " +
+      "user = the channel event's user (attribution — who added/claimed the item). " +
+      "After a write, re-display the list if it is on screen.",
+    inputSchema: {
+      action: z.enum([
+        "display",
+        "read",
+        "add",
+        "check",
+        "uncheck",
+        "remove_item",
+        "create",
+        "clear_completed",
+        "remove_list",
+      ]),
+      list: z.string().optional(),
+      name: z.string().optional(),
+      text: z.string().optional(),
+      item: z.string().optional(),
+      category: z.enum(LIST_CATEGORIES).optional(),
+      wall: z.string().optional(),
+      user: z.string().optional(),
+    },
+  },
+  async ({ action, list, name, text, item, category, wall, user }) => {
+    const by = user ?? "computer";
+    switch (action) {
+      case "display": {
+        if (!list?.trim()) throw new Error("display needs a list name");
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        return textResult(await displayList(row, wall));
+      }
+      case "read": {
+        if (!list?.trim()) {
+          const { lists } = await fetchLists();
+          return textResult(
+            JSON.stringify({
+              lists: lists.map((l) => ({
+                name: l.name,
+                ...(l.category ? { category: l.category } : {}),
+                total: l.total,
+                done: l.done,
+              })),
+            }),
+          );
+        }
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        const { list: meta, items } = await fetchListDetail(row.id);
+        return textResult(
+          JSON.stringify({
+            name: meta.name,
+            ...(meta.category ? { category: meta.category } : {}),
+            items: items.map(listItemRow),
+          }),
+        );
+      }
+      case "add": {
+        if (!list?.trim()) throw new Error("add needs a list name");
+        if (!text?.trim()) throw new Error("add needs the item text");
+        let { row } = await resolveList(list);
+        let created = false;
+        if (!row) {
+          const listName = list.trim().replace(/\s+list$/i, "");
+          const res = await cloudFetch<{ list: ListIndexRow }>("POST", "/api/lists", {
+            name: listName,
+            ...(category ? { category } : {}),
+            by,
+          });
+          row = res.list;
+          created = true;
+        }
+        const { item: added } = await cloudFetch<{ item: ListItem }>(
+          "POST",
+          `/api/lists/${encodeURIComponent(row.id)}/items`,
+          { text: text.trim(), by },
+        );
+        return textResult(
+          JSON.stringify({ ok: true, list: row.name, added: added.text, ...(created ? { createdList: true } : {}) }),
+        );
+      }
+      case "check":
+      case "uncheck": {
+        if (!list?.trim()) throw new Error(`${action} needs a list name`);
+        if (!item?.trim()) throw new Error(`${action} needs the item text`);
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        const { items } = await fetchListDetail(row.id);
+        const pool = action === "check" ? items.filter((i) => !i.checked) : items.filter((i) => i.checked);
+        const { item: found, candidates } = resolveItem(pool.length ? pool : items, item);
+        if (!found) {
+          throw new Error(
+            `No single item matches "${item}" on ${row.name}. Candidates: ${candidates
+              .slice(0, 8)
+              .map((i) => i.text)
+              .join(", ") || "none"}.`,
+          );
+        }
+        await cloudFetch("POST", `/api/lists/${encodeURIComponent(row.id)}/items/${encodeURIComponent(found.id)}`, {
+          checked: action === "check",
+          by,
+        });
+        return textResult(JSON.stringify({ ok: true, list: row.name, item: found.text, checked: action === "check" }));
+      }
+      case "remove_item": {
+        if (!list?.trim()) throw new Error("remove_item needs a list name");
+        if (!item?.trim()) throw new Error("remove_item needs the item text");
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        const { items } = await fetchListDetail(row.id);
+        const { item: found, candidates } = resolveItem(items, item);
+        if (!found) {
+          throw new Error(
+            `No single item matches "${item}" on ${row.name}. Candidates: ${candidates
+              .slice(0, 8)
+              .map((i) => i.text)
+              .join(", ") || "none"}.`,
+          );
+        }
+        await cloudFetch("DELETE", `/api/lists/${encodeURIComponent(row.id)}/items/${encodeURIComponent(found.id)}`);
+        return textResult(JSON.stringify({ ok: true, list: row.name, removed: found.text }));
+      }
+      case "create": {
+        if (!name?.trim()) throw new Error("create needs a name");
+        const { list: createdList } = await cloudFetch<{ list: ListIndexRow }>("POST", "/api/lists", {
+          name: name.trim(),
+          ...(category ? { category } : {}),
+          by,
+        });
+        return textResult(JSON.stringify({ ok: true, created: createdList.name }));
+      }
+      case "clear_completed": {
+        if (!list?.trim()) throw new Error("clear_completed needs a list name");
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        const res = await cloudFetch<{ cleared: number }>(
+          "POST",
+          `/api/lists/${encodeURIComponent(row.id)}/clear-completed`,
+          {},
+        );
+        return textResult(JSON.stringify({ ok: true, list: row.name, cleared: res.cleared }));
+      }
+      case "remove_list": {
+        if (!list?.trim()) throw new Error("remove_list needs a list name");
+        const { row, all } = await resolveList(list);
+        if (!row) throw noSuchList(list, all);
+        await cloudFetch("DELETE", `/api/lists/${encodeURIComponent(row.id)}`);
+        return textResult(JSON.stringify({ ok: true, removed: row.name }));
+      }
+    }
+  },
+);
+
 // ---- guest QR (TNGC-57) ----------------------------------------------------------
 // Mint an invite with the service token and put it on the wall in one call.
 // The invite URL is deliberately NOT returned: it is a live credential, and a

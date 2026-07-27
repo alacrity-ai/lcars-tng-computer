@@ -26,6 +26,7 @@ import { calendarRoutes } from "./calendar";
 import { gamesRoutes } from "./games/routes";
 import { GUEST_SESSION_TTL_MS, guestRoutes } from "./guest";
 import { libraryRoutes } from "./library";
+import { listsRoutes } from "./lists";
 import { mintPairCode, registerRoutes } from "./register";
 
 export { TenantHub } from "./hub";
@@ -236,6 +237,7 @@ app.route("/api/library", libraryRoutes(lookupSession, hub));
 // bounced; registered BEFORE the session gate because it owns its own auth.
 
 app.route("/api/calendar", calendarRoutes(lookupSession));
+app.route("/api/lists", listsRoutes(lookupSession));
 
 // ---- Viewscreen mode socket (TNGC-36) — registered BEFORE the session gate:
 // browser WebSockets can't set Authorization headers, so the session token
@@ -421,6 +423,18 @@ const CLOUD_PLUGINS = [
     tile: {
       color: "#cc99cc",
       icon: { viewBox: "0 0 24 24", paths: ["M3 5h18v16H3z", "M8 2v5", "M16 2v5", "M3 10h18"] },
+    },
+  },
+  {
+    id: "lists",
+    name: "Lists",
+    online: true,
+    tile: {
+      color: "#ffcc99",
+      icon: {
+        viewBox: "0 0 24 24",
+        paths: ["m3 17 2 2 4-4", "m3 7 2 2 4-4", "M13 6h8", "M13 12h8", "M13 18h8"],
+      },
     },
   },
 ];
