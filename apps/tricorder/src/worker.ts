@@ -665,8 +665,11 @@ async function sendLightsOp(
     bridge-side, and every one of them maps to a wall-server route that
     already existed — this plane adds verbs, never new authority. */
 const MEDIA_OPS = [
-  "next", "prev", "pause", "play", "stop", "volume_up", "volume_down", "jump", "loop", "clear",
+  "next", "prev", "pause", "play", "stop", "volume_up", "volume_down", "jump", "loop", "clear", "seek",
 ];
+/** Seek ceiling (TNGC-73): 12h covers any track or full-album upload, and
+    caps what a compromised phone could push into the house as a number. */
+const MEDIA_MAX_SEEK = 12 * 60 * 60;
 const MEDIA_MAX_QUEUE = 25;
 
 async function mediaGate(c: Context<{ Bindings: Env; Variables: Vars }>): Promise<Response | null> {
@@ -714,6 +717,18 @@ app.post("/api/plugins/media/control", async (c) => {
   if (op === "loop") {
     if (typeof body.enabled !== "boolean") return c.json({ error: "loop requires enabled (boolean)" }, 400);
     args.enabled = body.enabled;
+  }
+  if (op === "seek") {
+    const seconds = body.seconds;
+    if (
+      typeof seconds !== "number" ||
+      !Number.isFinite(seconds) ||
+      seconds < 0 ||
+      seconds > MEDIA_MAX_SEEK
+    ) {
+      return c.json({ error: `seek requires seconds 0..${MEDIA_MAX_SEEK}` }, 400);
+    }
+    args.seconds = Math.round(seconds);
   }
   const ctl = {
     id: crypto.randomUUID(),

@@ -23,6 +23,29 @@ import { videoFullscreen } from "./videoFullscreen";
 
 const DUCK = 0.3;
 
+/** How often the playhead goes up the socket (TNGC-73). Both players know
+    where they are several times a second; the server only needs enough for a
+    phone to re-sync its locally-interpolated scrubber. Module-level throttle:
+    exactly one player is live per wall at a time. */
+const PROGRESS_MS = 2_000;
+let lastProgressAt = 0;
+
+function reportProgress(videoId: string, position: number, duration?: number, force = false) {
+  const now = Date.now();
+  if (!force && now - lastProgressAt < PROGRESS_MS) return;
+  if (!Number.isFinite(position)) return;
+  lastProgressAt = now;
+  window.dispatchEvent(
+    new CustomEvent("tng-video-progress", {
+      detail: {
+        videoId,
+        position,
+        duration: typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : undefined,
+      },
+    }),
+  );
+}
+
 export function PlaybackLayer({ playback, view }: { playback: PanelProps | null; view: PanelView }) {
   const [fullscreen, setFullscreen] = useState(videoFullscreen.value);
   useEffect(() => {
@@ -91,8 +114,8 @@ function EmbedPlayer({ videoId, title, startSeconds }: PlayerProps) {
         "https://www.youtube.com",
       );
     function onMedia(ev: Event) {
-      const { action, rate, level } = (
-        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number }>
+      const { action, rate, level, seconds } = (
+        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number; seconds?: number }>
       ).detail;
       if (action === "mute") send("mute");
       else if (action === "unmute") send("unMute");
@@ -112,6 +135,11 @@ function EmbedPlayer({ videoId, title, startSeconds }: PlayerProps) {
       } else if (action === "play") send("playVideo");
       else if (action === "pause" || action === "stop") send("pauseVideo");
       else if (action === "speed") send("setPlaybackRate", [rate ?? 1]);
+      else if (action === "seek" && typeof seconds === "number") {
+        // allowSeekAhead: true — seek past what is buffered, which is the
+        // whole point of dragging a scrubber to the end of a long track.
+        send("seekTo", [Math.max(0, seconds), true]);
+      }
       // fullscreen/windowed are the layer's concern
     }
     function onDuck(ev: Event) {
@@ -181,9 +209,20 @@ function EmbedPlayer({ videoId, title, startSeconds }: PlayerProps) {
       // the periodic infoDelivery stream also carries playerState.
       if (data?.event === "onStateChange" && Number(data.info) === 0) reportEnded();
       if (data?.event === "infoDelivery") {
-        const info = data.info as { playerState?: number; volume?: number } | undefined;
+        const info = data.info as {
+          playerState?: number;
+          volume?: number;
+          currentTime?: number;
+          duration?: number;
+        } | undefined;
         if (typeof info?.volume === "number" && !duckedRef.current) volumeRef.current = info.volume;
         if (info?.playerState === 0) reportEnded();
+        // TNGC-73: the playhead the wall already receives several times a
+        // second, throttled to the server's needs. This stream is the only
+        // way an <iframe> embed will tell us where it is.
+        if (typeof info?.currentTime === "number") {
+          reportProgress(videoId, info.currentTime, info.duration);
+        }
       }
     };
     window.addEventListener("message", onMessage);
@@ -239,13 +278,22 @@ function AudioPlayer({ videoId, title, channel, startSeconds }: PlayerProps) {
     function onMedia(ev: Event) {
       const el = audioRef.current;
       if (!el) return;
-      const { action, rate, level } = (
-        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number }>
+      const { action, rate, level, seconds } = (
+        ev as CustomEvent<{ action: MediaAction; rate?: number; level?: number; seconds?: number }>
       ).detail;
       if (action === "play") void el.play().catch(() => {});
       else if (action === "pause" || action === "stop") el.pause();
       else if (action === "speed") el.playbackRate = rate ?? 1;
-      else if (action === "mute") el.muted = true;
+      else if (action === "seek" && typeof seconds === "number") {
+        // The stream proxy passes Range through, which is what makes seeking
+        // an extracted-audio track work at all (same mechanism as
+        // startSeconds). Clamp: past the end would fire `ended` and advance
+        // the queue, which is not what dragging a scrubber means.
+        const d = el.duration;
+        const target = Number.isFinite(d) && d > 0 ? Math.min(seconds, d - 0.5) : seconds;
+        el.currentTime = Math.max(0, target);
+        reportProgress(videoId, el.currentTime, el.duration, true);
+      } else if (action === "mute") el.muted = true;
       else if (action === "unmute") el.muted = false;
       else if (action === "volume" || action === "volume_up" || action === "volume_down") {
         baseVolume.current = Math.max(
@@ -282,7 +330,10 @@ function AudioPlayer({ videoId, title, channel, startSeconds }: PlayerProps) {
       if (startSeconds && startSeconds > 0) el.currentTime = startSeconds;
       setClock({ t: el.currentTime, d: el.duration });
     };
-    const onTime = () => setClock({ t: el.currentTime, d: el.duration });
+    const onTime = () => {
+      setClock({ t: el.currentTime, d: el.duration });
+      reportProgress(videoId, el.currentTime, el.duration); // TNGC-73
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onEnded = () => {

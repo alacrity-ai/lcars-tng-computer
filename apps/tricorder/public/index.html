@@ -252,6 +252,16 @@
   }
   .md-tag.bg { background: var(--blue); }
   .md-tag.loop { background: var(--gold); }
+  /* Scrubber (TNGC-73). The bar is driven by a LOCAL clock between reports,
+     so it advances smoothly even though the truth arrives every few seconds. */
+  .md-seek { margin-top: 12px; }
+  .md-seek input[type="range"] {
+    width: 100%; margin: 0; accent-color: var(--gold); background: transparent; cursor: pointer;
+  }
+  .md-times {
+    display: flex; justify-content: space-between; margin-top: 2px;
+    color: #8a8a9a; font-size: 11px; font-variant-numeric: tabular-nums;
+  }
   .md-transport { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; }
   /* Secondary controls: one row of identical squares under the transport
      circles. Uniform size and vector glyphs on purpose — a row of differently
@@ -1209,6 +1219,13 @@
       <div class="md-now-title" id="md-now-title">Nothing playing</div>
       <div class="md-now-sub" id="md-now-sub"></div>
       <div class="md-tags" id="md-tags"></div>
+      <!-- Hidden unless the player reported a position AND a real duration:
+           live streams and the native-app hand-off have nothing to scrub. -->
+      <div class="md-seek" id="md-seek" hidden>
+        <input type="range" id="md-seekbar" min="0" max="100" value="0" step="1"
+               aria-label="Seek within the track">
+        <div class="md-times"><span id="md-elapsed">0:00</span><span id="md-remain">-0:00</span></div>
+      </div>
       <div class="md-transport">
         <button class="tp-btn" id="md-prev" aria-label="Previous track">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
@@ -2150,6 +2167,7 @@ function vsShowNative() {
 
 function vsHideNative() {
   ++vsPlayGen;
+  vsStopProgress(); // the player is going away — stop reporting its playhead
   $("vs-render").classList.remove("native");
   $("vs-native").innerHTML = "";
 }
@@ -2218,6 +2236,8 @@ function vsFrame(msg) {
     } else if (msg.action === "stop") vsClearMedia();
   } else if (msg.type === "media") {
     if (msg.action === "stop") vsClearMedia();
+    // TNGC-73: this phone's own player owns the playhead in vs mode.
+    if (msg.action === "seek" && typeof msg.seconds === "number") vsSeek(msg.seconds);
     vsStagePost(msg);
   } else if (msg.type === "working") {
     if (vsWs) vsSetChip(msg.active ? "WORKING" : "LIVE", true);
@@ -2263,6 +2283,40 @@ function loadYT() {
 }
 
 let vsPlayGen = 0;
+// The live Viewscreen player + its progress beat (TNGC-73): this phone IS a
+// wall in vs mode, so it owes the server the same playhead reports, and it
+// must honour the same seek frames.
+let vsPlayer = null, vsProgTimer = null;
+
+function vsStopProgress() {
+  if (vsProgTimer) { clearInterval(vsProgTimer); vsProgTimer = null; }
+  vsPlayer = null;
+}
+
+function vsSeek(seconds) {
+  if (!vsPlayer || typeof vsPlayer.seekTo !== "function") return;
+  try {
+    vsPlayer.seekTo(Math.max(0, seconds), true);
+    vsReportProgress();
+  } catch {}
+}
+
+function vsReportProgress() {
+  if (!vsPlayer || typeof vsPlayer.getCurrentTime !== "function") return;
+  try {
+    const videoId = vsPlayer.__tngVideoId;
+    const position = vsPlayer.getCurrentTime();
+    const duration = vsPlayer.getDuration();
+    if (!videoId || typeof position !== "number") return;
+    vsSendUp({
+      type: "playback_progress",
+      videoId,
+      position,
+      ...(typeof duration === "number" && duration > 0 ? { duration } : {}),
+    });
+  } catch {}
+}
+
 function vsPlayVideo(box, props) {
   // Embed-blocked (server marked audioOnly): the phone can't reach the LAN
   // audio extractor and caching media in the cloud isn't worth the weight —
@@ -2279,9 +2333,10 @@ function vsPlayVideo(box, props) {
   holder.appendChild(mount);
   box.appendChild(holder);
   if (props.title) { const c = document.createElement("div"); c.className = "cap"; c.textContent = props.title; box.appendChild(c); }
+  vsStopProgress();
   loadYT().then(() => {
     if (gen !== vsPlayGen || !document.body.contains(mount)) return; // superseded
-    new YT.Player(mount, {
+    const player = new YT.Player(mount, {
       videoId,
       playerVars: {
         autoplay: 1,
@@ -2289,6 +2344,14 @@ function vsPlayVideo(box, props) {
         ...(typeof props.startSeconds === "number" ? { start: Math.floor(props.startSeconds) } : {}),
       },
       events: {
+        onReady: () => {
+          if (gen !== vsPlayGen) return;
+          player.__tngVideoId = videoId;
+          vsPlayer = player;
+          vsReportProgress();
+          if (vsProgTimer) clearInterval(vsProgTimer);
+          vsProgTimer = setInterval(vsReportProgress, 2000);
+        },
         onStateChange: (e) => {
           if (e.data === YT.PlayerState.ENDED) vsSendUp({ type: "video_ended", videoId });
         },
@@ -2310,6 +2373,7 @@ function vsPlayVideo(box, props) {
     playlist can move past the track when the person is done. */
 function vsYoutubeHandoff(box, props) {
   ++vsPlayGen; // supersede any pending player mount
+  vsStopProgress(); // playback left for the native app — nothing to scrub here
   const videoId = props.videoId;
   const card = document.createElement("div");
   card.className = "vs-handoff";
@@ -4172,6 +4236,39 @@ $("btn-fl-delete").onclick = async () => {
 // no op here ever wakes the Computer. State is bridge-reported, so the screen
 // polls (3s) rather than guessing; taps paint optimistically for one beat.
 let mdTimer = null, mdWall = null, mdState = null, mdOptimistic = 0, mdBackTo = "plugins";
+// Scrubber state (TNGC-73). The server's position arrives every few seconds
+// via the bridge; `mdProg` remembers WHEN it arrived so the bar can be drawn
+// from a local clock in between. Without that the thumb would tick in visible
+// four-second jumps and feel broken even though the seek works.
+let mdProg = null, mdSeekDrag = false, mdTick = null;
+
+/** m:ss (or h:mm:ss), always a number — unlike mdSecs, 0 is a real value here. */
+function mdClock(s) {
+  const t = Math.max(0, Math.floor(Number(s) || 0));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  return h > 0
+    ? h + ":" + String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0")
+    : m + ":" + String(sec).padStart(2, "0");
+}
+
+/** Where the track is RIGHT NOW: last report + elapsed wall-clock, unless
+    paused (a paused track's playhead doesn't move) or the user is dragging. */
+function mdLivePos() {
+  if (!mdProg) return 0;
+  const drift = mdProg.paused ? 0 : (Date.now() - mdProg.at) / 1000;
+  return Math.max(0, Math.min(mdProg.duration, mdProg.position + drift));
+}
+
+function mdPaintSeek() {
+  if (!mdProg || mdSeekDrag) return;
+  const bar = $("md-seekbar");
+  const dur = Math.round(mdProg.duration);
+  if (bar.max !== String(dur)) bar.max = String(dur);
+  const p = mdLivePos();
+  bar.value = String(Math.round(p));
+  $("md-elapsed").textContent = mdClock(p);
+  $("md-remain").textContent = "-" + mdClock(mdProg.duration - p);
+}
 
 /** opts.from: where Back should return to — the plugin grid when opened from
     the tile, the main screen when opened from the transport bar's label, so
@@ -4186,13 +4283,20 @@ function openMd(opts) {
   stopMdPoll();
   pollMd();
   mdTimer = setInterval(pollMd, 3000);
+  // Twice a second is enough for a seconds-resolution clock and costs nothing;
+  // it only runs while this screen is open.
+  mdTick = setInterval(mdPaintSeek, 500);
 }
 $("btn-mdback").onclick = () => {
   stopMdPoll();
   if (mdBackTo === "main") { show("main"); pollStatus(); }
   else openPlugins();
 };
-function stopMdPoll() { if (mdTimer) { clearInterval(mdTimer); mdTimer = null; } }
+function stopMdPoll() {
+  if (mdTimer) { clearInterval(mdTimer); mdTimer = null; }
+  if (mdTick) { clearInterval(mdTick); mdTick = null; }
+  mdSeekDrag = false;
+}
 
 async function pollMd() {
   if (document.hidden || !me) return;
@@ -4254,6 +4358,23 @@ function renderMd() {
   if (now && now.backgrounded) tag("Background", "bg");
   if (w && w.loop) tag("Loop", "loop");
   if (now && now.durationSeconds) tag(mdSecs(now.durationSeconds));
+
+  // Scrubber: needs a reported playhead AND a real length. The player's own
+  // duration wins over the search-result one — it is what the seek acts on.
+  const dur = now ? (now.playerDuration || now.durationSeconds || 0) : 0;
+  const seekable = !!(now && dur > 0 && typeof now.position === "number");
+  $("md-seek").hidden = !seekable;
+  if (seekable) {
+    mdProg = {
+      position: now.position,
+      at: now.positionAt || Date.now(),
+      duration: dur,
+      paused: !!w.paused,
+    };
+    mdPaintSeek();
+  } else {
+    mdProg = null;
+  }
 
   if (Date.now() > mdOptimistic) setPlayIcon("md-play-icon", !!(w && w.paused));
   $("md-prev").disabled = !(w && w.history && w.history.length);
@@ -4341,6 +4462,25 @@ $("md-play").onclick = () => {
   mdOptimistic = Date.now() + 2500;
   mdOp(paused ? "play" : "pause");
 };
+// Dragging owns the bar until release: a poll landing mid-drag must not yank
+// the thumb out from under a thumb.
+$("md-seekbar").addEventListener("input", () => {
+  mdSeekDrag = true;
+  const v = Number($("md-seekbar").value);
+  const dur = mdProg ? mdProg.duration : 0;
+  $("md-elapsed").textContent = mdClock(v);
+  $("md-remain").textContent = "-" + mdClock(dur - v);
+});
+$("md-seekbar").addEventListener("change", () => {
+  const v = Number($("md-seekbar").value);
+  mdSeekDrag = false;
+  // Adopt the drop point locally so the bar holds still while the op makes
+  // its round trip; the server notes the seek immediately, so the next poll
+  // agrees rather than snapping back.
+  if (mdProg) mdProg = { ...mdProg, position: v, at: Date.now() };
+  mdOp("seek", { seconds: v });
+});
+
 $("md-vup").onclick = () => mdOp("volume_up");
 $("md-vdown").onclick = () => mdOp("volume_down");
 $("md-stop").onclick = () => mdOp("stop");

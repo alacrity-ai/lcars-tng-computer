@@ -448,12 +448,15 @@ export class TenantHub extends DurableObject<Env> {
       const user = tags.find((t) => t.startsWith("user:"))?.slice(5);
       if (!user) return;
       try {
-        const msg = JSON.parse(data) as { type?: unknown; videoId?: unknown };
-        if (
-          (msg.type === "video_ended" || msg.type === "video_error") &&
-          typeof msg.videoId === "string" &&
-          msg.videoId.length <= 16
-        ) {
+        const msg = JSON.parse(data) as { type?: unknown; videoId?: unknown; position?: unknown };
+        const player =
+          msg.type === "video_ended" ||
+          msg.type === "video_error" ||
+          // TNGC-73: where this phone's own player is, so the scrubber works
+          // in Viewscreen mode too. Still a player event, still nothing that
+          // lets a screen socket speak as a wall.
+          (msg.type === "playback_progress" && typeof msg.position === "number");
+        if (player && typeof msg.videoId === "string" && msg.videoId.length <= 16) {
           this.sendDown({ v: 1, type: "display_client", name: `tricorder-${user}`, msg });
         }
       } catch {

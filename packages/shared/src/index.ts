@@ -937,6 +937,7 @@ export type MediaAction =
   | "play"
   | "stop"
   | "speed"
+  | "seek"
   | "fullscreen"
   | "windowed"
   | "volume"
@@ -952,6 +953,9 @@ export interface MediaMessage {
   rate?: number;
   /** volume only: absolute level 0–100. */
   level?: number;
+  /** seek only (TNGC-73): absolute position in seconds. Seeks IN PLACE — the
+      player must not reload, or the track would restart instead of moving. */
+  seconds?: number;
 }
 
 /** Voice nudges for the live map panel ("zoom in", "go west", "go to
@@ -1121,13 +1125,28 @@ export interface VideoEndedMessage {
   videoId: string;
 }
 
+/** Where the wall's player currently is in the track (TNGC-73). Reported
+    every couple of seconds while playing, by whichever player is live — the
+    YouTube embed, the extracted-audio element, or a Viewscreen phone. The
+    server holds the last report per wall so a tricorder can draw a scrubber;
+    it is the ONLY way the position ever leaves the player. */
+export interface PlaybackProgressMessage {
+  type: "playback_progress";
+  videoId: string;
+  /** Seconds from the start. */
+  position: number;
+  /** Absent for live streams — the scrubber hides rather than lying. */
+  duration?: number;
+}
+
 export type ClientMessage =
   | HelloMessage
   | SetDisplayMessage
   | SpeakDoneMessage
   | ScreenStateMessage
   | VideoErrorMessage
-  | VideoEndedMessage;
+  | VideoEndedMessage
+  | PlaybackProgressMessage;
 
 // ---------- Console REST API (MCP server → API server) ----------
 // TNGC-35: every route that touches a screen accepts an optional `wall`. The
@@ -1178,6 +1197,8 @@ export interface MediaRequest {
   rate?: number;
   /** volume only: absolute level 0–100. */
   level?: number;
+  /** seek only (TNGC-73): absolute position in seconds. */
+  seconds?: number;
   wall?: string;
 }
 
@@ -1361,6 +1382,15 @@ export interface QueueNowPlaying extends QueueItem {
   audioOnly?: boolean;
   /** Playing under another panel (♫) rather than on screen. */
   backgrounded?: boolean;
+  /** Last reported playhead, seconds (TNGC-73). Absent until the player has
+      reported once, or when nothing is reporting (Viewscreen hand-off). */
+  position?: number;
+  /** Track length in seconds as the PLAYER measures it — absent for live
+      streams, which is the signal to hide the scrubber. */
+  playerDuration?: number;
+  /** ms epoch of that report, so a phone can advance it by wall-clock
+      instead of showing a number that is already seconds stale. */
+  positionAt?: number;
 }
 
 /** Now-playing + up-next panel (TNGC-66). Props are composed by the console

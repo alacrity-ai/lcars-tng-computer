@@ -362,6 +362,10 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   function nowPlayingFor(wall: string, panelHasScreen = false): QueueNowPlaying | undefined {
     const p = hub.playbackProps(wall);
     if (!p || typeof p.videoId !== "string") return undefined;
+    // TNGC-73: the playhead as last reported by whichever player is live,
+    // stamped so a phone can advance it locally instead of showing a number
+    // that is already a relay-beat stale.
+    const prog = hub.playbackProgress(wall);
     return {
       videoId: p.videoId,
       title: typeof p.title === "string" ? p.title : undefined,
@@ -369,6 +373,13 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       durationSeconds: typeof p.durationSeconds === "number" ? p.durationSeconds : undefined,
       audioOnly: p.audioOnly === true,
       backgrounded: panelHasScreen || hub.playbackBackgrounded(wall),
+      ...(prog
+        ? {
+            position: Math.round(prog.position),
+            positionAt: prog.at,
+            ...(prog.duration ? { playerDuration: Math.round(prog.duration) } : {}),
+          }
+        : {}),
     };
   }
 

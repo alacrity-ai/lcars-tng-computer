@@ -1459,6 +1459,14 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
         path = "/api/console/queue";
         body = { action: "loop", enabled: args.enabled };
       }
+    } else if (ctl.op === "seek") {
+      // TNGC-73: absolute seconds, re-validated and re-bounded here — the
+      // Worker's ceiling is the first gate, this is the second.
+      const s = args.seconds;
+      if (typeof s === "number" && Number.isFinite(s) && s >= 0 && s <= 12 * 60 * 60) {
+        path = "/api/console/media";
+        body = { action: "seek", seconds: Math.round(s) };
+      }
     } else if (
       ctl.op === "pause" ||
       ctl.op === "play" ||

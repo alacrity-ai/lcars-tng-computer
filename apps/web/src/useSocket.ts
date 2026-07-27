@@ -184,7 +184,9 @@ export function useSocket(displayName: string | null) {
           if (msg.action === "windowed") videoFullscreen.value = false;
           // Loose coupling: whichever panel is playing media listens for this.
           window.dispatchEvent(
-            new CustomEvent("tng-media", { detail: { action: msg.action, rate: msg.rate, level: msg.level } }),
+            new CustomEvent("tng-media", {
+              detail: { action: msg.action, rate: msg.rate, level: msg.level, seconds: msg.seconds },
+            }),
           );
         } else if (msg.type === "map_control") {
           // Same loose coupling: the live MapPanel animates in place.
@@ -393,12 +395,29 @@ export function useSocket(displayName: string | null) {
     };
     window.addEventListener("tng-video-ended", onVideoEnded);
 
+    // Playhead reports (TNGC-73). Fire-and-forget, unlike video_ended: one
+    // dropped report costs a phone's scrubber two seconds of staleness, and
+    // another is already on its way.
+    const onVideoProgress = (e: Event) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const { videoId, position, duration } = ((e as CustomEvent).detail ?? {}) as {
+        videoId?: string;
+        position?: number;
+        duration?: number;
+      };
+      if (!videoId || typeof position !== "number") return;
+      ws.send(JSON.stringify({ type: "playback_progress", videoId, position, duration }));
+    };
+    window.addEventListener("tng-video-progress", onVideoProgress);
+
     return () => {
       disposed = true;
       window.removeEventListener("tng-map-view", onMapView);
       window.removeEventListener("tng-sky-view", onSkyView);
       window.removeEventListener("tng-video-error", onVideoError);
       window.removeEventListener("tng-video-ended", onVideoEnded);
+      window.removeEventListener("tng-video-progress", onVideoProgress);
       wsRef.current?.close();
     };
   }, []);

@@ -481,7 +481,7 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
   app.post<{ Body: MediaRequest }>("/api/console/media", async (req, reply) => {
     const { action, rate, level } = req.body ?? {};
     const actions = [
-      "pause", "play", "stop", "speed", "fullscreen", "windowed",
+      "pause", "play", "stop", "speed", "seek", "fullscreen", "windowed",
       "volume", "volume_up", "volume_down", "mute", "unmute",
     ];
     if (!actions.includes(action)) {
@@ -505,6 +505,22 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       }
       hub.broadcast({ type: "media", action, level: Math.round(level) }, wall);
       return { ok: true, action, level: Math.round(level) };
+    }
+    if (action === "seek") {
+      // TNGC-73: absolute position. The player moves in place — never reload,
+      // or "jump to 2:30" would restart the track from zero.
+      const seconds = req.body?.seconds;
+      if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+        return reply.code(400).send({ error: "seek requires seconds (a non-negative number)" });
+      }
+      if (!hub.playbackState(wall)) {
+        return reply.code(409).send({ error: "nothing is playing on this wall" });
+      }
+      const at = Math.round(seconds);
+      hub.notePlaybackSeek(wall, at);
+      hub.broadcast({ type: "media", action, seconds: at }, wall);
+      refreshQueuePanel(wall);
+      return { ok: true, action, seconds: at };
     }
     if (action === "stop") {
       cancelActiveReading();

@@ -11,6 +11,11 @@ import { DEFAULT_PRIMARY_DISPLAY, normalizeDisplayName } from "@tng/shared";
 
 /** After this long on any non-exempt panel, the screen falls back to status. */
 const IDLE_REVERT_MS = 2 * 60_000;
+/** Longest believable track length (TNGC-73). A live stream or a player in a
+    broken state reports durations in the millions of seconds; anything past
+    this is treated as "no duration", which hides the scrubber rather than
+    drawing one where a drag would mean nothing. */
+const MAX_TRACK_SECONDS = 12 * 60 * 60;
 /** Views that never auto-revert: the idle board itself, alerts (which demand
  * attention until explicitly cleared), blank (an explicit screen-off), boot
  * (transitions on its own), and long-dwell content — a video playing or an
@@ -51,6 +56,10 @@ interface DisplayEntry {
       a phone's ⏯ button could only guess. Cleared by play, by any new
       track, and by clearPlayback — a fresh track always starts playing. */
   paused: boolean;
+  /** TNGC-73: where the player last said it was. Kept next to `playback` and
+      thrown away with it — a position outliving its track would draw a
+      scrubber pointing at the wrong song. */
+  progress: { videoId: string; position: number; duration?: number; at: number } | null;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
@@ -106,6 +115,7 @@ export class DisplayHub {
         widgetSources: new Map(),
         playback: null,
         paused: false,
+        progress: null,
         idleTimer: undefined,
       };
       this.displays.set(name, e);
@@ -300,6 +310,31 @@ export class DisplayHub {
       if (wall) this.videoErrorHandler?.(wall, msg.videoId, msg.code, msg.audio);
     } else if (msg.type === "video_ended") {
       if (wall) this.videoEndedHandler?.(wall, msg.videoId);
+    } else if (msg.type === "playback_progress") {
+      if (!wall) return;
+      const e = this.entry(wall);
+      // Only from the player that owns the CURRENT track: a stale report from
+      // a dying player would otherwise rewind the scrubber mid-song.
+      if (e.playback?.videoId !== msg.videoId) return;
+      if (!Number.isFinite(msg.position) || msg.position < 0) return;
+      // YouTube's lighter infoDelivery frames carry currentTime but no
+      // duration, so a report WITHOUT one must not erase what we know —
+      // otherwise the scrubber blinks in and out as the frames alternate.
+      // A nonsense length (live streams report days) counts as unknown.
+      const reported =
+        typeof msg.duration === "number" &&
+        Number.isFinite(msg.duration) &&
+        msg.duration > 0 &&
+        msg.duration <= MAX_TRACK_SECONDS
+          ? msg.duration
+          : undefined;
+      const known = e.progress?.videoId === msg.videoId ? e.progress.duration : undefined;
+      e.progress = {
+        videoId: msg.videoId,
+        position: msg.position,
+        duration: reported ?? known,
+        at: Date.now(),
+      };
     }
   }
 
@@ -347,6 +382,9 @@ export class DisplayHub {
       // foreground; any other panel backgrounds it (badge appears). Only
       // clearPlayback() ends it.
       if (msg.view === "youtube") {
+        // A different video means the old playhead is meaningless; the SAME
+        // video re-docking (recall, fullscreen flip) keeps its position.
+        if (e.playback?.videoId !== msg.props.videoId) e.progress = null;
         e.playback = msg.props;
         e.paused = false; // a freshly displayed track is playing (TNGC-69)
       }
@@ -375,6 +413,7 @@ export class DisplayHub {
       panel — queue advance while a diagram/weather/etc. has that screen. */
   playbackTrack(props: PanelProps, wall: string) {
     const e = this.entry(wall);
+    if (e.playback?.videoId !== props.videoId) e.progress = null; // TNGC-73
     e.playback = props;
     e.paused = false; // a new background track starts playing (TNGC-69)
     this.broadcast({ type: "playback", action: "track", props }, wall);
@@ -387,6 +426,7 @@ export class DisplayHub {
     if (!e.playback) return;
     e.playback = null;
     e.paused = false;
+    e.progress = null;
     this.broadcast({ type: "playback", action: "stop" }, wall);
     this.syncNowPlayingBadge(e);
   }
@@ -402,6 +442,27 @@ export class DisplayHub {
 
   playbackPaused(wall: string): boolean {
     return this.displays.get(wall)?.paused === true;
+  }
+
+  /** TNGC-73: the last playhead report for the wall's CURRENT track. */
+  playbackProgress(wall: string) {
+    const e = this.displays.get(wall);
+    if (!e?.progress || e.progress.videoId !== e.playback?.videoId) return null;
+    return e.progress;
+  }
+
+  /** A seek was ordered: move the stored playhead NOW rather than waiting for
+      the player's next report, so the phone that dragged the scrubber doesn't
+      watch its own thumb snap back for a beat. */
+  notePlaybackSeek(wall: string, seconds: number) {
+    const e = this.displays.get(wall);
+    if (!e?.playback || typeof e.playback.videoId !== "string") return;
+    e.progress = {
+      videoId: e.playback.videoId,
+      position: Math.max(0, seconds),
+      duration: e.progress?.duration,
+      at: Date.now(),
+    };
   }
 
   /** Walls with a live playback session — the media-state route's starting
