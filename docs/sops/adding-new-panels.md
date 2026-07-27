@@ -30,6 +30,12 @@ Panels are built across **three layers** that must stay in sync:
 
 The registry is typed as a total `Record<PanelView, ComponentType>`, so adding a view name without building a component **will not compile**. This guarantee means `display` can never advertise a panel the wall can't draw.
 
+**Machine-driven panels** (a game board, anything painted by cloud machinery
+rather than chosen by the Computer) go in `PANEL_VIEWS` *and* in
+`MACHINE_VIEWS`, which subtracts them from `DISPLAY_VIEWS` — the enum the
+`display` tool actually offers. The registry still has to cover them; the model
+just can't conjure one mid-conversation. See `pictionary` (TNGC-62).
+
 **What that guarantee does NOT cover:** it is a *compile-time* check against the
 `PanelView` union. A deployed viewscreen bundle built before your panel existed
 still renders the `UnknownPanel` stub at runtime — the type system can't reach

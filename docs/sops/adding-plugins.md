@@ -72,6 +72,14 @@ if the Computer should be able to speak it too — an MCP tool in
 via `cloudFetch` (see the `calendar` tool). It still respects the same
 household switch: `tenant_plugins` + the admin's Enable-plugins sheet.
 
+**One tile per plugin, not per feature.** If your plugin is really a *family*
+of things — games, timers, whatever comes next — give it one tile and a
+submenu, or the plugin grid turns into an app drawer by the fourth one.
+`games` (TNGC-61) is the pattern: one `CLOUD_PLUGINS` entry, a catalog behind
+it, and a registry where a new member costs a folder and one line. Its
+`GameModule` interface is worth reading even if you are not building a game —
+it is what "the extension point is the whole contract" looks like.
+
 ## Hard rules (learned the hard way — do not relearn them)
 
 1. **State is born in plugin-owned named volumes.** Never pair hardware, form
@@ -549,6 +557,18 @@ in `CLOUD_PLUGINS`, PWA screens, three wall panels in `panel-renderer`, and a
 service token. Read it when the capability is household *data* — it keeps
 working with the Computer unplugged, which is the whole reason the kind
 exists.
+
+**`games` (TNGC-61/62) — the cloud-native plugin that is a family.** One tile,
+a submenu, and a per-tenant match engine that runs as a PURE REDUCER inside
+the TenantHub DO (`apps/tricorder/src/games/`). Read it for three things the
+other exemplars don't show: how to hold live, fast-moving state without D1
+(the DO is single-threaded per tenant, so ordering is free and exact), how to
+own the DO alarm without stepping on anyone (`endsAt` on every phase), and how
+to paint a wall from cloud machinery — the `display_props` down-frame, which
+the bridge turns into the `POST /api/console/display` it already makes
+elsewhere. If your plugin needs a board on the wall rather than a panel the
+model chooses to show, that frame is how you get one, and your view belongs in
+`MACHINE_VIEWS` so `display` doesn't offer it.
 
 **Two traps that have already cost a shipped release** (don't relearn them):
 a roster id that isn't the plugin folder name silently greys your tile
