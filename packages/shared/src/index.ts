@@ -50,6 +50,7 @@ export const PANEL_VIEWS = [
   "qr",
   "pictionary",
   "list",
+  "gallery",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -144,6 +145,24 @@ export interface ListPanelProps {
   title: string;
   category?: string | null;
   items: ListPanelItem[];
+}
+
+/** Ambient photo slideshow (TNGC-64). `url`s are the photo API's capability
+    URLs — plain <img> fetchable on walls and phones alike. The panel cycles
+    on its own clock (crossfade every `intervalMs`, default 8s). */
+export interface GalleryPhoto {
+  url: string;
+  /** ms epoch — rendered as a small "JULY 2026" caption. */
+  takenAt?: number;
+  album?: string | null;
+}
+
+export interface GalleryPanelProps {
+  photos: GalleryPhoto[];
+  title?: string;
+  intervalMs?: number;
+  /** Shuffle before cycling (the ambient default); false plays in order. */
+  shuffle?: boolean;
 }
 
 export interface TextPanelProps {

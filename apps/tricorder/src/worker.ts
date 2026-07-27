@@ -27,6 +27,7 @@ import { gamesRoutes } from "./games/routes";
 import { GUEST_SESSION_TTL_MS, guestRoutes } from "./guest";
 import { libraryRoutes } from "./library";
 import { listsRoutes } from "./lists";
+import { photosRoutes } from "./photos";
 import { mintPairCode, registerRoutes } from "./register";
 
 export { TenantHub } from "./hub";
@@ -238,6 +239,7 @@ app.route("/api/library", libraryRoutes(lookupSession, hub));
 
 app.route("/api/calendar", calendarRoutes(lookupSession));
 app.route("/api/lists", listsRoutes(lookupSession));
+app.route("/api/photos", photosRoutes(lookupSession));
 
 // ---- Viewscreen mode socket (TNGC-36) — registered BEFORE the session gate:
 // browser WebSockets can't set Authorization headers, so the session token
@@ -437,6 +439,22 @@ const CLOUD_PLUGINS = [
       },
     },
   },
+  {
+    id: "photos",
+    name: "Photos",
+    online: true,
+    tile: {
+      color: "#cc6666",
+      icon: {
+        viewBox: "0 0 24 24",
+        paths: [
+          "M3 5h18v14H3z",
+          "M10.5 10a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0",
+          "m21 15-4.5-4.5L6 21",
+        ],
+      },
+    },
+  },
 ];
 
 // Tiles arrive from house-authored manifests, so they are validated and
@@ -459,6 +477,11 @@ function cleanTile(raw: unknown): PluginTile | undefined {
     typeof icon.viewBox === "string" && TILE_VIEWBOX_RE.test(icon.viewBox) ? icon.viewBox : "0 0 24 24";
   return { color: t.color.toLowerCase(), icon: { viewBox, paths, ...(icon.fill === true ? { fill: true } : {}) } };
 }
+/** Scenes the phone may ask for (TNGC-67). Kept in step by hand with SCENES
+    in plugins/lighting/service/src/control.mjs — the cloud cannot see the
+    sidecar's list, and guessing would let a typo reach the house as a 404. */
+const LIGHT_SCENES = ["default", "evening", "movie", "all-off", "red-alert", "party", "reset"];
+
 const CONTROL_LOG_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const COLOR_RE = /^[#a-zA-Z0-9 -]{1,32}$/;
 
@@ -537,13 +560,37 @@ app.post("/api/plugins/lights/control", async (c) => {
   if (typeof body.transition === "number" && body.transition >= 0 && body.transition <= 30) {
     args.transition = body.transition;
   }
-  if (!("state" in args) && !("brightness" in args) && !("color" in args) && !("colorTemp" in args)) {
-    return c.json({ error: "nothing to do — pass state, brightness, color, or colorTemp" }, 400);
+  // A named scene instead of a set (TNGC-67). Whitelisted here and re-checked
+  // bridge-side: a scene name is a route into the house, not free text. The
+  // phone's Default button is the reason this exists — `default` is the bulbs'
+  // own bright off-white, the house's "let me see everything" baseline.
+  const scene = typeof body.scene === "string" ? body.scene.trim().toLowerCase() : "";
+  if (scene) {
+    if (!LIGHT_SCENES.includes(scene)) {
+      return c.json({ error: `unknown scene — have: ${LIGHT_SCENES.join(", ")}` }, 400);
+    }
+    const sceneArgs: Record<string, unknown> = { scene };
+    if (typeof args.target === "string") sceneArgs.target = args.target;
+    return sendLightsOp(c, s, "scene", sceneArgs);
   }
+  if (!("state" in args) && !("brightness" in args) && !("color" in args) && !("colorTemp" in args)) {
+    return c.json({ error: "nothing to do — pass state, brightness, color, colorTemp, or scene" }, 400);
+  }
+  return sendLightsOp(c, s, "set", args);
+});
+
+/** Ship one validated lights op to the house and record who did it. Shared by
+    `set` and `scene` (TNGC-67) so attribution can't drift between them. */
+async function sendLightsOp(
+  c: Context<{ Bindings: Env; Variables: Vars }>,
+  s: SessionIdentity,
+  op: "set" | "scene",
+  args: Record<string, unknown>,
+): Promise<Response> {
   const ctl = {
     id: crypto.randomUUID(),
     plugin: "lights",
-    op: "set",
+    op,
     args,
     user: s.userHandle,
     device: s.deviceLabel,
@@ -565,7 +612,7 @@ app.post("/api/plugins/lights/control", async (c) => {
       c.env.DB.batch([
         c.env.DB.prepare(
           "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ).bind(ctl.id, s.tenantId, s.userHandle, "lights", "set", JSON.stringify(args).slice(0, 200), ctl.ts),
+        ).bind(ctl.id, s.tenantId, s.userHandle, "lights", op, JSON.stringify(args).slice(0, 200), ctl.ts),
         c.env.DB.prepare("DELETE FROM control_log WHERE tenant_id = ? AND created_at < ?").bind(
           s.tenantId,
           ctl.ts - CONTROL_LOG_RETENTION_MS,
@@ -574,7 +621,7 @@ app.post("/api/plugins/lights/control", async (c) => {
     );
   }
   return new Response(res.body, { status: res.status, headers: res.headers });
-});
+}
 
 // ---- claudeops plugin (TNGC-54) --------------------------------------------------
 // Remote control of the host's claude-ops session. ADMIN ONLY on both read

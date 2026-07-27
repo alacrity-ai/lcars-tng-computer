@@ -73,6 +73,10 @@ services:
       # Enabled plugins (TNGC-33) — comma-separated ids under plugins/;
       # the Makefile also chains each plugin's compose.yaml for sidecars.
       TNG_PLUGINS: ${TNG_PLUGINS:-}
+      # Idle photo gallery (TNGC-64): walls that become picture frames after
+      # sitting on the status board (comma-separated names; empty = off).
+      TNG_GALLERY_WALLS: ${TNG_GALLERY_WALLS:-}
+      TNG_IDLE_GALLERY_MS: ${TNG_IDLE_GALLERY_MS:-}
 
 volumes:
   # Session state incl. OAuth — survives restarts, isolated from host ~/.claude

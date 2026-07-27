@@ -390,6 +390,16 @@
     background: none; border: 1px solid var(--red); color: var(--red); border-radius: 12px;
     font: inherit; font-size: 12px; padding: 7px 12px; cursor: pointer;
   }
+  /* "Default" — the bulbs' own bright off-white (TNGC-67). Deliberately not
+     gold: it is neither On nor Off but a third thing, and a swatch-coloured
+     chip says "a look" where the gold pair says "power". */
+  .lt-onoff.dflt {
+    border-color: #ffd8a8; color: #ffd8a8; padding: 8px 12px;
+  }
+  .lt-dflt {
+    background: none; border: 1px solid #ffd8a8; color: #ffd8a8; border-radius: 12px;
+    font: inherit; font-size: 11px; padding: 8px 10px; cursor: pointer; text-transform: uppercase;
+  }
 
   /* calendar plugin (TNGC-51) */
   .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
@@ -496,6 +506,26 @@
   .fl-addrow .btn { width: auto; margin-top: 0; padding: 12px 18px; }
   .fl-actions { display: flex; gap: 10px; margin-top: 14px; }
   .fl-actions .btn { margin-top: 0; }
+
+  /* photos plugin (TNGC-64) */
+  .ph-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .ph-chip {
+    background: #1c1c28; border: 1px solid #333; color: var(--peach); border-radius: 14px;
+    font: inherit; font-size: 12px; font-weight: 700; padding: 7px 14px; cursor: pointer; text-transform: uppercase;
+  }
+  .ph-chip.on { background: var(--gold); border-color: var(--gold); color: var(--ink); }
+  .ph-uprow { display: flex; gap: 8px; margin-top: 12px; }
+  .ph-uprow input { flex: 1; min-width: 0; }
+  .ph-uprow .btn { width: auto; margin-top: 0; padding: 12px 18px; }
+  .ph-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 12px; }
+  .ph-cell {
+    aspect-ratio: 1; border: 0; padding: 0; border-radius: 10px; overflow: hidden;
+    background: #101018; cursor: pointer;
+  }
+  .ph-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #phv-img { width: 100%; max-height: 62vh; object-fit: contain; border-radius: 12px; background: #000; margin-top: 10px; }
+  .phv-meta { color: #888; font-size: 12px; margin-top: 10px; }
+  .phv-meta b { color: var(--peach); }
 
   /* send sheet */
   #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: flex-end; z-index: 5; }
@@ -1023,6 +1053,30 @@
       <button class="btn red" id="btn-fl-delete">Delete list</button>
     </div>
     <div class="err" id="flist-err"></div>
+  </div>
+
+  <!-- PHOTOS (TNGC-64): upload/browse the family photo library -->
+  <div class="view" id="view-ph">
+    <button class="link" id="btn-phback" style="text-align:left">&#9664; Plugins</button>
+    <label>Photos</label>
+    <div class="ph-chips" id="ph-chips"></div>
+    <div class="ph-uprow">
+      <input id="ph-album" placeholder="Album for uploads (optional)" autocapitalize="words">
+      <button class="btn blue" id="btn-ph-up">Upload</button>
+    </div>
+    <input type="file" id="ph-file" accept="image/*" multiple style="display:none">
+    <div class="pl-note" id="ph-note" hidden></div>
+    <div class="ph-grid" id="ph-grid"></div>
+    <div class="err" id="ph-err"></div>
+  </div>
+
+  <!-- one photo -->
+  <div class="view" id="view-phv">
+    <button class="link" id="btn-phvback" style="text-align:left">&#9664; Photos</button>
+    <img id="phv-img" alt="">
+    <div class="phv-meta" id="phv-meta"></div>
+    <button class="btn red" id="btn-phv-del">Delete photo</button>
+    <div class="err" id="phv-err"></div>
   </div>
 
   <!-- LIBRARY (TNGC-23) -->
@@ -2568,6 +2622,7 @@ async function openPlugins() {
         else if (p.id === "claudeops") openOps();
         else if (p.id === "games") openGames();
         else if (p.id === "lists") openFl();
+        else if (p.id === "photos") openPh();
       };
       grid.appendChild(b);
     }
@@ -3119,9 +3174,10 @@ async function pollLights() {
 
 function ltShortName(full) { return full.length > 16 ? full.slice(0, 15) + "…" : full; }
 
-async function ltControl(body) {
+async function ltControl(body, note) {
   try {
     await api("/api/plugins/lights/control", { method: "POST", body: JSON.stringify(body) });
+    if (note) toast(note);
     // the bridge re-reads reported state ~1.2s after the op — poll on its heels
     setTimeout(pollLights, 2000);
     setTimeout(pollLights, 4500);
@@ -3167,8 +3223,17 @@ function ltAllRow(anyOn) {
   off.className = "lt-onoff off";
   off.textContent = "Off";
   off.onclick = () => ltControl({ target: "all", state: "off" });
+  // "I just need to see everything" — the bulbs' own bright off-white, sent
+  // as a SCENE so the house reproduces hue/saturation faithfully. A hex round
+  // trip lands ~350K off and in the wrong colour mode (TNGC-67).
+  const dflt = document.createElement("button");
+  dflt.className = "lt-onoff dflt";
+  dflt.textContent = "Default";
+  dflt.title = "Everything on, full brightness, neutral off-white";
+  dflt.onclick = () => ltControl({ target: "all", scene: "default" }, "house set to default");
   row.appendChild(on);
   row.appendChild(off);
+  row.appendChild(dflt);
   return row;
 }
 
@@ -3255,6 +3320,17 @@ function ltScrubRow(row, f) {
     ltControl({ target: f.name, brightness: Number(range.value), state: "on" });
     renderLights();
   };
+  // The colour picker is a native <input type="color">, so "Default" cannot
+  // live inside it — it sits here, in the row's editing mode, next to Apply.
+  const dflt = document.createElement("button");
+  dflt.className = "lt-dflt";
+  dflt.textContent = "Default";
+  dflt.title = "Full brightness, neutral off-white";
+  dflt.onclick = () => {
+    ltScrub = null;
+    ltControl({ target: f.name, scene: "default" });
+    renderLights();
+  };
   const x = document.createElement("button");
   x.className = "lt-x";
   x.textContent = "✕";
@@ -3262,6 +3338,7 @@ function ltScrubRow(row, f) {
   x.onclick = () => { ltScrub = null; renderLights(); };
   row.appendChild(range);
   row.appendChild(pct);
+  row.appendChild(dflt);
   row.appendChild(ok);
   row.appendChild(x);
   return row;
@@ -3822,6 +3899,150 @@ $("btn-fl-delete").onclick = async () => {
     openFl();
   } catch (e) { toast(e.message, true); }
 };
+
+// ---- photos plugin (TNGC-64) ----------------------------------------------------
+// Upload/browse the family photo library. Photos are downsized ON THE PHONE
+// (canvas, max 1600px, jpeg) before upload — the cloud stores viewing
+// copies, not originals. Grid <img>s ride the capability URLs directly.
+let phAlbum = null, phPhotos = [], phCurrent = null;
+
+function openPh() {
+  show("ph");
+  $("ph-err").textContent = "";
+  phRefresh();
+}
+$("btn-phback").onclick = () => openPlugins();
+$("btn-phvback").onclick = () => openPh();
+
+async function phRefresh() {
+  try {
+    const q = phAlbum ? "?album=" + encodeURIComponent(phAlbum) : "";
+    const d = await api("/api/photos" + q);
+    phPhotos = d.photos;
+    const chips = $("ph-chips");
+    chips.innerHTML = "";
+    const mkChip = (label, value) => {
+      const b = document.createElement("button");
+      b.className = "ph-chip" + ((value ?? null) === phAlbum ? " on" : "");
+      b.textContent = label;
+      b.onclick = () => { phAlbum = value ?? null; phRefresh(); };
+      chips.appendChild(b);
+    };
+    mkChip("All (" + d.total + ")", null);
+    for (const a of d.albums) mkChip(a.album + " (" + a.n + ")", a.album);
+    const grid = $("ph-grid");
+    grid.innerHTML = "";
+    if (!d.photos.length) {
+      $("ph-err").textContent = "";
+      grid.innerHTML = "";
+      $("ph-note").hidden = false;
+      $("ph-note").textContent = d.total === 0
+        ? "No photos yet — upload some."
+        : "Nothing in this album.";
+      return;
+    }
+    $("ph-note").hidden = true;
+    for (const p of d.photos) {
+      const cell = document.createElement("button");
+      cell.className = "ph-cell";
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.src = p.url;
+      img.alt = "";
+      cell.appendChild(img);
+      cell.onclick = () => phView(p);
+      grid.appendChild(cell);
+    }
+  } catch (e) { $("ph-err").textContent = e.message; }
+}
+
+function phView(p) {
+  phCurrent = p;
+  show("phv");
+  $("phv-err").textContent = "";
+  $("phv-img").src = p.url;
+  const d = new Date(p.takenAt);
+  $("phv-meta").innerHTML = "";
+  const meta = $("phv-meta");
+  const when = document.createElement("b");
+  when.textContent = d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  meta.appendChild(when);
+  meta.appendChild(document.createTextNode(
+    (p.album ? " · " + p.album : "") + " · by " + p.createdBy,
+  ));
+  // your own photos, or anyone's if you're the admin
+  $("btn-phv-del").hidden = !(me.user.role === "admin" || p.createdBy === me.user.handle);
+}
+
+$("btn-phv-del").onclick = async () => {
+  if (!phCurrent || !confirm("Delete this photo for the whole household?")) return;
+  try {
+    await api("/api/photos/" + phCurrent.id, { method: "DELETE" });
+    toast("Photo deleted");
+    openPh();
+  } catch (e) { $("phv-err").textContent = e.message; }
+};
+
+// ---- upload: pick → downsize → POST, one at a time with a running note ----
+$("btn-ph-up").onclick = () => $("ph-file").click();
+$("ph-file").onchange = async () => {
+  const files = [...$("ph-file").files].slice(0, 20);
+  $("ph-file").value = "";
+  if (!files.length) return;
+  const album = $("ph-album").value.trim();
+  const note = $("ph-note");
+  note.hidden = false;
+  let done = 0, failed = 0;
+  for (const file of files) {
+    note.textContent = "Uploading " + (done + failed + 1) + " / " + files.length + "…";
+    try {
+      const resized = await phResize(file);
+      const res = await fetch("/api/photos", {
+        method: "POST",
+        headers: {
+          "content-type": "image/jpeg",
+          authorization: "Bearer " + store.token,
+          "x-photo-taken-at": String(file.lastModified || Date.now()),
+          "x-photo-width": String(resized.width),
+          "x-photo-height": String(resized.height),
+          ...(album ? { "x-photo-album": encodeURIComponent(album) } : {}),
+        },
+        body: resized.blob,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "upload failed (" + res.status + ")");
+      }
+      done++;
+    } catch (e) {
+      failed++;
+      toast(e.message, true);
+    }
+  }
+  await phRefresh(); // may hide/repurpose the note — summarize after
+  note.hidden = false;
+  note.textContent = "Uploaded " + done + (failed ? " — " + failed + " failed" : "");
+  setTimeout(() => { if (note.textContent.startsWith("Uploaded")) note.hidden = true; }, 2500);
+};
+
+/** Downsize on the phone: max 1600px on the long side, EXIF orientation
+    baked in by the browser (imageOrientation: from-image), jpeg q0.82. */
+async function phResize(file) {
+  const MAX = 1600;
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale);
+  const h = Math.round(bmp.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode image"))), "image/jpeg", 0.82);
+  });
+  return { blob, width: w, height: h };
+}
 
 function renderOpsPrefBtns(s) {
   const model = (s && s.model) || "";

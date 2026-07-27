@@ -1118,6 +1118,73 @@ server.registerTool(
   },
 );
 
+// ---- family photos (TNGC-64) -----------------------------------------------------
+// The photo library lives in the tricorder cloud (D1 index + R2 bytes); the
+// gallery panel consumes capability URLs, so the model never touches image
+// data — display fetches the index and composes props server-side, exactly
+// the calendar/lists posture.
+
+interface PhotoIndexRow {
+  id: string;
+  url: string;
+  album: string | null;
+  takenAt: number;
+  createdBy: string;
+}
+
+const GALLERY_MAX = 80;
+
+server.registerTool(
+  "photos",
+  {
+    description:
+      "The family photo library (uploaded from tricorders; guests excluded). Actions: " +
+      "display {album?, month?, wall?} — start the ambient slideshow on the wall ('show " +
+      "our photos' → everything, newest-leaning shuffle; 'photos from July' → month: " +
+      "YYYY-MM resolved by you; 'show the vacation album' → album by name). " +
+      "read {} — albums with counts and the library total, for questions ('how many " +
+      "photos do we have?', 'what albums are there?'). " +
+      "To STOP the slideshow, display the status board (or whatever was asked for) via " +
+      "the display tool — the gallery is just a panel. Uploading is a human act: point " +
+      "people at the Photos plugin on their tricorder.",
+    inputSchema: {
+      action: z.enum(["display", "read"]),
+      album: z.string().optional(),
+      month: z.string().optional(),
+      wall: z.string().optional(),
+    },
+  },
+  async ({ action, album, month, wall }) => {
+    if (action === "read") {
+      const idx = await cloudFetch<{ albums: Array<{ album: string; n: number }>; total: number }>(
+        "GET",
+        "/api/photos?limit=1",
+      );
+      return textResult(JSON.stringify({ total: idx.total, albums: idx.albums }));
+    }
+    const params = new URLSearchParams({ limit: String(GALLERY_MAX) });
+    if (album?.trim()) params.set("album", album.trim());
+    if (month && /^\d{4}-\d{2}$/.test(month)) params.set("month", month);
+    const { photos } = await cloudFetch<{ photos: PhotoIndexRow[] }>("GET", `/api/photos?${params}`);
+    if (!photos.length) {
+      return textResult(
+        album || month
+          ? `No photos found${album ? ` in "${album}"` : ""}${month ? ` for ${month}` : ""}. Say so and offer the full library.`
+          : "The photo library is empty — suggest uploading from the tricorder's Photos plugin.",
+      );
+    }
+    await call("/api/console/display", {
+      view: "gallery",
+      props: {
+        photos: photos.map((p) => ({ url: p.url, takenAt: p.takenAt, album: p.album })),
+        title: album ? album.toUpperCase() : month ? `MEMORIES · ${month}` : "MEMORIES",
+      },
+      ...(wall ? { wall } : {}),
+    });
+    return textResult(`Slideshow on the wall — ${photos.length} photo${photos.length === 1 ? "" : "s"}.`);
+  },
+);
+
 // ---- guest QR (TNGC-57) ----------------------------------------------------------
 // Mint an invite with the service token and put it on the wall in one call.
 // The invite URL is deliberately NOT returned: it is a live credential, and a

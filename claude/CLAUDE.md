@@ -133,6 +133,7 @@ and don't inline their contents here.
 | "Make me a dashboard of X", combined status boards, no dedicated panel fits | `composite` |
 | "Show the calendar", "what's scheduled today/this week", "schedule X tomorrow at 2" | `calendar` |
 | "Add X to the shopping list", "show the list", "check off X", "what's left on Y" | `lists` |
+| "Show our photos", "photos from July", "the vacation album", "stop the slideshow" | `photos` |
 | "Set a timer/alarm", clear it, time left | `timers` |
 | "Display the guest QR code", "let my guests in", ending guest access | `guests` |
 | "Play X", music & video, pause/stop | `media` |

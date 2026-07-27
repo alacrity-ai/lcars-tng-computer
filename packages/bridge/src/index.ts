@@ -63,7 +63,7 @@ import type {
   TngMessage,
 } from "@tng/contract";
 import { EFFORT_LEVELS, MODEL_VALUE_RE } from "@tng/contract";
-import { getItem } from "@tng/library-client";
+import { cloudFetch, getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
 /** Voice commands are ephemeral speech: anything older than this ON ARRIVAL
@@ -979,6 +979,76 @@ async function pollRoster(): Promise<void> {
 setInterval(() => void pollRoster(), 10_000).unref();
 void pollRoster();
 
+// ---- idle photo gallery (TNGC-64) ------------------------------------------------
+// Opt-in screensaver: a wall named in TNG_GALLERY_WALLS that sits on the
+// status board for IDLE_MS drifts into the ambient photo slideshow. The
+// bridge is the right owner — it alone holds the cloud token (photo index)
+// AND reaches the wall server. Hands-off rule: the moment a wall shows
+// anything but status/our gallery, its idle clock resets — commands, alerts,
+// and panels always win; the takeover only ever replaces the idle board.
+
+const GALLERY_WALLS = (process.env.TNG_GALLERY_WALLS ?? "")
+  .split(/[\s,]+/)
+  .map((w) => w.trim())
+  .filter(Boolean);
+// `||` not `??`: compose passes an empty string when unset, and an empty
+// string must mean "default", never "0ms".
+const IDLE_GALLERY_MS = Number(process.env.TNG_IDLE_GALLERY_MS || 10 * 60_000);
+const GALLERY_PHOTO_CACHE_MS = 10 * 60_000;
+
+const idleSince = new Map<string, number>();
+let galleryPhotoCache: { at: number; photos: Array<Record<string, unknown>> } | null = null;
+
+async function galleryPhotos(): Promise<Array<Record<string, unknown>>> {
+  if (galleryPhotoCache && Date.now() - galleryPhotoCache.at < GALLERY_PHOTO_CACHE_MS) {
+    return galleryPhotoCache.photos;
+  }
+  const { photos } = await cloudFetch<{
+    photos: Array<{ url: string; takenAt: number; album: string | null }>;
+  }>("GET", "/api/photos?limit=80");
+  const mapped = photos.map((p) => ({ url: p.url, takenAt: p.takenAt, album: p.album }));
+  galleryPhotoCache = { at: Date.now(), photos: mapped };
+  return mapped;
+}
+
+async function pollIdleGallery(): Promise<void> {
+  for (const wall of GALLERY_WALLS) {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/console/screen?wall=${encodeURIComponent(wall)}`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!res.ok) continue;
+      const s = (await res.json()) as { view?: string };
+      if (s.view === "gallery") continue; // ours (or someone's) — leave it be
+      if (s.view !== "status") {
+        idleSince.delete(wall); // the wall is in use — hands off, clock resets
+        continue;
+      }
+      const since = idleSince.get(wall) ?? Date.now();
+      if (!idleSince.has(wall)) idleSince.set(wall, since);
+      if (Date.now() - since < IDLE_GALLERY_MS) continue;
+      const photos = await galleryPhotos();
+      idleSince.delete(wall);
+      if (!photos.length) continue; // empty library — nothing to drift into
+      await fetch(`${SERVER_URL}/api/console/display`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ view: "gallery", props: { photos, title: "MEMORIES" }, wall }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      console.error(`[bridge] idle gallery on ${wall} (${photos.length} photos)`);
+    } catch {
+      // wall server restarting / cloud blip — next poll catches up
+    }
+  }
+}
+if (GALLERY_WALLS.length && CLOUD_URL && CLOUD_TOKEN) {
+  console.error(
+    `[bridge] idle gallery armed for ${GALLERY_WALLS.join(", ")} after ${Math.round(IDLE_GALLERY_MS / 60_000)}min`,
+  );
+  setInterval(() => void pollIdleGallery(), 30_000).unref();
+}
+
 // ---- tricorder plugins (TNGC-40) ------------------------------------------------
 // The deterministic control plane. `control` down-frames POST straight to the
 // plugin sidecar — no queue, no session turn, dispatched even mid-turn: a
@@ -1211,6 +1281,11 @@ if (CLAUDEOPS_URL) {
 /** Whitelist-rebuild of a lights `/set` body. The Worker validated already,
     but the bridge trusts nothing that rode the internet — same posture as
     set_pref: the sidecar request is BUILT from the values, never relayed. */
+/** Scene names the house will accept from a phone (TNGC-67). Hand-kept in
+    step with SCENES in plugins/lighting/service/src/control.mjs, same as the
+    Worker's copy — two gates, and the sidecar 404s anything past both. */
+const LIGHT_SCENES = ["default", "evening", "movie", "all-off", "red-alert", "party", "reset"];
+
 function lightsSetBody(args: Record<string, unknown>): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   if (typeof args.target === "string" && args.target.length > 0 && args.target.length <= 64) out.target = args.target;
@@ -1238,6 +1313,34 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
     console.error(`[bridge] dropped stale control op (${Math.round((Date.now() - ctl.ts) / 1000)}s old) from ${ctl.user}`);
     return;
   }
+  // A named scene (TNGC-67). Re-validated here, never passed through: the
+  // Worker's whitelist is the first gate, this is the second, and the sidecar
+  // 404s anything neither knew about.
+  if (ctl.plugin === "lights" && ctl.op === "scene") {
+    const raw = (ctl.args ?? {}).scene;
+    const name = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (!LIGHT_SCENES.includes(name)) {
+      console.error(`[bridge] refused lights scene "${String(raw)}" from ${ctl.user}`);
+      return;
+    }
+    const target = (ctl.args ?? {}).target;
+    const body: Record<string, unknown> = { name };
+    if (typeof target === "string" && target.length > 0 && target.length <= 64) body.target = target;
+    try {
+      const res = await fetch(`${LIGHTING_URL}/scene`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
+      });
+      console.error(`[bridge] lights scene by ${ctl.user}/${ctl.device}: ${JSON.stringify(body)} → ${res.status}`);
+    } catch (err) {
+      console.error(`[bridge] lights scene failed: ${(err as Error).message}`);
+    }
+    setTimeout(() => void pollPlugins(true), 1_800).unref();
+    return;
+  }
+
   if (ctl.plugin === "lights" && ctl.op === "set") {
     const body = lightsSetBody(ctl.args ?? {});
     if (!body) {
