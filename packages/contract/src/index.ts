@@ -177,6 +177,35 @@ export interface LightsState {
   updatedAt: number;
 }
 
+/** One track as the media plugin reports it (TNGC-69). */
+export interface MediaTrack {
+  videoId: string;
+  title?: string;
+  channel?: string;
+  durationSeconds?: number;
+}
+
+/** One wall's transport picture (TNGC-69) — what a phone needs to draw
+    ⏮ ⏯ ⏭ and the session list. `history` is oldest → newest; ⏮ is available
+    iff it is non-empty, ⏭ iff `queue` is. */
+export interface MediaWall {
+  wall: string;
+  playing: (MediaTrack & { audioOnly?: boolean; backgrounded?: boolean }) | null;
+  paused: boolean;
+  loop: boolean;
+  queue: MediaTrack[];
+  history: MediaTrack[];
+}
+
+/** The media plugin's `plugin_state` payload (TNGC-69). Only walls with
+    playback, a queue, or history appear — an idle house sends `walls: []`,
+    which is what hides the tricorder's transport bar. */
+export interface MediaState {
+  walls: MediaWall[];
+  primary: string;
+  updatedAt: number;
+}
+
 /** Frames pushed down the /link socket (cloud → bridge). Keepalive is raw
     text "ping"/"pong" outside this framing (DO auto-response, never wakes
     the hub).

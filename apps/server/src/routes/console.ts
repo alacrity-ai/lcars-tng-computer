@@ -30,7 +30,14 @@ import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
 import { validateComposite } from "../composite.js";
 import { loadSettings, saveSettings } from "../settings.js";
-import { decorateYoutubeProps, getQueue, refreshQueuePanel, restorePlaylist } from "./youtube.js";
+import {
+  decorateYoutubeProps,
+  endMediaSession,
+  getQueue,
+  mediaState,
+  refreshQueuePanel,
+  restorePlaylist,
+} from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
 const CHUNK_MIN_CHARS = 180;
@@ -505,12 +512,21 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       // TNGC-26: stop ends the playback SESSION (foreground or background) —
       // the persistent player tears down, the ♫ badge clears.
       hub.clearPlayback(wall);
+      endMediaSession(wall); // …and the ⏮ back-stack with it (TNGC-69)
       // A visible queue panel loses its NOW PLAYING row in the same stroke.
       refreshQueuePanel(wall);
     }
+    // TNGC-69: remember pause/resume so a phone's ⏯ can show true state.
+    if (action === "pause") hub.setPlaybackPaused(wall, true);
+    if (action === "play") hub.setPlaybackPaused(wall, false);
     hub.broadcast({ type: "media", action }, wall);
     return { ok: true, action };
   });
+
+  // The house's transport picture (TNGC-69): every wall with playback, a
+  // queue, or history — composed from live state, stored nowhere. The bridge
+  // polls this and relays it to tricorders as the `media` plugin's state.
+  app.get("/api/console/media-state", async () => mediaState());
 
   app.post<{ Body: SpeakRequest }>("/api/console/speak", async (req, reply) => {
     const { text: rawText, waitForPlayback = true, caption = true, lang = "en" } = req.body ?? {};

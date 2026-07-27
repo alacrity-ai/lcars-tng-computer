@@ -197,6 +197,71 @@
   #toast.visible { opacity: 1; transform: none; }
   #toast.bad { color: var(--red); }
 
+  /* transport bar (TNGC-69) — ⏮ ⏯ ⏭ under the talk circle, present only
+     while something is actually playing. Deterministic: every tap is a
+     control frame, never a command the Computer has to think about. */
+  #tp-bar {
+    display: none; align-items: center; gap: 10px; margin-top: 14px;
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 16px; padding: 8px 12px;
+    animation: fade-rise .22s ease-out both;
+  }
+  #tp-bar.show { display: flex; }
+  .tp-btn {
+    flex: none; width: 46px; height: 46px; border-radius: 50%;
+    background: none; border: 2px solid var(--gold); color: var(--gold);
+    display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+    transition: transform .12s, opacity .2s;
+  }
+  .tp-btn:active { transform: scale(.92); filter: brightness(1.2); }
+  .tp-btn[disabled] { opacity: .25; border-color: #555; color: #777; pointer-events: none; }
+  .tp-btn.play { width: 54px; height: 54px; background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  .tp-meta { flex: 1; min-width: 0; }
+  .tp-title {
+    color: var(--peach); font-size: 13px; font-weight: 700;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tp-sub { color: #777; font-size: 10px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tp-wall {
+    flex: none; color: var(--blue); font-size: 10px; font-weight: 700; text-transform: uppercase;
+    border: 1px solid #2a2a3a; border-radius: 10px; padding: 4px 8px;
+  }
+
+  /* media plugin screen (TNGC-70) */
+  .md-now { border: 1px solid var(--gold); border-radius: 14px; padding: 12px 14px; margin-top: 10px; background: #17110a; }
+  .md-now.idle { border-color: #2a2a3a; background: #101018; }
+  .md-now-title { color: var(--peach); font-size: 17px; font-weight: 700; word-break: break-word; }
+  .md-now-sub { color: #888; font-size: 12px; margin-top: 3px; }
+  .md-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .md-tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; border-radius: 10px;
+    padding: 3px 9px; background: var(--lav); color: var(--ink);
+  }
+  .md-tag.bg { background: var(--blue); }
+  .md-tag.loop { background: var(--gold); }
+  .md-transport { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; }
+  .md-row {
+    display: flex; align-items: center; gap: 10px; min-height: 50px;
+    background: #101018; border: 1px solid #2a2a3a; border-radius: 12px;
+    padding: 7px 12px; margin-top: 8px; width: 100%; text-align: left;
+    font: inherit; color: inherit; cursor: pointer;
+  }
+  .md-row.past { opacity: .45; cursor: default; }
+  .md-row.current { border-color: var(--gold); background: #17110a; cursor: default; }
+  .md-pos { flex: none; width: 26px; color: var(--gold); font-size: 12px; font-weight: 700; text-align: right; }
+  .md-row.past .md-pos { color: #777; }
+  .md-tk { flex: 1; min-width: 0; }
+  .md-tk-title { color: var(--peach); font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .md-row.current .md-tk-title { color: var(--gold); }
+  .md-tk-sub { color: #777; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .md-dur { flex: none; color: var(--blue); font-size: 11px; }
+  .md-sec { color: var(--blue); font-size: 12px; text-transform: uppercase; margin: 16px 0 2px; }
+  .md-walls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .md-wallchip {
+    background: none; border: 1px solid #2a2a3a; color: #999; border-radius: 12px;
+    font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; text-transform: uppercase;
+  }
+  .md-wallchip.on { border-color: var(--gold); color: var(--gold); }
+
   /* instant-send toggle */
   .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
   .toggle-label { color: var(--blue); font-size: 13px; text-transform: uppercase; }
@@ -891,6 +956,26 @@
           <div id="live"></div>
           <div id="toast"></div>
         </div>
+        <!-- transport bar (TNGC-69): appears only while media plays -->
+        <div id="tp-bar">
+          <button class="tp-btn" id="tp-prev" aria-label="Previous track">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+              <path d="M6 5h2.5v14H6z"/><path d="M19 5.5v13L9.5 12z"/></svg>
+          </button>
+          <button class="tp-btn play" id="tp-play" aria-label="Pause or resume">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true" id="tp-play-icon">
+              <path d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/></svg>
+          </button>
+          <button class="tp-btn" id="tp-next" aria-label="Next track">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+              <path d="M5 5.5v13L14.5 12z"/><path d="M15.5 5H18v14h-2.5z"/></svg>
+          </button>
+          <div class="tp-meta">
+            <div class="tp-title" id="tp-title"></div>
+            <div class="tp-sub" id="tp-sub"></div>
+          </div>
+          <span class="tp-wall" id="tp-wall" hidden></span>
+        </div>
         <div class="toggle-row">
           <span class="toggle-label">Instant send on release</span>
           <button class="switch" id="sw-instant" aria-label="Instant send on release"><span class="knob"></span></button>
@@ -1079,6 +1164,41 @@
     <div class="err" id="phv-err"></div>
   </div>
 
+  <!-- MEDIA (TNGC-70): the player — session list, transport, jump, loop -->
+  <div class="view" id="view-md">
+    <button class="link" id="btn-mdback" style="text-align:left">&#9664; Plugins</button>
+    <label>Media</label>
+    <div class="md-walls" id="md-walls"></div>
+    <div class="md-now" id="md-now">
+      <div class="md-now-title" id="md-now-title">Nothing playing</div>
+      <div class="md-now-sub" id="md-now-sub"></div>
+      <div class="md-tags" id="md-tags"></div>
+      <div class="md-transport">
+        <button class="tp-btn" id="md-prev" aria-label="Previous track">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+            <path d="M6 5h2.5v14H6z"/><path d="M19 5.5v13L9.5 12z"/></svg>
+        </button>
+        <button class="tp-btn play" id="md-play" aria-label="Pause or resume">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true" id="md-play-icon">
+            <path d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/></svg>
+        </button>
+        <button class="tp-btn" id="md-next" aria-label="Next track">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+            <path d="M5 5.5v13L14.5 12z"/><path d="M15.5 5H18v14h-2.5z"/></svg>
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn small" id="md-vdown">&minus; Volume</button>
+        <button class="btn small" id="md-vup">+ Volume</button>
+        <button class="btn small lav" id="md-loop">Loop</button>
+        <button class="btn small red" id="md-stop">Stop</button>
+      </div>
+    </div>
+    <div id="md-list"></div>
+    <div class="muted" id="md-hint"></div>
+    <div class="err" id="md-err"></div>
+  </div>
+
   <!-- LIBRARY (TNGC-23) -->
   <div class="view" id="view-library">
     <div class="lib-head">
@@ -1240,6 +1360,8 @@ function logout() {
   stopLightsPoll();
   stopOpsPoll();
   stopFlPoll();
+  stopMdPoll();
+  renderTransport(null); // the bar must not outlive the session that saw it
   show("login");
 }
 
@@ -1455,8 +1577,80 @@ async function pollStatus() {
     if (Array.isArray(s.displays)) displays = s.displays;
     setPill(s.online, s.pending || 0);
     setCompactBanner(s.compacting === true);
+    renderTransport(s.media);
   } catch { /* 401 already handled; network blips keep last state */ }
 }
+
+// ---- transport bar (TNGC-69) ---------------------------------------------------
+// ⏮ ⏯ ⏭ under the talk circle, visible only while something plays. Every tap
+// is a deterministic control frame — the Computer is never woken, so skipping
+// a track costs nothing and works while it is mid-thought. State rides the
+// status poll above (no timer of its own); taps apply optimistically and the
+// poll confirms within ~2s via the fast window.
+let tpWall = null, tpOptimistic = 0;
+
+/** Which playing wall this phone drives: its own viewscreen while in vs mode,
+    else the wall it targets, else whatever is actually playing. */
+function pickMediaWall(list) {
+  if (!list.length) return null;
+  const own = vsOn && me ? "tricorder-" + me.user.handle : null;
+  if (own) { const m = list.find((w) => w.wall === own); if (m) return m; }
+  const sel = getWall();
+  if (sel) { const m = list.find((w) => w.wall === sel); if (m) return m; }
+  return list[0];
+}
+
+function renderTransport(list) {
+  const bar = $("tp-bar");
+  const items = Array.isArray(list) ? list : [];
+  const w = pickMediaWall(items);
+  if (!w) {
+    bar.className = "";
+    tpWall = null;
+    return;
+  }
+  tpWall = w.wall;
+  bar.className = "show";
+  $("tp-title").textContent = w.title || "Playing";
+  $("tp-sub").textContent = w.channel || "";
+  // A tap's optimistic paint owns the button for a beat — otherwise a poll
+  // that raced the op would visibly snap the icon back and forth.
+  if (Date.now() > tpOptimistic) setPlayIcon("tp-play-icon", w.paused);
+  $("tp-prev").disabled = !w.canPrev;
+  $("tp-next").disabled = !w.canNext;
+  // The wall chip earns its space only when the house is ambiguous.
+  const chip = $("tp-wall");
+  chip.hidden = items.length < 2;
+  chip.textContent = w.wall;
+}
+
+/** ▶ when paused, ❚❚ when playing — the button shows what a tap will DO. */
+function setPlayIcon(id, paused) {
+  $(id).innerHTML = paused ? '<path d="M7 4.5v15L19.5 12z"/>' : '<path d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/>';
+}
+
+async function mediaOp(op, extra) {
+  const body = { op, ...(extra || {}) };
+  if (tpWall) body.wall = tpWall;
+  try {
+    await api("/api/plugins/media/control", { method: "POST", body: JSON.stringify(body) });
+    // Confirm from reported state quickly rather than trusting the 202.
+    fastUntil = Math.max(fastUntil, Date.now() + 12000);
+    schedulePoll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$("tp-prev").onclick = () => mediaOp("prev");
+$("tp-next").onclick = () => mediaOp("next");
+$("tp-play").onclick = () => {
+  // Flip locally first: a transport button that waits a round trip feels dead.
+  const paused = $("tp-play-icon").innerHTML.includes("15L");
+  setPlayIcon("tp-play-icon", !paused);
+  tpOptimistic = Date.now() + 2500;
+  mediaOp(paused ? "play" : "pause");
+};
 
 // Memory consolidation banner (TNGC-32): driven by the status poll everywhere
 // and instantly by broadcast frames while in Viewscreen mode. While active,
@@ -2623,6 +2817,7 @@ async function openPlugins() {
         else if (p.id === "games") openGames();
         else if (p.id === "lists") openFl();
         else if (p.id === "photos") openPh();
+        else if (p.id === "media") openMd();
       };
       grid.appendChild(b);
     }
@@ -3898,6 +4093,173 @@ $("btn-fl-delete").onclick = async () => {
     stopFlPoll();
     openFl();
   } catch (e) { toast(e.message, true); }
+};
+
+// ---- media plugin (TNGC-70) -----------------------------------------------------
+// The player: the whole listening session in order (played · playing · queued),
+// tap-to-jump, loop, volume. Same deterministic plane as the transport bar —
+// no op here ever wakes the Computer. State is bridge-reported, so the screen
+// polls (3s) rather than guessing; taps paint optimistically for one beat.
+let mdTimer = null, mdWall = null, mdState = null, mdOptimistic = 0;
+
+function openMd() {
+  show("md");
+  $("md-err").textContent = "";
+  stopMdPoll();
+  pollMd();
+  mdTimer = setInterval(pollMd, 3000);
+}
+$("btn-mdback").onclick = () => { stopMdPoll(); openPlugins(); };
+function stopMdPoll() { if (mdTimer) { clearInterval(mdTimer); mdTimer = null; } }
+
+async function pollMd() {
+  if (document.hidden || !me) return;
+  try {
+    const d = await api("/api/plugins/media/state");
+    mdState = d.state && Array.isArray(d.state.walls) ? d.state.walls : [];
+    renderMd();
+    $("md-err").textContent = "";
+  } catch (e) { $("md-err").textContent = e.message; }
+}
+
+/** The wall this screen drives: an explicit pick, else the transport bar's
+    choice, else the first with anything going on. */
+function mdCurrent() {
+  const walls = mdState || [];
+  if (!walls.length) return null;
+  return walls.find((w) => w.wall === mdWall)
+    || walls.find((w) => w.wall === tpWall)
+    || walls[0];
+}
+
+function mdSecs(s) {
+  if (typeof s !== "number" || !isFinite(s) || s <= 0) return "";
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m + ":" + String(sec).padStart(2, "0");
+}
+
+function renderMd() {
+  const walls = mdState || [];
+  const w = mdCurrent();
+  mdWall = w ? w.wall : null;
+
+  // Wall chips only when the house is ambiguous — one room needs no picker.
+  const wrap = $("md-walls");
+  wrap.innerHTML = "";
+  if (walls.length > 1) {
+    for (const x of walls) {
+      const b = document.createElement("button");
+      b.className = "md-wallchip" + (x.wall === mdWall ? " on" : "");
+      b.textContent = x.wall;
+      b.onclick = () => { mdWall = x.wall; renderMd(); };
+      wrap.appendChild(b);
+    }
+  }
+
+  const now = w && w.playing;
+  $("md-now").className = "md-now" + (now ? "" : " idle");
+  $("md-now-title").textContent = now ? (now.title || now.videoId) : "Nothing playing";
+  $("md-now-sub").textContent = now ? (now.channel || "") : "Ask the Computer to play something.";
+  const tags = $("md-tags");
+  tags.innerHTML = "";
+  const tag = (text, cls) => {
+    const s = document.createElement("span");
+    s.className = "md-tag" + (cls ? " " + cls : "");
+    s.textContent = text;
+    tags.appendChild(s);
+  };
+  if (now && now.audioOnly) tag("Audio");
+  if (now && now.backgrounded) tag("Background", "bg");
+  if (w && w.loop) tag("Loop", "loop");
+  if (now && now.durationSeconds) tag(mdSecs(now.durationSeconds));
+
+  if (Date.now() > mdOptimistic) setPlayIcon("md-play-icon", !!(w && w.paused));
+  $("md-prev").disabled = !(w && w.history && w.history.length);
+  $("md-next").disabled = !(w && w.queue && w.queue.length);
+  $("md-loop").style.opacity = w && w.loop ? "1" : ".55";
+
+  // One list, in listening order: what played (dimmed), what plays, what's next.
+  const list = $("md-list");
+  list.innerHTML = "";
+  if (!w) {
+    $("md-hint").textContent = "";
+    return;
+  }
+  const section = (label) => {
+    const d = document.createElement("div");
+    d.className = "md-sec";
+    d.textContent = label;
+    list.appendChild(d);
+  };
+  const row = (track, cls, pos, onTap) => {
+    const el = document.createElement(onTap ? "button" : "div");
+    el.className = "md-row " + cls;
+    const p = document.createElement("span");
+    p.className = "md-pos";
+    p.textContent = pos;
+    const tk = document.createElement("span");
+    tk.className = "md-tk";
+    const t = document.createElement("span");
+    t.className = "md-tk-title";
+    t.textContent = track.title || track.videoId;
+    tk.appendChild(t);
+    if (track.channel) {
+      const c = document.createElement("span");
+      c.className = "md-tk-sub";
+      c.textContent = track.channel;
+      tk.appendChild(c);
+    }
+    const dur = document.createElement("span");
+    dur.className = "md-dur";
+    dur.textContent = mdSecs(track.durationSeconds);
+    el.appendChild(p); el.appendChild(tk); el.appendChild(dur);
+    if (onTap) el.onclick = onTap;
+    list.appendChild(el);
+  };
+  if (w.history.length) {
+    section("Played");
+    // Newest-last matches the ⏮ order people expect walking back up the list.
+    for (const t of w.history) row(t, "past", "✓");
+  }
+  if (now) {
+    section("Now playing");
+    row(now, "current", "▶");
+  }
+  section(w.queue.length ? "Up next · " + w.queue.length : "Up next");
+  if (!w.queue.length) {
+    const d = document.createElement("div");
+    d.className = "muted";
+    d.textContent = "Nothing queued.";
+    list.appendChild(d);
+  }
+  w.queue.forEach((t, i) => row(t, "", String(i + 1), () => mdOp("jump", { index: i })));
+  $("md-hint").textContent = w.queue.length ? "Tap a queued track to jump to it." : "";
+}
+
+/** Same op path as the bar, but targeted at THIS screen's chosen wall. */
+async function mdOp(op, extra) {
+  const body = { op, ...(extra || {}) };
+  if (mdWall) body.wall = mdWall;
+  try {
+    await api("/api/plugins/media/control", { method: "POST", body: JSON.stringify(body) });
+    setTimeout(pollMd, 1100); // reported state, not the 202, is the confirmation
+  } catch (e) { $("md-err").textContent = e.message; }
+}
+
+$("md-prev").onclick = () => mdOp("prev");
+$("md-next").onclick = () => mdOp("next");
+$("md-play").onclick = () => {
+  const paused = $("md-play-icon").innerHTML.includes("15L");
+  setPlayIcon("md-play-icon", !paused);
+  mdOptimistic = Date.now() + 2500;
+  mdOp(paused ? "play" : "pause");
+};
+$("md-vup").onclick = () => mdOp("volume_up");
+$("md-vdown").onclick = () => mdOp("volume_down");
+$("md-stop").onclick = () => mdOp("stop");
+$("md-loop").onclick = () => {
+  const w = mdCurrent();
+  mdOp("loop", { enabled: !(w && w.loop) });
 };
 
 // ---- photos plugin (TNGC-64) ----------------------------------------------------

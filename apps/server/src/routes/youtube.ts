@@ -7,6 +7,8 @@ import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import type {
+  MediaStateResponse,
+  MediaWallState,
   QueueItem,
   QueueNowPlaying,
   QueuePanelProps,
@@ -19,6 +21,9 @@ import type {
 import type { DisplayHub } from "../hub.js";
 
 const MAX_QUEUE = 25;
+/** Played-track depth per wall (TNGC-69). Deep enough to walk back through
+    an evening, shallow enough that a long shuffle can't grow unbounded. */
+const MAX_HISTORY = 25;
 
 // Play queues — one per viewscreen (TNGC-35): music on wall A survives wall B
 // changing panels, and each wall's queue advances independently. Module-level
@@ -27,6 +32,15 @@ const MAX_QUEUE = 25;
 // ends, and the Claude session is idle at that moment.
 const queues = new Map<string, QueueItem[]>();
 
+// What each wall has already PLAYED, oldest → newest (TNGC-69). The queue
+// holds only what's waiting, so without this there is nowhere for "previous
+// track" to read from. Same lifetime as the queues: in-memory, per process —
+// a restart legitimately starts a new listening session.
+const history = new Map<string, QueueItem[]>();
+
+/** Per-wall loop flag (TNGC-69): replay the session when the queue drains. */
+const looping = new Map<string, boolean>();
+
 function queueFor(wall: string): QueueItem[] {
   let q = queues.get(wall);
   if (!q) {
@@ -34,6 +48,15 @@ function queueFor(wall: string): QueueItem[] {
     queues.set(wall, q);
   }
   return q;
+}
+
+function historyFor(wall: string): QueueItem[] {
+  let h = history.get(wall);
+  if (!h) {
+    h = [];
+    history.set(wall, h);
+  }
+  return h;
 }
 
 export function getQueue(wall: string): QueueItem[] {
@@ -289,6 +312,18 @@ export let restorePlaylist: (props: Record<string, unknown>, wall: string) =>
     console media route calls it after a `stop` clears playback. */
 export let refreshQueuePanel: (wall: string) => void = () => {};
 
+/** The whole house's transport picture (TNGC-69) — what the tricorder's
+    ⏮ ⏯ ⏭ bar and the Media plugin screen read, relayed by the bridge. Same
+    mutable-let seam: it needs the hub, which only registerYoutubeRoutes has. */
+export let mediaState: () => MediaStateResponse = () => ({ primary: "", walls: [] });
+
+/** `media stop` ends the playback SESSION, so the back-stack goes with it —
+    ⏮ must never walk out of a fresh session into last night's music. */
+export function endMediaSession(wall: string): void {
+  history.set(wall, []);
+  looping.set(wall, false);
+}
+
 export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // Candidates from the most recent search, in rank order — the pool the
   // runtime auto-advance draws from when a played video errors on the wall.
@@ -348,6 +383,49 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     hub.broadcast({ type: "display", view: "queue", props: composeQueueProps(wall) }, wall);
   };
 
+  /** The playing track as a plain queue item — what history stores. */
+  function currentTrack(wall: string): QueueItem | undefined {
+    const p = hub.playbackProps(wall);
+    if (!p || typeof p.videoId !== "string") return undefined;
+    return {
+      videoId: p.videoId,
+      title: typeof p.title === "string" ? p.title : undefined,
+      channel: typeof p.channel === "string" ? p.channel : undefined,
+      durationSeconds: typeof p.durationSeconds === "number" ? p.durationSeconds : undefined,
+    };
+  }
+
+  /** Retire the playing track into history (TNGC-69). Consecutive-duplicate
+      guard: a re-display of the same video (audio flip, re-dock) must not
+      stack, or ⏮ would walk back onto the track you're already hearing. */
+  function pushHistory(wall: string) {
+    const cur = currentTrack(wall);
+    if (!cur) return;
+    const h = historyFor(wall);
+    if (h[h.length - 1]?.videoId === cur.videoId) return;
+    h.push(cur);
+    if (h.length > MAX_HISTORY) h.shift();
+  }
+
+  mediaState = () => {
+    // Walls with playback ∪ walls holding a queue ∪ walls with history —
+    // an idle house yields none, which is what hides the phone's bar.
+    const names = new Set<string>([
+      ...hub.playbackWalls(),
+      ...[...queues.entries()].filter(([, q]) => q.length > 0).map(([w]) => w),
+      ...[...history.entries()].filter(([, h]) => h.length > 0).map(([w]) => w),
+    ]);
+    const walls: MediaWallState[] = [...names].map((wall) => ({
+      wall,
+      playing: nowPlayingFor(wall) ?? null,
+      paused: hub.playbackPaused(wall),
+      loop: looping.get(wall) === true,
+      queue: getQueue(wall),
+      history: [...historyFor(wall)],
+    }));
+    return { primary: hub.primary, walls };
+  };
+
   /** Sync a wall's up-next badge to its queue. Call after every mutation —
       the badge exists iff something is waiting. */
   function pushQueueWidget(wall: string) {
@@ -391,10 +469,12 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   }
 
   /** Pop the head of a wall's queue into its playback session. Returns what
-      started, if anything. */
+      started, if anything. The outgoing track retires into history (TNGC-69)
+      so "previous track" has somewhere to read from. */
   function playNext(wall: string): QueueItem | undefined {
     const next = queueFor(wall).shift();
     if (!next) return undefined;
+    pushHistory(wall);
     void playTrack({
       videoId: next.videoId,
       title: next.title,
@@ -404,6 +484,66 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }, wall);
     pushQueueWidget(wall);
     return next;
+  }
+
+  /** Advance, or — with loop on — start the session over (TNGC-69). Rebuilds
+      the cycle from history + the track that just ended, so a single looping
+      track repeats forever without the list growing. */
+  function playNextOrLoop(wall: string): QueueItem | undefined {
+    const started = playNext(wall);
+    if (started || looping.get(wall) !== true) return started;
+    const cycle = [...historyFor(wall)];
+    const cur = currentTrack(wall);
+    if (cur && cycle[cycle.length - 1]?.videoId !== cur.videoId) cycle.push(cur);
+    if (!cycle.length) return undefined;
+    history.set(wall, []);
+    queues.set(wall, cycle.slice(0, MAX_QUEUE));
+    return playNext(wall);
+  }
+
+  /** Step BACK: the current track returns to the front of up-next and the
+      last played track resumes. ⏮ then ⏭ lands exactly where you were. */
+  function playPrev(wall: string): QueueItem | undefined {
+    const h = historyFor(wall);
+    const prev = h.pop();
+    if (!prev) return undefined;
+    const cur = currentTrack(wall);
+    if (cur) queueFor(wall).unshift(cur);
+    void playTrack({
+      videoId: prev.videoId,
+      title: prev.title,
+      channel: prev.channel,
+      durationSeconds: prev.durationSeconds,
+      autoplay: true,
+    }, wall);
+    pushQueueWidget(wall);
+    return prev;
+  }
+
+  /** Jump to a queued position. Everything skipped over lands in history in
+      order — so ⏮ still walks back through it, the way a player should. */
+  function playJump(wall: string, index: number): QueueItem | undefined {
+    const q = queueFor(wall);
+    if (index < 0 || index >= q.length) return undefined;
+    const skipped = q.splice(0, index); // tracks before the target
+    pushHistory(wall); // the currently playing one retires first…
+    const h = historyFor(wall);
+    for (const t of skipped) {
+      if (h[h.length - 1]?.videoId === t.videoId) continue;
+      h.push(t); // …then everything jumped over, in play order
+    }
+    while (h.length > MAX_HISTORY) h.shift();
+    const target = q.shift();
+    if (!target) return undefined;
+    void playTrack({
+      videoId: target.videoId,
+      title: target.title,
+      channel: target.channel,
+      durationSeconds: target.durationSeconds,
+      autoplay: true,
+    }, wall);
+    pushQueueWidget(wall);
+    return target;
   }
 
   app.post<{ Body: QueueRequest }>("/api/console/queue", async (req, reply) => {
@@ -434,6 +574,35 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       const body: QueueResponse = { ok: true, queue: getQueue(wall), nowPlaying: started };
       return body;
     }
+    if (action === "prev") {
+      // TNGC-69: the phone's ⏮. 409 when this is the session's first track.
+      const started = playPrev(wall);
+      if (!started) {
+        return reply.code(409).send({ error: "nothing played before this — already at the first track" });
+      }
+      const body: QueueResponse = { ok: true, queue: getQueue(wall), nowPlaying: started };
+      return body;
+    }
+    if (action === "jump") {
+      const index = req.body?.index;
+      if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= MAX_QUEUE) {
+        return reply.code(400).send({ error: `jump requires index 0..${MAX_QUEUE - 1}` });
+      }
+      const started = playJump(wall, index);
+      if (!started) return reply.code(409).send({ error: `nothing queued at position ${index + 1}` });
+      const body: QueueResponse = { ok: true, queue: getQueue(wall), nowPlaying: started };
+      return body;
+    }
+    if (action === "loop") {
+      const enabled = req.body?.enabled;
+      if (typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "loop requires enabled (boolean)" });
+      }
+      looping.set(wall, enabled);
+      refreshQueuePanel(wall);
+      const body: QueueResponse = { ok: true, queue: getQueue(wall), loop: enabled };
+      return body;
+    }
     if (action === "clear") {
       queues.set(wall, []);
       pushQueueWidget(wall);
@@ -453,7 +622,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       const body: QueueResponse = { ok: true, queue: props.queue, playing: props.nowPlaying ?? null };
       return body;
     }
-    return reply.code(400).send({ error: "action must be add, skip, clear, list, or display" });
+    return reply
+      .code(400)
+      .send({ error: "action must be add, skip, prev, jump, loop, clear, list, or display" });
   });
 
   // The playlist snapshot (TNGC-25): now playing + everything queued, in
@@ -484,8 +655,10 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     if (tracks.length === 0) return { error: "playlist has no playable tracks" };
     const [first, ...rest] = tracks;
     // REPLACE the queue: playing a playlist means starting that vibe, not
-    // appending to whatever was pending.
+    // appending to whatever was pending. The played-history goes with it —
+    // ⏮ must not walk back out of the playlist you just started (TNGC-69).
     queues.set(wall, rest.slice(0, MAX_QUEUE));
+    history.set(wall, []);
     if (rest.length > MAX_QUEUE) {
       console.warn(`[youtube] playlist restore truncated ${rest.length - MAX_QUEUE} tracks (queue cap ${MAX_QUEUE})`);
     }
@@ -550,7 +723,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // stranded the queue.
   hub.setVideoEndedHandler((wall, videoId) => {
     if (hub.playbackVideoId(wall) !== videoId) return;
-    if (!playNext(wall) && hub.playbackBackgrounded(wall)) {
+    // Loop (TNGC-69) only applies to a track ENDING on its own — an error
+    // must never spin the session in a circle.
+    if (!playNextOrLoop(wall) && hub.playbackBackgrounded(wall)) {
       // Nothing next and nobody watching — end the session so the ♫ badge
       // doesn't advertise a dead track. Foregrounded keeps today's behavior
       // (the ended player stays on screen).

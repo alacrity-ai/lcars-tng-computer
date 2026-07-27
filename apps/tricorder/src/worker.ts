@@ -347,7 +347,40 @@ app.post("/api/message", async (c) => {
 });
 
 app.get("/api/status", async (c) => {
-  return hub(c, c.get("session").tenantId).fetch(new Request("https://hub/status"));
+  const s = c.get("session");
+  const h = hub(c, s.tenantId);
+  const res = await h.fetch(new Request("https://hub/status"));
+  const status = (await res.json()) as Record<string, unknown>;
+  // TNGC-69: a compact transport summary rides the poll the main screen
+  // ALREADY runs, so the ⏮ ⏯ ⏭ bar costs no new timer. Fetched only when the
+  // session may see it — guests have no plugins, and the household can
+  // switch media off — so there is nothing to strip and nothing to leak.
+  if (s.role !== "guest" && (await pluginEnabled(c.env, s.tenantId, "media"))) {
+    try {
+      const mres = await h.fetch(new Request("https://hub/plugin-state?plugin=media"));
+      const { state } = (await mres.json()) as { state: unknown };
+      const walls = (state as { walls?: unknown } | null)?.walls;
+      if (Array.isArray(walls)) {
+        status.media = walls
+          .filter((w): w is Record<string, unknown> => !!w && typeof w === "object" && !!w.playing)
+          .slice(0, 8)
+          .map((w) => {
+            const p = w.playing as Record<string, unknown>;
+            return {
+              wall: String(w.wall ?? ""),
+              title: typeof p.title === "string" ? p.title : String(p.videoId ?? ""),
+              channel: typeof p.channel === "string" ? p.channel : undefined,
+              paused: w.paused === true,
+              canNext: Array.isArray(w.queue) && w.queue.length > 0,
+              canPrev: Array.isArray(w.history) && w.history.length > 0,
+            };
+          });
+      }
+    } catch {
+      // no media state yet (bridge just linked) — the bar simply stays hidden
+    }
+  }
+  return c.json(status);
 });
 
 // ---- the command queue (TNGC-22) ------------------------------------------------
@@ -622,6 +655,95 @@ async function sendLightsOp(
   }
   return new Response(res.body, { status: res.status, headers: res.headers });
 }
+
+// ---- media plugin (TNGC-69) ------------------------------------------------------
+// Transport control with NO session in the loop: ⏮ ⏯ ⏭ from a phone costs a
+// control frame, not an LLM turn. Members only (attribution is the point) and
+// tenant-switchable like every other plugin.
+
+/** Ops a phone may send. Args are validated and REBUILT here, re-validated
+    bridge-side, and every one of them maps to a wall-server route that
+    already existed — this plane adds verbs, never new authority. */
+const MEDIA_OPS = ["next", "prev", "pause", "play", "stop", "volume_up", "volume_down", "jump", "loop"];
+const MEDIA_MAX_QUEUE = 25;
+
+async function mediaGate(c: Context<{ Bindings: Env; Variables: Vars }>): Promise<Response | null> {
+  const s = c.get("session");
+  if (s.role === "guest") return c.json({ error: "the guest account has no plugins" }, 403);
+  if (!(await pluginEnabled(c.env, s.tenantId, "media"))) {
+    return c.json({ error: "the media plugin is not enabled for this household" }, 403);
+  }
+  return null;
+}
+
+app.get("/api/plugins/media/state", async (c) => {
+  const denied = await mediaGate(c);
+  if (denied) return denied;
+  return hub(c, c.get("session").tenantId).fetch(new Request("https://hub/plugin-state?plugin=media"));
+});
+
+app.post("/api/plugins/media/control", async (c) => {
+  const denied = await mediaGate(c);
+  if (denied) return denied;
+  const s = c.get("session");
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const op = typeof body.op === "string" ? body.op : "";
+  if (!MEDIA_OPS.includes(op)) {
+    return c.json({ error: `op must be one of: ${MEDIA_OPS.join(", ")}` }, 400);
+  }
+  const args: Record<string, unknown> = {};
+  // A wall name is a route into the house — length-capped here, capped again
+  // bridge-side, and normalized by the wall server's own resolver.
+  if (typeof body.wall === "string" && body.wall.length > 0 && body.wall.length <= 64) {
+    args.wall = body.wall;
+  }
+  if (op === "jump") {
+    const index = body.index;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= MEDIA_MAX_QUEUE) {
+      return c.json({ error: `jump requires index 0..${MEDIA_MAX_QUEUE - 1}` }, 400);
+    }
+    args.index = index;
+  }
+  if (op === "loop") {
+    if (typeof body.enabled !== "boolean") return c.json({ error: "loop requires enabled (boolean)" }, 400);
+    args.enabled = body.enabled;
+  }
+  const ctl = {
+    id: crypto.randomUUID(),
+    plugin: "media",
+    op,
+    args,
+    user: s.userHandle,
+    device: s.deviceLabel,
+    ts: Date.now(),
+  };
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/control", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(ctl),
+    }),
+  );
+  if (res.status === 202) {
+    c.executionCtx.waitUntil(
+      c.env.DB.batch([
+        c.env.DB.prepare(
+          "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(ctl.id, s.tenantId, s.userHandle, "media", op, JSON.stringify(args).slice(0, 200), ctl.ts),
+        c.env.DB.prepare("DELETE FROM control_log WHERE tenant_id = ? AND created_at < ?").bind(
+          s.tenantId,
+          ctl.ts - CONTROL_LOG_RETENTION_MS,
+        ),
+      ]),
+    );
+  }
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
 
 // ---- claudeops plugin (TNGC-54) --------------------------------------------------
 // Remote control of the host's claude-ops session. ADMIN ONLY on both read

@@ -1308,12 +1308,16 @@ export interface QueueItem {
 }
 
 export interface QueueRequest {
-  action: "add" | "skip" | "clear" | "list" | "display";
+  action: "add" | "skip" | "prev" | "clear" | "list" | "display" | "jump" | "loop";
   /** add only. */
   videoId?: string;
   title?: string;
   channel?: string;
   durationSeconds?: number;
+  /** jump only (TNGC-69): 0-based position in the up-next list. */
+  index?: number;
+  /** loop only (TNGC-69). */
+  enabled?: boolean;
   /** TNGC-35: which viewscreen's play queue (each wall has its own). */
   wall?: string;
 }
@@ -1322,10 +1326,33 @@ export interface QueueResponse {
   ok: true;
   /** Queue AFTER the action, in play order. */
   queue: QueueItem[];
-  /** skip: what just started playing. */
+  /** skip/prev/jump: what just started playing. */
   nowPlaying?: QueueItem;
   /** list/display: the wall's current playback, if any (TNGC-66). */
   playing?: QueueNowPlaying | null;
+  /** loop: the flag after the action (TNGC-69). */
+  loop?: boolean;
+}
+
+/** One wall's transport picture (TNGC-69). Everything a phone needs to draw
+    ⏮ ⏯ ⏭ and the full session list, composed from state the server already
+    holds — no new storage anywhere. */
+export interface MediaWallState {
+  wall: string;
+  playing: QueueNowPlaying | null;
+  paused: boolean;
+  loop: boolean;
+  /** Waiting to play, in order. */
+  queue: QueueItem[];
+  /** Already played this session, oldest → newest. ⏮ pops the tail. */
+  history: QueueItem[];
+}
+
+/** GET /api/console/media-state — only walls with playback, a queue, or
+    history appear, so an idle house answers `{walls: []}`. */
+export interface MediaStateResponse {
+  primary: string;
+  walls: MediaWallState[];
 }
 
 /** The wall's current track as the queue panel reports it (TNGC-66). */

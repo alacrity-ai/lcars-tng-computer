@@ -56,6 +56,7 @@ import type {
   LightsState,
   LinkDownFrame,
   LinkUpFrame,
+  MediaState,
   PluginStatus,
   PluginTile,
   QueueItem,
@@ -1067,9 +1068,15 @@ let lightsOnline = false;
 let lightsState: LightsState | null = null;
 let opsOnline = false;
 let opsState: Record<string, unknown> | null = null;
+/** Media (TNGC-69) is a BUILT-IN control plugin, not an installed sidecar:
+    its "service" is the wall server this bridge already drives. Online =
+    that server answered, so it is effectively always on in a running house. */
+let mediaOnline = false;
+let mediaState: MediaState | null = null;
 let lastPluginsJson = "";
 let lastLightsJson = "";
 let lastOpsJson = "";
+let lastMediaJson = "";
 
 // ---- plugin tiles (TNGC-58) ------------------------------------------------------
 // How a plugin looks on the phone's plugin grid is the PLUGIN's business, so
@@ -1142,6 +1149,18 @@ export function pluginTile(id: string): PluginTile | undefined {
   return tile;
 }
 
+/** Media's tile (TNGC-69) is declared HERE, not in a manifest, because media
+    has no plugins/ folder to hold one: it is core plumbing exposed as a
+    plugin so it inherits the enable switch, the guest exclusion, and the
+    attribution log. Lucide "list-music": a queue with a note. */
+const MEDIA_TILE: PluginTile = {
+  color: "#cc99cc",
+  icon: {
+    viewBox: "0 0 24 24",
+    paths: ["M21 15V6", "M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z", "M12 12H3", "M16 6H3", "M12 18H3"],
+  },
+};
+
 function pluginRoster(): PluginStatus[] {
   const entry = (id: string, name: string, online: boolean): PluginStatus => {
     const tile = pluginTile(id);
@@ -1149,6 +1168,7 @@ function pluginRoster(): PluginStatus[] {
   };
   return [
     entry("lights", "Lights", lightsOnline),
+    { id: "media", name: "Media", online: mediaOnline, tile: MEDIA_TILE },
     ...(CLAUDEOPS_URL ? [entry("claudeops", "Claude Ops", opsOnline)] : []),
   ];
 }
@@ -1176,6 +1196,16 @@ function sendLightsState(): void {
 function sendOpsState(): void {
   if (!opsState || cloudSocket?.readyState !== WebSocket.OPEN) return;
   const frame: LinkUpFrame = { v: 1, type: "plugin_state", plugin: "claudeops", state: opsState };
+  try {
+    cloudSocket.send(JSON.stringify(frame));
+  } catch {
+    // link recycling — the open handler re-syncs
+  }
+}
+
+function sendMediaState(): void {
+  if (!mediaState || cloudSocket?.readyState !== WebSocket.OPEN) return;
+  const frame: LinkUpFrame = { v: 1, type: "plugin_state", plugin: "media", state: mediaState };
   try {
     cloudSocket.send(JSON.stringify(frame));
   } catch {
@@ -1259,14 +1289,50 @@ async function pollPlugins(force = false): Promise<void> {
     opsOnline = ops;
   }
 
+  await pollMedia(force);
+
   const pj = JSON.stringify(pluginRoster());
   if (force || pj !== lastPluginsJson) {
     lastPluginsJson = pj;
     sendPlugins();
   }
 }
+
+/** media (TNGC-69): the wall server's own transport state. No health probe of
+    its own — the media-state read IS the probe. Runs on its OWN short beat
+    rather than the 15s plugin sweep: a transport bar that takes 15 seconds to
+    notice a track change reads as broken, and this is one loopback GET against
+    a process the bridge already talks to constantly. Pushes are change-gated,
+    so a quiet house sends nothing up the link no matter how often we look. */
+async function pollMedia(force = false): Promise<void> {
+  try {
+    const res = await fetch(`${SERVER_URL}/api/console/media-state`, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) {
+      mediaOnline = false;
+      return;
+    }
+    const s = (await res.json()) as { walls?: unknown; primary?: unknown };
+    const walls = Array.isArray(s.walls) ? (s.walls as MediaState["walls"]).slice(0, 16) : [];
+    const primary = typeof s.primary === "string" ? s.primary : "";
+    // Compare WITHOUT updatedAt, or every beat would look like a change and
+    // push a frame for a house where nothing is happening.
+    const mj = JSON.stringify({ walls, primary });
+    if (force || mj !== lastMediaJson) {
+      lastMediaJson = mj;
+      mediaState = { walls, primary, updatedAt: Date.now() };
+      sendMediaState();
+    }
+    mediaOnline = true;
+  } catch {
+    mediaOnline = false; // wall server restarting (tsx watch) — next beat heals
+  }
+}
+
 setInterval(() => void pollPlugins(), 15_000).unref();
 void pollPlugins();
+setInterval(() => void pollMedia(), 4_000).unref();
 
 // While the ops session is mid-turn the phone is watching for "finished" —
 // tighten the loop so the idle transition + result summary land in seconds,
@@ -1361,6 +1427,67 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
     // The phone's confirmation is reported state, not the 200: re-read after
     // the fade has begun and push the fresh snapshot up the link.
     setTimeout(() => void pollPlugins(true), 1_200).unref();
+    return;
+  }
+
+  // media (TNGC-69): transport control with no session in the loop. Every op
+  // maps to a console route the wall server already exposes; the request is
+  // BUILT from validated values, never relayed. `wall` is optional — absent
+  // lets the server's own resolveWall rule pick (origin → primary).
+  if (ctl.plugin === "media") {
+    const args = ctl.args ?? {};
+    const wall =
+      typeof args.wall === "string" && args.wall.length > 0 && args.wall.length <= 64
+        ? args.wall
+        : undefined;
+    let path: string | null = null;
+    let body: Record<string, unknown> | null = null;
+    if (ctl.op === "next") {
+      path = "/api/console/queue";
+      body = { action: "skip" };
+    } else if (ctl.op === "prev") {
+      path = "/api/console/queue";
+      body = { action: "prev" };
+    } else if (ctl.op === "jump") {
+      const index = args.index;
+      if (typeof index === "number" && Number.isInteger(index) && index >= 0 && index < 25) {
+        path = "/api/console/queue";
+        body = { action: "jump", index };
+      }
+    } else if (ctl.op === "loop") {
+      if (typeof args.enabled === "boolean") {
+        path = "/api/console/queue";
+        body = { action: "loop", enabled: args.enabled };
+      }
+    } else if (
+      ctl.op === "pause" ||
+      ctl.op === "play" ||
+      ctl.op === "stop" ||
+      ctl.op === "volume_up" ||
+      ctl.op === "volume_down"
+    ) {
+      path = "/api/console/media";
+      body = { action: ctl.op };
+    }
+    if (!path || !body) {
+      console.error(`[bridge] refused media control ${ctl.op} from ${ctl.user} — invalid op or args`);
+      return;
+    }
+    if (wall) body.wall = wall;
+    try {
+      const res = await fetch(`${SERVER_URL}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
+      });
+      console.error(`[bridge] media ${ctl.op} by ${ctl.user}/${ctl.device} → ${res.status}`);
+    } catch (err) {
+      console.error(`[bridge] media ${ctl.op} failed: ${(err as Error).message}`);
+    }
+    // Confirmation is REPORTED state, not the 200 — re-read and push so the
+    // phone's buttons settle on truth about a second after the tap.
+    setTimeout(() => void pollMedia(true), 900).unref();
     return;
   }
 

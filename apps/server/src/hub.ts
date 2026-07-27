@@ -46,6 +46,11 @@ interface DisplayEntry {
   widgetSources: Map<string, Widget[]>;
   /** TNGC-26, now per display: what this wall's persistent player plays. */
   playback: PanelProps | null;
+  /** TNGC-69: is that player paused? `media pause` is a fire-and-forget
+      broadcast, so without this the server cannot answer "is it paused" and
+      a phone's ⏯ button could only guess. Cleared by play, by any new
+      track, and by clearPlayback — a fresh track always starts playing. */
+  paused: boolean;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
@@ -100,6 +105,7 @@ export class DisplayHub {
         widgets: [],
         widgetSources: new Map(),
         playback: null,
+        paused: false,
         idleTimer: undefined,
       };
       this.displays.set(name, e);
@@ -340,7 +346,10 @@ export class DisplayHub {
       // A youtube display IS the playback session starting/changing in the
       // foreground; any other panel backgrounds it (badge appears). Only
       // clearPlayback() ends it.
-      if (msg.view === "youtube") e.playback = msg.props;
+      if (msg.view === "youtube") {
+        e.playback = msg.props;
+        e.paused = false; // a freshly displayed track is playing (TNGC-69)
+      }
       this.armIdleRevert(e);
       this.displayObserver?.(wall, msg.view, msg.props);
       this.syncNowPlayingBadge(e);
@@ -367,6 +376,7 @@ export class DisplayHub {
   playbackTrack(props: PanelProps, wall: string) {
     const e = this.entry(wall);
     e.playback = props;
+    e.paused = false; // a new background track starts playing (TNGC-69)
     this.broadcast({ type: "playback", action: "track", props }, wall);
     this.syncNowPlayingBadge(e);
   }
@@ -376,8 +386,30 @@ export class DisplayHub {
     const e = this.entry(wall);
     if (!e.playback) return;
     e.playback = null;
+    e.paused = false;
     this.broadcast({ type: "playback", action: "stop" }, wall);
     this.syncNowPlayingBadge(e);
+  }
+
+  /** TNGC-69: record what `media pause`/`play` did, so a phone's transport
+      button can render true state instead of optimism. No-op when nothing
+      is playing — pausing silence must not leave a sticky flag. */
+  setPlaybackPaused(wall: string, paused: boolean) {
+    const e = this.displays.get(wall);
+    if (!e?.playback) return;
+    e.paused = paused;
+  }
+
+  playbackPaused(wall: string): boolean {
+    return this.displays.get(wall)?.paused === true;
+  }
+
+  /** Walls with a live playback session — the media-state route's starting
+      set (it unions this with walls that merely hold a queue). */
+  playbackWalls(): string[] {
+    const out: string[] = [];
+    for (const e of this.displays.values()) if (e.playback) out.push(e.name);
+    return out;
   }
 
   playbackVideoId(wall: string): string | undefined {
@@ -403,6 +435,7 @@ export class DisplayHub {
       title: typeof p.title === "string" ? p.title : undefined,
       audioOnly: p.audioOnly === true,
       backgrounded: this.playbackBackgrounded(wall),
+      paused: this.playbackPaused(wall),
     };
   }
 
