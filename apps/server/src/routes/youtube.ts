@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import type {
   QueueItem,
+  QueueNowPlaying,
+  QueuePanelProps,
   QueueRequest,
   QueueResponse,
   YoutubeSearchRequest,
@@ -281,6 +283,12 @@ export let restorePlaylist: (props: Record<string, unknown>, wall: string) =>
   | { ok: true; started: PlaylistTrack; queued: number }
   | { error: string } = () => ({ error: "youtube routes not registered yet" });
 
+/** Re-broadcast the queue panel with fresh props if a wall is showing it
+    (TNGC-66) — called at every queue/playback mutation so the panel stays
+    live without polling. Same mutable-let pattern as restorePlaylist: the
+    console media route calls it after a `stop` clears playback. */
+export let refreshQueuePanel: (wall: string) => void = () => {};
+
 export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
   // Candidates from the most recent search, in rank order — the pool the
   // runtime auto-advance draws from when a played video errors on the wall.
@@ -311,6 +319,35 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     }
   });
 
+  /** The wall's current track, shaped for the queue panel (TNGC-66). Reads
+      the hub's playback record — the queue holds only what's WAITING.
+      `panelHasScreen`: compose as if the queue panel is displayed — the
+      display action composes BEFORE its own broadcast flips the hub's view,
+      and playback under the queue panel is backgrounded by definition. */
+  function nowPlayingFor(wall: string, panelHasScreen = false): QueueNowPlaying | undefined {
+    const p = hub.playbackProps(wall);
+    if (!p || typeof p.videoId !== "string") return undefined;
+    return {
+      videoId: p.videoId,
+      title: typeof p.title === "string" ? p.title : undefined,
+      channel: typeof p.channel === "string" ? p.channel : undefined,
+      durationSeconds: typeof p.durationSeconds === "number" ? p.durationSeconds : undefined,
+      audioOnly: p.audioOnly === true,
+      backgrounded: panelHasScreen || hub.playbackBackgrounded(wall),
+    };
+  }
+
+  /** Typed for the broadcast seam: panel props travel as a plain record. */
+  function composeQueueProps(wall: string): QueuePanelProps & Record<string, unknown> {
+    const nowPlaying = nowPlayingFor(wall, true);
+    return { ...(nowPlaying ? { nowPlaying } : {}), queue: getQueue(wall) };
+  }
+
+  refreshQueuePanel = (wall) => {
+    if (hub.stateFor(wall).view !== "queue") return;
+    hub.broadcast({ type: "display", view: "queue", props: composeQueueProps(wall) }, wall);
+  };
+
   /** Sync a wall's up-next badge to its queue. Call after every mutation —
       the badge exists iff something is waiting. */
   function pushQueueWidget(wall: string) {
@@ -329,6 +366,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
           ],
       wall,
     );
+    // Every widget-sync point is also a queue/playback mutation point —
+    // keep a visible queue panel truthful in the same stroke (TNGC-66).
+    refreshQueuePanel(wall);
   }
 
   /** Broadcast a youtube panel through the embed-vs-audio decision (Layer 0).
@@ -345,6 +385,9 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
     const decorated = await decorateYoutubeProps(props);
     if (hub.playbackBackgrounded(wall)) hub.playbackTrack(decorated, wall);
     else hub.broadcast({ type: "display", view: "youtube", props: decorated }, wall);
+    // A backgrounded start/flip under a visible queue panel changes its
+    // NOW PLAYING row — sync it (no-op unless the wall shows the queue).
+    refreshQueuePanel(wall);
   }
 
   /** Pop the head of a wall's queue into its playback session. Returns what
@@ -356,6 +399,7 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       videoId: next.videoId,
       title: next.title,
       channel: next.channel,
+      durationSeconds: next.durationSeconds,
       autoplay: true,
     }, wall);
     pushQueueWidget(wall);
@@ -397,10 +441,19 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       return body;
     }
     if (action === "list") {
-      const body: QueueResponse = { ok: true, queue: getQueue(wall) };
+      const body: QueueResponse = { ok: true, queue: getQueue(wall), playing: nowPlayingFor(wall) ?? null };
       return body;
     }
-    return reply.code(400).send({ error: "action must be add, skip, clear, or list" });
+    if (action === "display") {
+      // "Show the media queue" (TNGC-66): server-composed panel — now
+      // playing from the hub's playback record + the queue in play order.
+      // Every mutation re-broadcasts while the panel is up, so it stays live.
+      const props = composeQueueProps(wall);
+      hub.broadcast({ type: "display", view: "queue", props }, wall);
+      const body: QueueResponse = { ok: true, queue: props.queue, playing: props.nowPlaying ?? null };
+      return body;
+    }
+    return reply.code(400).send({ error: "action must be add, skip, clear, list, or display" });
   });
 
   // The playlist snapshot (TNGC-25): now playing + everything queued, in
@@ -502,6 +555,7 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       // doesn't advertise a dead track. Foregrounded keeps today's behavior
       // (the ended player stays on screen).
       hub.clearPlayback(wall);
+      refreshQueuePanel(wall);
     }
   });
 
@@ -541,6 +595,7 @@ export function registerYoutubeRoutes(app: FastifyInstance, hub: DisplayHub) {
       // giving up (the errored video may itself have been queued).
       if (playNext(wall)) return;
       hub.clearPlayback(wall);
+      refreshQueuePanel(wall);
       // Only take the screen for the failure if the player HAD the screen —
       // backgrounded music dying must not yank the visible panel.
       if (hub.stateFor(wall).view === "youtube") {

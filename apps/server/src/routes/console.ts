@@ -30,7 +30,7 @@ import { TimerEngine } from "../widgets.js";
 import { PanelHistory, summarize } from "../history.js";
 import { validateComposite } from "../composite.js";
 import { loadSettings, saveSettings } from "../settings.js";
-import { decorateYoutubeProps, getQueue, restorePlaylist } from "./youtube.js";
+import { decorateYoutubeProps, getQueue, refreshQueuePanel, restorePlaylist } from "./youtube.js";
 
 /** Below this length a speak is one utterance; splitting buys nothing. */
 const CHUNK_MIN_CHARS = 180;
@@ -505,6 +505,8 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
       // TNGC-26: stop ends the playback SESSION (foreground or background) —
       // the persistent player tears down, the ♫ badge clears.
       hub.clearPlayback(wall);
+      // A visible queue panel loses its NOW PLAYING row in the same stroke.
+      refreshQueuePanel(wall);
     }
     hub.broadcast({ type: "media", action }, wall);
     return { ok: true, action };

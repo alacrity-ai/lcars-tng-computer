@@ -226,11 +226,17 @@ server.registerTool(
       "it plays; pass channel/durationSeconds when known). If nothing is playing, add " +
       "starts it immediately (nowPlaying in the response — confirm as 'Playing', not " +
       "'Queued'). 'skip' / 'next video' → action 'skip' (409 when the queue is empty). " +
-      "'clear the queue' → 'clear'. 'what's queued' → 'list' (also in screen_state). " +
+      "'clear the queue' → 'clear'. " +
+      "'Show the media queue' / 'what's queued' / 'what's next' → action 'display' " +
+      "(TNGC-66): renders the now-playing + up-next panel on the asking wall AND " +
+      "returns {playing, queue} for a one-line spoken summary; the panel then live-" +
+      "updates itself as tracks advance/skip/stop — display once, never re-display to " +
+      "refresh it. Prefer 'display' when the user asks aloud; 'list' is the silent " +
+      "data-only read (also in screen_state). " +
       "Queue survives 'play X' — the new video plays now, the queue resumes after it. " +
       "Returns the queue in play order.",
     inputSchema: {
-      action: z.enum(["add", "skip", "clear", "list"]),
+      action: z.enum(["add", "skip", "clear", "list", "display"]),
       videoId: z.string().optional(),
       title: z.string().optional(),
       channel: z.string().optional(),

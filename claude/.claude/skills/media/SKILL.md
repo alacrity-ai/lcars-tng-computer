@@ -101,8 +101,13 @@ one-line spoken confirmation is enough.
 - **Nothing playing when you add?** The server starts it immediately — the
   response's `nowPlaying` tells you; confirm as "Playing" not "Queued".
 - **"Skip" / "next"** → `queue` action `skip`. 409 = queue empty — say so.
-- **"What's in the queue?"** → action `list` (also visible in
-  `screen_state`). Read titles, not videoIds.
+- **"Show the media queue" / "what's in the queue?" / "what's next?"** →
+  action `display` (TNGC-66): puts the now-playing + up-next panel on the
+  asking wall and returns `{playing, queue}` — speak ONE short line ("Playing
+  Miles Davis; four tracks queued."), the panel carries the detail. It
+  live-updates as tracks advance, skip, or stop — display once, never
+  re-display to refresh. Use `list` instead only when you need the data
+  without taking the screen (e.g. answering mid-panel without switching).
 - **"Clear the queue"** → action `clear`.
 - **"Play X" while a queue exists** plays X now and leaves the queue intact
   — it resumes after X. Mention that only if the user seems surprised.

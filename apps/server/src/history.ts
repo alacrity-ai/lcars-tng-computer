@@ -4,8 +4,10 @@ import type { PanelHistoryEntry, PanelProps, PanelView } from "@tng/shared";
 /** History depth; a wall session rarely reaches further back than this. */
 const DEFAULT_CAPACITY = 50;
 
-/** Navigation, not content — recording these would bury the real entries. */
-const SKIP_VIEWS: PanelView[] = ["status", "blank", "boot"];
+/** Navigation, not content — recording these would bury the real entries.
+    "queue" (TNGC-66) is live machinery state: replaying a stale snapshot via
+    recall would lie, and the queue tool re-composes it fresh on demand. */
+const SKIP_VIEWS: PanelView[] = ["status", "blank", "boot", "queue"];
 
 /** One-line human handle for an entry, from whichever prop names the content.
     Exported for the library save path (TNGC-23): the saved item's title is

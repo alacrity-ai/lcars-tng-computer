@@ -3307,3 +3307,93 @@ body {
   letter-spacing: 0.12em;
 }
 .gal-empty span { color: #8888a0; font-size: clamp(13px, 1.4vw, 24px); letter-spacing: 0.04em; }
+
+/* ---- media queue (TNGC-66) ----------------------------------------------- */
+.mq-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2vh;
+  padding-right: 24px;
+  font-family: var(--lcars-mono);
+}
+.mq-section-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--lcars-gold);
+  font-size: clamp(13px, 1.4vw, 24px);
+  letter-spacing: 0.16em;
+  border-bottom: 3px solid var(--lcars-gold);
+  padding-bottom: 0.6vh;
+}
+.mq-count { color: var(--lcars-lavender); font-size: clamp(11px, 1.1vw, 19px); letter-spacing: 0.1em; }
+.mq-now { flex: none; }
+.mq-now-body { padding: 1.2vh 0 0 0; }
+.mq-now-title {
+  color: var(--lcars-cream);
+  font-size: clamp(22px, 2.6vw, 44px);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mq-now-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4vw;
+  margin-top: 0.5vh;
+  font-size: clamp(12px, 1.3vw, 22px);
+}
+.mq-now-channel { color: var(--lcars-peach); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mq-tag {
+  color: #000;
+  background: var(--lcars-lavender);
+  border-radius: 999px;
+  padding: 0.1em 0.8em;
+  font-size: clamp(10px, 1vw, 17px);
+  letter-spacing: 0.12em;
+}
+.mq-tag-bg { background: var(--lcars-blue); }
+.mq-now-empty { padding: 1.2vh 0 0 0; color: #8888a0; font-size: clamp(16px, 1.8vw, 30px); letter-spacing: 0.1em; }
+.mq-up { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.mq-rows { flex: 1; min-height: 0; overflow: hidden; padding-top: 0.8vh; }
+.mq-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1.2vw;
+  padding: 0.55vh 0;
+  border-bottom: 1px solid #222236;
+  font-size: clamp(14px, 1.5vw, 26px);
+}
+.mq-pos {
+  flex: none;
+  width: 2.2em;
+  color: var(--lcars-gold);
+  text-align: right;
+}
+.mq-track { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 1vw; overflow: hidden; }
+.mq-track-title { color: var(--lcars-cream); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mq-track-channel {
+  flex: none;
+  color: #8888a0;
+  font-size: clamp(11px, 1.1vw, 19px);
+  max-width: 28%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mq-dur { flex: none; color: var(--lcars-lavender); font-size: clamp(11px, 1.2vw, 20px); }
+.mq-more { padding-top: 0.8vh; color: var(--lcars-gold); font-size: clamp(12px, 1.2vw, 20px); letter-spacing: 0.1em; }
+.mq-queue-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2vh;
+  color: var(--lcars-gold);
+  font-size: clamp(18px, 2.2vw, 38px);
+  letter-spacing: 0.12em;
+}
+.mq-queue-empty span { color: #8888a0; font-size: clamp(12px, 1.3vw, 22px); letter-spacing: 0.04em; }

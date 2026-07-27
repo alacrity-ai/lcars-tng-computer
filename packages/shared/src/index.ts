@@ -51,6 +51,7 @@ export const PANEL_VIEWS = [
   "pictionary",
   "list",
   "gallery",
+  "queue",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
@@ -59,8 +60,10 @@ export type PanelView = (typeof PANEL_VIEWS)[number];
     PANEL_VIEWS — the renderer's registry is a total Record and has to cover
     them — but the `display` tool should not offer them, because a pictionary
     board conjured mid-conversation is noise, not a panel. Every game panel
-    adds one line here. */
-export const MACHINE_VIEWS = ["pictionary"] as const;
+    adds one line here. "queue" (TNGC-66) is machinery too: its props are
+    composed server-side from live queue + playback state (the `queue` tool's
+    display action), never hand-written by the model. */
+export const MACHINE_VIEWS = ["pictionary", "queue"] as const;
 
 /** What the model may actually display. */
 export const DISPLAY_VIEWS = PANEL_VIEWS.filter(
@@ -1305,7 +1308,7 @@ export interface QueueItem {
 }
 
 export interface QueueRequest {
-  action: "add" | "skip" | "clear" | "list";
+  action: "add" | "skip" | "clear" | "list" | "display";
   /** add only. */
   videoId?: string;
   title?: string;
@@ -1321,6 +1324,25 @@ export interface QueueResponse {
   queue: QueueItem[];
   /** skip: what just started playing. */
   nowPlaying?: QueueItem;
+  /** list/display: the wall's current playback, if any (TNGC-66). */
+  playing?: QueueNowPlaying | null;
+}
+
+/** The wall's current track as the queue panel reports it (TNGC-66). */
+export interface QueueNowPlaying extends QueueItem {
+  /** Playing as extracted audio (embed-blocked) — shown as an AUDIO tag. */
+  audioOnly?: boolean;
+  /** Playing under another panel (♫) rather than on screen. */
+  backgrounded?: boolean;
+}
+
+/** Now-playing + up-next panel (TNGC-66). Props are composed by the console
+    server from its live queue + playback records (the `queue` route's display
+    action) and re-broadcast on every queue/playback change while the panel is
+    up — the model never assembles them. */
+export interface QueuePanelProps {
+  nowPlaying?: QueueNowPlaying;
+  queue: QueueItem[];
 }
 
 /** read_article: one call starts a server-driven reading session — display,
