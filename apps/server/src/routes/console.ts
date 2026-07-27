@@ -585,7 +585,21 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
     // sidecar-down path sends; the phone reports when it stops talking.
     if (isTricorderDisplay(wall)) {
       const utteranceId = randomUUID();
-      hub.broadcast({ type: "speak", utteranceId, text, caption: effectiveCaption }, wall);
+      // The language rides along (TNGC-76): this is the one path where nothing
+      // has been synthesized yet, so the frame is the phone's only clue about
+      // which voice to speak in — and segments must stay split, since the
+      // phone speaks them one after another instead of stitching a WAV.
+      hub.broadcast(
+        {
+          type: "speak",
+          utteranceId,
+          text,
+          caption: effectiveCaption,
+          lang,
+          ...(segments?.length ? { segments } : {}),
+        },
+        wall,
+      );
       // Scaled to the words, like the audio path's durationMs + slack: the
       // default 60s would cut a long answer off mid-sentence on the phone.
       if (waitForPlayback) await hub.waitForSpeakDone(utteranceId, spokenMs(text) + 25_000);

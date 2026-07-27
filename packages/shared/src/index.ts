@@ -915,6 +915,16 @@ export interface SpeakMessage {
   /** TNGC-27: server-fired timer/alarm announcement — plays at the set voice
       volume even when the voice is muted (an alarm's job is to make noise). */
   alarm?: boolean;
+  /** TNGC-76: ISO 639-1 language of `text`. Only the phone path reads it — a
+      wall's audio arrives already synthesized in that language's Piper voice,
+      but a tricorder synthesizes locally and has to be told which voice to
+      use, or French text comes out of an English mouth. */
+  lang?: string;
+  /** TNGC-76: mixed-language utterance, in order; `text` is their
+      concatenation. Same reason as `lang`: the house stitches one WAV for the
+      wall, while the phone speaks the segments back-to-back, each in its own
+      language's voice. */
+  segments?: SpeakSegment[];
 }
 
 export interface ChimeMessage {

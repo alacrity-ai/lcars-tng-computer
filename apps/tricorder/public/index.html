@@ -2330,25 +2330,41 @@ const synth = window.speechSynthesis || null;
 let vsHouseVoice = { volume: 100, muted: false };
 let vsVoiceOff = localStorage.getItem("tricorder.vsVoiceOff") === "1";
 let vsSpeakEnd = null; // finisher for the utterance in flight (see vsSpeak)
-let vsPickedVoice = null;
+const vsVoiceByLang = new Map(); // primary subtag → voice | null
 
-// The Computer is a calm British-accented woman, so prefer an en-GB female
-// voice by the names the common engines ship, then any en-GB, then any English,
-// then whatever the engine defaults to. Resolved once — but not until
-// getVoices() is populated, which Chrome does asynchronously.
+/** "fr-CA" / "fr_CA" / "FR" → "fr". Voices and speak frames disagree about
+    shape, so both ends are compared on the primary subtag. */
+function vsLangKey(lang) {
+  return String(lang || "en").toLowerCase().split(/[-_]/)[0] || "en";
+}
+
+// The Computer is a calm British-accented woman, so English prefers an en-GB
+// female voice by the names the common engines ship, then any en-GB, then any
+// English. Other languages (TNGC-76) take the engine's default voice for that
+// language. Resolved once per language — but never before getVoices() is
+// populated, which Chrome does asynchronously.
 const VS_VOICE_NAMES = /uk english female|martha|kate|serena|stephanie|fiona|sonia|libby/i;
-function vsPickVoice() {
-  if (vsPickedVoice || !synth) return vsPickedVoice;
+function vsPickVoice(lang) {
+  if (!synth) return null;
+  const want = vsLangKey(lang);
+  if (vsVoiceByLang.has(want)) return vsVoiceByLang.get(want);
   let voices = [];
   try { voices = synth.getVoices() || []; } catch {}
-  const en = voices.filter((v) => /^en[-_]?/i.test(v.lang || ""));
-  if (!en.length) return null;
-  const gb = en.filter((v) => /^en[-_]GB/i.test(v.lang));
-  vsPickedVoice =
-    gb.find((v) => VS_VOICE_NAMES.test(v.name)) ||
-    en.find((v) => VS_VOICE_NAMES.test(v.name)) ||
-    gb[0] || en[0] || null;
-  return vsPickedVoice;
+  if (!voices.length) return null; // engine still warming — retry next utterance
+  const match = voices.filter((v) => vsLangKey(v.lang) === want);
+  let pick = null;
+  if (want === "en") {
+    const gb = match.filter((v) => /^en[-_]GB/i.test(v.lang));
+    pick = gb.find((v) => VS_VOICE_NAMES.test(v.name)) ||
+      match.find((v) => VS_VOICE_NAMES.test(v.name)) ||
+      gb[0] || match[0] || null;
+  } else {
+    pick = match.find((v) => v.default) || match[0] || null;
+  }
+  // A miss is cached as null on purpose — the phone then speaks with u.lang
+  // set and no voice, which beats forcing French through an English mouth.
+  vsVoiceByLang.set(want, pick);
+  return pick;
 }
 
 /** iOS only starts speech from inside a user gesture. Entering Viewscreen mode
@@ -2412,7 +2428,14 @@ function vsSpeechMs(text) {
  */
 function vsSpeak(msg) {
   vsStopSpeech(); // a new utterance supersedes the one before it
-  const text = String(msg.text || "");
+  // Mixed-language speech (TNGC-76) arrives pre-split: the house stitches one
+  // WAV for a wall, but the phone speaks the runs back-to-back, each in its
+  // own language's voice. A plain utterance is just a one-segment chain.
+  const segments = (Array.isArray(msg.segments) ? msg.segments : [])
+    .filter((s) => s && s.text)
+    .map((s) => ({ text: String(s.text), lang: s.lang || msg.lang }));
+  const parts = segments.length ? segments : [{ text: String(msg.text || ""), lang: msg.lang }];
+  const text = segments.length ? segments.map((s) => s.text).join("") : String(msg.text || "");
   const cap = $("vs-caption");
   // Captions render as before — and when the voice is silenced they ARE the
   // answer channel (wall parity, TNGC-27). `caption: false` means the panel
@@ -2439,18 +2462,32 @@ function vsSpeak(msg) {
     timer = setTimeout(done, vsSpeechMs(text));
     return;
   }
-  const u = new SpeechSynthesisUtterance(text);
-  const voice = vsPickVoice();
-  if (voice) { u.voice = voice; u.lang = voice.lang; }
-  u.volume = Math.max(0, Math.min(1, vsHouseVoice.volume / 100));
-  u.onend = done;
-  u.onerror = done;
+  // One utterance per segment, chained on its end event. `settled` gates the
+  // chain: cancelling fires end/error on what was speaking, and the segments
+  // behind it must die with it rather than talk over the next answer.
+  let next = 0;
+  const speakPart = () => {
+    if (settled) return;
+    if (next >= parts.length) { done(); return; }
+    const part = parts[next++];
+    const u = new SpeechSynthesisUtterance(part.text);
+    const voice = vsPickVoice(part.lang);
+    // No installed voice for the language: say it with the language TAG set
+    // and let the engine choose. An English voice reading French is worse
+    // than the engine's own guess.
+    if (voice) { u.voice = voice; u.lang = voice.lang; }
+    else u.lang = part.lang || "en";
+    u.volume = Math.max(0, Math.min(1, vsHouseVoice.volume / 100));
+    u.onend = speakPart;
+    u.onerror = speakPart; // a segment the engine can't say must not strand the rest
+    try { synth.speak(u); } catch { done(); }
+  };
   // Safari drops onend when the app backgrounds mid-utterance, and a blocked
   // engine never starts at all — the house must not wait on a promise this
-  // phone can no longer keep.
+  // phone can no longer keep. Covers the whole chain.
   timer = setTimeout(done, vsSpeechMs(text) + 10000);
   vsDuck();
-  try { synth.speak(u); } catch { done(); }
+  speakPart();
 }
 
 const VS_SPEAKER_ON =

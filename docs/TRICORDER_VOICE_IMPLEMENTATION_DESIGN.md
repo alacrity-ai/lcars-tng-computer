@@ -49,7 +49,7 @@ per-utterance audio through the cloud still would not.
   it is deliberately NOT the `voice` MCP tool's mute.
 - **Read-aloud** (`caption: false`) speaks without covering the panel it is
   reading. The karaoke highlight sweep stays a wall feature — it needs
-  `timing`, which the bridge still strips (see §7).
+  `timing`, which the bridge still strips (see §8).
 - **Barge-in**: holding the talk button cancels speech, so the mic never hears
   the Computer. Exiting Viewscreen mode, backgrounding the app, and a
   superseding utterance all cancel too.
@@ -103,7 +103,32 @@ reported honestly the pacing is correct either way. Only the waste is left, and
 it stays on the wall-shaped path where it belongs — worth revisiting if reading
 to a phone becomes common.
 
-## 6. Where the code lives
+## 6. Language (TNGC-76)
+
+The first cut spoke everything in English — including a `speak` with
+`lang: "fr"`. Two halves were wrong: the house's phone branch (§5) dropped
+`lang` from the frame, and `segments` had already been flattened into one
+string further up the route, so the phone had nothing to work from; and the
+phone's voice pick hard-filtered the handset's voices to `^en`.
+
+- `SpeakMessage` carries `lang` and (unflattened) `segments`. Both are for the
+  phone alone — a wall's audio is already synthesized in the right Piper voice
+  by the time the frame is built, which is exactly why the phone path is the
+  one that has to be told.
+- `vsPickVoice(lang)` matches installed voices on the **primary subtag**
+  (`fr-CA`, `fr_CA` and `FR` all key as `fr`), cached per language. English
+  keeps the en-GB character preference; other languages take the engine's
+  default voice for that language.
+- **No English fallback voice.** With nothing installed for the language, the
+  utterance goes out with `u.lang` set and `u.voice` unset, letting the engine
+  choose. An English voice reading French is worse than the engine's guess.
+- **Segments speak as a chain** — one utterance each, in order, advanced on
+  `onend`, each in its own language's voice: the phone's answer to the house's
+  stitched WAV. Still exactly one `speak_done`, and a cancel mid-chain drops
+  the remaining segments instead of talking over the next answer (`settled`
+  gates the chain, since cancelling fires `end` on what was speaking).
+
+## 7. Where the code lives
 
 | File | Change |
 |---|---|
@@ -111,12 +136,12 @@ to a phone becomes common.
 | `packages/bridge/src/index.ts` | relay `speak` instead of answering it; backstop timer per utterance; still strips `audioUrl`/`timing` |
 | `apps/tricorder/src/hub.ts` | `speak_done` accepted on screen sockets |
 | `apps/server/src/routes/console.ts` | phone-addressed `speak` skips synthesis entirely (§5) |
-| `packages/shared/src/index.ts` | `isTricorderDisplay()` — one place that knows a phone viewscreen from a wall |
+| `packages/shared/src/index.ts` | `isTricorderDisplay()`, `spokenMs()`, and `SpeakMessage.lang`/`.segments` (§6) |
 | `packages/contract/src/index.ts` | `display_client` doc comment: player events **+ speak completion** |
 | `claude/CLAUDE.md` | the "silent caption is expected" note becomes "the phone speaks in its own voice" |
 | `apps/tricorder/renderer/src/main.tsx` | stage header comment: speak stays PWA-native because the voice is |
 
-## 7. Deliberately out of scope
+## 8. Deliberately out of scope
 
 - **Chimes/earcons on the phone** — the wall's sound set isn't shipped in the
   PWA bundle; the voice was the ask.
@@ -125,7 +150,7 @@ to a phone becomes common.
   the page; only the highlight is missing.
 - **Piper audio over the tunnel** — see §2.
 
-## 8. Risks
+## 9. Risks
 
 - **iOS gesture requirement**: `speechSynthesis.speak()` outside a user gesture
   is ignored on Safari. Entering Viewscreen mode is a tap, so the enter handler
