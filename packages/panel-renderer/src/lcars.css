@@ -3286,6 +3286,14 @@ body {
   white-space: nowrap;
 }
 .gal-pos { color: var(--lcars-lavender); font-size: clamp(10px, 1vw, 18px); }
+/* "Computer, full screen" (TNGC-68) — the slideshow covers the whole wall,
+   LCARS chrome and all. Same layering contract as .youtube-panel-full: below
+   widgets (1050) and voice captions (1100) so both stay visible. */
+.gal-full {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
 .gal-empty {
   height: 100%;
   display: flex;

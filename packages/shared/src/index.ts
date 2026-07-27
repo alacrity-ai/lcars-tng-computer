@@ -163,6 +163,9 @@ export interface GalleryPanelProps {
   intervalMs?: number;
   /** Shuffle before cycling (the ambient default); false plays in order. */
   shuffle?: boolean;
+  /** Start full-bleed (TNGC-68) — covers the wall, LCARS chrome and all. The
+      panel also follows live media fullscreen/windowed events mid-show. */
+  fullscreen?: boolean;
 }
 
 export interface TextPanelProps {

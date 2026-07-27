@@ -32,12 +32,24 @@ function shuffled(photos: GalleryPhoto[]): GalleryPhoto[] {
   return [...photos].sort((a, b) => hash(a.url) - hash(b.url));
 }
 
-export function GalleryPanel({ photos, title, intervalMs, shuffle }: GalleryPanelProps) {
+export function GalleryPanel({ photos, title, intervalMs, shuffle, fullscreen }: GalleryPanelProps) {
   const ordered = useMemo(
     () => (shuffle === false ? photos : shuffled(photos)),
     [photos, shuffle],
   );
   const [index, setIndex] = useState(0);
+  // "Full screen" / "exit full screen" mid-show (TNGC-68): same tng-media
+  // fullscreen/windowed events the video playback layer follows, so the
+  // slideshow expands in place — no re-display, no restart at photo 1.
+  const [full, setFull] = useState(fullscreen === true);
+  useEffect(() => {
+    function onMedia(ev: Event) {
+      const { action } = (ev as CustomEvent<{ action: string }>).detail ?? {};
+      if (action === "fullscreen" || action === "windowed") setFull(action === "fullscreen");
+    }
+    window.addEventListener("tng-media", onMedia);
+    return () => window.removeEventListener("tng-media", onMedia);
+  }, []);
   const period = Math.max(3_000, intervalMs ?? DEFAULT_INTERVAL_MS);
   const count = ordered.length;
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -51,9 +63,11 @@ export function GalleryPanel({ photos, title, intervalMs, shuffle }: GalleryPane
     };
   }, [count, period, ordered]);
 
+  const cls = full ? "gal-panel gal-full" : "gal-panel";
+
   if (!count) {
     return (
-      <div className="gal-panel">
+      <div className={cls}>
         <div className="gal-empty">
           NO PHOTOS YET
           <span>Upload some from the tricorder&rsquo;s Photos plugin.</span>
@@ -66,7 +80,7 @@ export function GalleryPanel({ photos, title, intervalMs, shuffle }: GalleryPane
   const next = ordered[(index + 1) % count];
 
   return (
-    <div className="gal-panel">
+    <div className={cls}>
       {/* two layers: only the current is visible; the next preloads beneath */}
       <img key={current.url} className="gal-img show" src={current.url} alt="" />
       {count > 1 ? <img key={`pre-${next.url}`} className="gal-img" src={next.url} alt="" /> : null}

@@ -16,6 +16,9 @@ display it and you're done.
 | "Show our photos", "put the pictures up" | `display {}` |
 | "Photos from July" | `display {month: "YYYY-07"}` — resolve the year yourself (no year said = the most recent July) |
 | "Show the vacation album" | `display {album: "vacation"}` |
+| "Show the gallery full screen", "photos edge to edge" | `display {fullscreen: true}` — no LCARS frame, the picture-frame look |
+| "Full screen" while the gallery is up | `media {action: "fullscreen"}` — expands in place, show keeps its position |
+| "Exit full screen", "windowed" | `media {action: "windowed"}` |
 | "Stop the slideshow", "that's enough photos" | `display` tool → `{view: "status"}` (the gallery is just a panel) |
 | "How many photos…", "what albums…" | `read {}` → speak it |
 | "Upload / add this photo" | Not a voice act — say: "Upload from the Photos plugin on your tricorder." |

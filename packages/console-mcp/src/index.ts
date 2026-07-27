@@ -255,8 +255,9 @@ server.registerTool(
       "media is playing (even invisibly — check the ♫ state in screen_state's playback field). " +
       "'speed' sets the video playback rate (rate required, 0.25–2; 1 = normal — 'faster' → " +
       "1.5, 'double speed' → 2, 'normal speed' → 1). The rate resets whenever a new video " +
-      "or panel is displayed. 'fullscreen' expands the video to fill the entire wall; " +
-      "'windowed' returns it to the framed panel. Volume: 'volume' sets an absolute level " +
+      "or panel is displayed. 'fullscreen' expands the video — or a photo-gallery " +
+      "slideshow — to fill the entire wall; 'windowed' returns it to the framed panel " +
+      "(works mid-show without restarting the show). Volume: 'volume' sets an absolute level " +
       "(level required, 0–100 — '50% volume' → 50, 'max volume' → 100); 'volume_up' / " +
       "'volume_down' nudge by 15 ('louder', 'quieter'); 'mute' / 'unmute' are separate " +
       "('mute' when they want silence but the video to keep going — 'stop' if they want it " +
@@ -1166,9 +1167,13 @@ server.registerTool(
   {
     description:
       "The family photo library (uploaded from tricorders; guests excluded). Actions: " +
-      "display {album?, month?, wall?} — start the ambient slideshow on the wall ('show " +
-      "our photos' → everything, newest-leaning shuffle; 'photos from July' → month: " +
-      "YYYY-MM resolved by you; 'show the vacation album' → album by name). " +
+      "display {album?, month?, wall?, fullscreen?} — start the ambient slideshow on the " +
+      "wall ('show our photos' → everything, newest-leaning shuffle; 'photos from July' → " +
+      "month: YYYY-MM resolved by you; 'show the vacation album' → album by name; 'show " +
+      "the gallery full screen' → fullscreen: true, edge-to-edge with no LCARS frame — " +
+      "the picture-frame look). While a gallery is ALREADY up, use the media tool's " +
+      "fullscreen/windowed instead — it expands/restores in place without restarting " +
+      "the show. " +
       "read {} — albums with counts and the library total, for questions ('how many " +
       "photos do we have?', 'what albums are there?'). " +
       "To STOP the slideshow, display the status board (or whatever was asked for) via " +
@@ -1179,9 +1184,10 @@ server.registerTool(
       album: z.string().optional(),
       month: z.string().optional(),
       wall: z.string().optional(),
+      fullscreen: z.boolean().optional(),
     },
   },
-  async ({ action, album, month, wall }) => {
+  async ({ action, album, month, wall, fullscreen }) => {
     if (action === "read") {
       const idx = await cloudFetch<{ albums: Array<{ album: string; n: number }>; total: number }>(
         "GET",
@@ -1205,6 +1211,7 @@ server.registerTool(
       props: {
         photos: photos.map((p) => ({ url: p.url, takenAt: p.takenAt, album: p.album })),
         title: album ? album.toUpperCase() : month ? `MEMORIES · ${month}` : "MEMORIES",
+        ...(fullscreen ? { fullscreen: true } : {}),
       },
       ...(wall ? { wall } : {}),
     });
