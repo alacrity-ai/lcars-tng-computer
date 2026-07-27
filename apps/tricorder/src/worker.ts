@@ -12,7 +12,14 @@
  * ./public (the PWA) are served by the platform before this Worker runs.
  */
 import { Hono, type Context } from "hono";
-import { CONTRACT_VERSION, EFFORT_LEVELS, MODEL_CHOICES, MODEL_VALUE_RE, type TngMessage } from "@tng/contract";
+import {
+  CONTRACT_VERSION,
+  EFFORT_LEVELS,
+  MODEL_CHOICES,
+  MODEL_VALUE_RE,
+  type PluginTile,
+  type TngMessage,
+} from "@tng/contract";
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
 import { calendarRoutes } from "./calendar";
@@ -386,7 +393,39 @@ const PLUGIN_ID_RE = /^[a-z0-9-]{1,32}$/;
 // Cloud-native plugins (TNGC-52) live behind the Worker itself — no bridge,
 // no sidecar — so they are always online, even when the Computer is not.
 // They merge into the roster the bridge reports; the bridge wins on id clash.
-const CLOUD_PLUGINS = [{ id: "calendar", name: "Calendar", online: true }];
+// Having no manifest, they carry their tile (TNGC-58) here instead.
+const CLOUD_PLUGINS = [
+  {
+    id: "calendar",
+    name: "Calendar",
+    online: true,
+    tile: {
+      color: "#cc99cc",
+      icon: { viewBox: "0 0 24 24", paths: ["M3 5h18v16H3z", "M8 2v5", "M16 2v5", "M3 10h18"] },
+    },
+  },
+];
+
+// Tiles arrive from house-authored manifests, so they are validated and
+// REBUILT here before any phone sees them — the same rule the control ops
+// follow. The icon is path DATA the PWA draws; an SVG string never crosses
+// this boundary. Anything that fails drops the tile, never the plugin.
+const TILE_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const TILE_VIEWBOX_RE = /^[\d.\- ]{3,32}$/;
+const TILE_PATH_RE = /^[MmLlHhVvCcSsQqTtAaZz\d.,\-\s]{1,600}$/;
+
+function cleanTile(raw: unknown): PluginTile | undefined {
+  const t = raw as { color?: unknown; icon?: unknown } | undefined;
+  if (!t || typeof t !== "object") return undefined;
+  const icon = t.icon as { viewBox?: unknown; paths?: unknown; fill?: unknown } | undefined;
+  if (typeof t.color !== "string" || !TILE_COLOR_RE.test(t.color)) return undefined;
+  if (!icon || !Array.isArray(icon.paths) || icon.paths.length === 0 || icon.paths.length > 12) return undefined;
+  const paths = icon.paths.filter((p: unknown): p is string => typeof p === "string" && TILE_PATH_RE.test(p));
+  if (paths.length !== icon.paths.length) return undefined;
+  const viewBox =
+    typeof icon.viewBox === "string" && TILE_VIEWBOX_RE.test(icon.viewBox) ? icon.viewBox : "0 0 24 24";
+  return { color: t.color.toLowerCase(), icon: { viewBox, paths, ...(icon.fill === true ? { fill: true } : {}) } };
+}
 const CONTROL_LOG_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const COLOR_RE = /^[#a-zA-Z0-9 -]{1,32}$/;
 
@@ -406,13 +445,19 @@ app.get("/api/plugins", async (c) => {
       .bind(s.tenantId)
       .all<{ id: string; enabled: number }>(),
   ]);
-  const data = (await res.json()) as { online: boolean; plugins: Array<{ id: string; name: string; online: boolean }> };
+  const data = (await res.json()) as {
+    online: boolean;
+    plugins: Array<{ id: string; name: string; online: boolean; tile?: unknown }>;
+  };
   const enabled = new Map(rows.results.map((r) => [r.id, r.enabled === 1]));
   const bridgeIds = new Set(data.plugins.map((p) => p.id));
   const roster = [...data.plugins, ...CLOUD_PLUGINS.filter((p) => !bridgeIds.has(p.id))];
   return c.json({
     online: data.online,
-    plugins: roster.map((p) => ({ ...p, enabled: enabled.get(p.id) === true })),
+    plugins: roster.map(({ tile, ...p }) => {
+      const clean = cleanTile(tile);
+      return { ...p, enabled: enabled.get(p.id) === true, ...(clean ? { tile: clean } : {}) };
+    }),
   });
 });
 

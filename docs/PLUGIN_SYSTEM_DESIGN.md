@@ -160,6 +160,10 @@ entrypoints; no extra parser ships in the images):
   "version": "0.1.0",
   "minCore": "0.3.0",
   "description": "Local Zigbee lighting fabric (Zigbee2MQTT + Mosquitto)",
+  "ui": {
+    "color": "#ff9900",
+    "icon": { "viewBox": "0 0 24 24", "paths": ["M9 18h6", "M10 21h4", "M12 2a7 7 0 0 0-4 12.8V18h8v-3.2A7 7 0 0 0 12 2z"] }
+  },
   "services": [
     { "name": "lighting", "internalEndpoints": [{ "host": "lighting", "port": 7101 }] }
   ],

@@ -24,6 +24,10 @@ plugins/<id>/
   "version": "0.1.0",
   "minCore": "0.3.0",
   "description": "Local Zigbee lighting fabric",
+  "ui": {
+    "color": "#ff9900",
+    "icon": { "viewBox": "0 0 24 24", "paths": ["M9 18h6", "M10 21h4", "M12 2a7 7 0 0 0-4 12.8V18h8v-3.2A7 7 0 0 0 12 2z"] }
+  },
   "services": [
     { "name": "lighting", "internalEndpoints": [{ "host": "lighting", "port": 7101 }] }
   ],
@@ -33,6 +37,12 @@ plugins/<id>/
 }
 ```
 
+- `ui` — **required.** The plugin's square tile on the tricorder's plugin
+  grid: `color` (`#rrggbb`) behind `icon` (SVG path **data**, drawn by the
+  phone — never markup it renders). Core hardcodes no plugin's look. Missing
+  or invalid drops to a grey generic tile and says so at boot; it never
+  disables the plugin. Full rules:
+  [docs/sops/adding-plugins.md](../docs/sops/adding-plugins.md).
 - `internalEndpoints` — pinpoint `host:port` holes the fenced brain gets to
   this plugin's sidecars. Nothing else opens.
 - `allowedDomains` — EXTERNAL egress for the brain. Empty for anything fully

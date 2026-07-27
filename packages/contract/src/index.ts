@@ -120,12 +120,30 @@ export const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
 // probes each sidecar and reports the roster — the cloud never guesses what
 // a house has installed.
 
+/** How a plugin paints its tile on the tricorder's plugin grid (TNGC-58).
+    Declared by the plugin itself in its manifest's `ui` block, carried up the
+    link with the roster, and re-validated cloud-side before any phone sees it
+    — a manifest is house-authored content, not trusted markup, so the icon is
+    path DATA the phone draws, never an SVG string it renders. */
+export interface PluginTile {
+  /** Tile background, `#rrggbb`. The phone picks black or white lettering
+      from its luminance. */
+  color: string;
+  /** SVG path data for the glyph, drawn inside `viewBox`. Stroked like a
+      Lucide icon unless `fill` is set. */
+  icon: { viewBox: string; paths: string[]; fill?: boolean };
+}
+
 /** One plugin as probed by the bridge (TNGC-40). `online` = the sidecar
     answered its health check just now. */
 export interface PluginStatus {
   id: string;
   name: string;
   online: boolean;
+  /** TNGC-58. Optional on the wire only so an older bridge still rosters —
+      manifests are required to declare it; the phone falls back to a neutral
+      tile when it is missing or fails validation. */
+  tile?: PluginTile;
 }
 
 /** A plugin control op (TNGC-40). EPHEMERAL by design: no DO persistence,

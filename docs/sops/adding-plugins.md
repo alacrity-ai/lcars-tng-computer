@@ -93,6 +93,13 @@ plugins/<id>/
   "version": "0.3.0",
   "minCore": "0.3.0",
   "description": "One line — printed in the boot banner.",
+  "ui": {
+    "color": "#ff9900",
+    "icon": {
+      "viewBox": "0 0 24 24",
+      "paths": ["M9 18h6", "M10 21h4", "M12 2a7 7 0 0 0-4 12.8V18h8v-3.2A7 7 0 0 0 12 2z"]
+    }
+  },
   "services": [
     { "name": "mosquitto" },
     { "name": "zigbee2mqtt" },
@@ -103,6 +110,26 @@ plugins/<id>/
   "allowedDomains": []
 }
 ```
+
+- **`ui` — REQUIRED (TNGC-58).** How your plugin looks on the tricorder's
+  plugin grid: a square tile in `ui.color` carrying `ui.icon` as its glyph.
+  Core hardcodes nothing — a new plugin arrives with its own look.
+  - `color` — `#rrggbb`, the tile background. Pick something no other enabled
+    plugin uses; the grid is scanned by color before it is read. LCARS
+    palette: gold `#ff9900`, lavender `#cc99cc`, blue `#9999cc`, peach
+    `#ffcc99`, red `#cc6666`. The phone picks black or white lettering from
+    the color's luminance, so mid-tones are fine.
+  - `icon` — `{viewBox, paths[], fill?}`. **Path DATA, not an SVG string**: a
+    manifest is house-authored content, so the phone builds the `<svg>` from
+    validated `d` attributes and never renders markup you supply. Paths are
+    stroked (Lucide/Feather style, `stroke-linecap: round`) unless you set
+    `"fill": true`. Up to 12 paths, 600 chars each, and the charset is
+    restricted to path commands and numbers — anything else drops the tile.
+    Lift `d` values straight out of a Lucide icon; convert `<circle>`/`<line>`
+    primitives to paths first.
+  - A missing or invalid `ui` **never disables your plugin** — it costs it the
+    look. The loader prints `ui MISSING` at boot and the bridge logs which
+    field failed; the tile falls back to a grey generic. Fix it and restart.
 
 - `services[].internalEndpoints` — every hole the brain gets. Declare ONLY
   what the MCP server actually calls (usually just your service). `tng

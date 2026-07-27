@@ -9,6 +9,17 @@
     { "name": "zigbee2mqtt" },
     { "name": "lighting", "internalEndpoints": [{ "host": "lighting", "port": 7101 }] }
   ],
+  "ui": {
+    "color": "#ff9900",
+    "icon": {
+      "viewBox": "0 0 24 24",
+      "paths": [
+        "M9 18h6",
+        "M10 21h4",
+        "M12 2a7 7 0 0 0-4 12.8V18h8v-3.2A7 7 0 0 0 12 2z"
+      ]
+    }
+  },
   "mcp": { "name": "lights", "command": "node", "args": ["../plugins/lighting/mcp/server.mjs"] },
   "skills": ["lighting"],
   "allowedDomains": []

@@ -45,7 +45,8 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import WebSocket from "ws";
@@ -56,6 +57,7 @@ import type {
   LinkDownFrame,
   LinkUpFrame,
   PluginStatus,
+  PluginTile,
   QueueItem,
   RosterDisplay,
   TngMessage,
@@ -999,10 +1001,78 @@ let lastPluginsJson = "";
 let lastLightsJson = "";
 let lastOpsJson = "";
 
+// ---- plugin tiles (TNGC-58) ------------------------------------------------------
+// How a plugin looks on the phone's plugin grid is the PLUGIN's business, so
+// it is declared in the plugin's own manifest (`ui`) rather than hardcoded in
+// core — a new plugin arrives with its color and glyph and needs no edit here.
+// The manifest is house-authored content, not trusted markup: the icon travels
+// as path DATA (validated against a strict charset, re-validated cloud-side)
+// that the phone draws itself. A bad `ui` block never hides a working plugin —
+// it costs the tile its look, loudly, and nothing else.
+
+const PLUGINS_DIR =
+  process.env.TNG_PLUGINS_DIR ??
+  resolve(dirname(fileURLToPath(import.meta.url)), "../../../plugins");
+
+const TILE_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const TILE_VIEWBOX_RE = /^[\d.\- ]{3,32}$/;
+/** SVG path data: commands + numbers + separators. No parentheses, no url(),
+    nothing that could carry script even if a future renderer got careless. */
+const TILE_PATH_RE = /^[MmLlHhVvCcSsQqTtAaZz\d.,\-\s]{1,600}$/;
+const MAX_TILE_PATHS = 12;
+
+/** Validate and REBUILD a manifest `ui` block — never pass one through. */
+export function parseTile(raw: unknown, id: string): PluginTile | undefined {
+  const ui = raw as { color?: unknown; icon?: unknown } | undefined;
+  if (!ui || typeof ui !== "object") {
+    console.error(`[bridge] plugin ${id}: manifest has no "ui" block — tile falls back to the default look`);
+    return undefined;
+  }
+  const color = typeof ui.color === "string" ? ui.color.trim() : "";
+  const icon = ui.icon as { viewBox?: unknown; paths?: unknown; fill?: unknown } | undefined;
+  if (!TILE_COLOR_RE.test(color)) {
+    console.error(`[bridge] plugin ${id}: ui.color must be "#rrggbb" — tile falls back to the default look`);
+    return undefined;
+  }
+  if (!icon || !Array.isArray(icon.paths) || icon.paths.length === 0 || icon.paths.length > MAX_TILE_PATHS) {
+    console.error(`[bridge] plugin ${id}: ui.icon.paths must be 1..${MAX_TILE_PATHS} SVG paths — tile falls back`);
+    return undefined;
+  }
+  const paths = icon.paths.filter((p): p is string => typeof p === "string" && TILE_PATH_RE.test(p.trim())).map((p) => p.trim());
+  if (paths.length !== icon.paths.length) {
+    console.error(`[bridge] plugin ${id}: ui.icon.paths contains path data that failed validation — tile falls back`);
+    return undefined;
+  }
+  const viewBox = typeof icon.viewBox === "string" && TILE_VIEWBOX_RE.test(icon.viewBox.trim())
+    ? icon.viewBox.trim()
+    : "0 0 24 24";
+  return { color: color.toLowerCase(), icon: { viewBox, paths, ...(icon.fill === true ? { fill: true } : {}) } };
+}
+
+/** Manifests change only on deploy — read once, remember the verdict. */
+const tileCache = new Map<string, PluginTile | undefined>();
+
+function pluginTile(id: string): PluginTile | undefined {
+  if (tileCache.has(id)) return tileCache.get(id);
+  let tile: PluginTile | undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(PLUGINS_DIR, id, "plugin.json"), "utf8")) as { ui?: unknown };
+    tile = parseTile(manifest.ui, id);
+  } catch {
+    console.error(`[bridge] plugin ${id}: no readable plugin.json under ${PLUGINS_DIR} — tile falls back`);
+  }
+  tileCache.set(id, tile);
+  return tile;
+}
+
 function pluginRoster(): PluginStatus[] {
+  const entry = (id: string, name: string, online: boolean): PluginStatus => {
+    const tile = pluginTile(id);
+    return { id, name, online, ...(tile ? { tile } : {}) };
+  };
   return [
-    { id: "lights", name: "Lights", online: lightsOnline },
-    ...(CLAUDEOPS_URL ? [{ id: "claudeops", name: "Claude Ops", online: opsOnline }] : []),
+    entry("lights", "Lights", lightsOnline),
+    ...(CLAUDEOPS_URL ? [entry("claudeops", "Claude Ops", opsOnline)] : []),
   ];
 }
 

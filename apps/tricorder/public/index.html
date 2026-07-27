@@ -313,8 +313,35 @@
 
   /* plugins + lights screens (TNGC-40) */
   .pl-note { color: #888; font-size: 14px; margin-top: 12px; }
+  /* The plugin grid (TNGC-58): three square tiles per row — thumb-sized on a
+     phone, each in its own manifest-declared color with its own glyph, so the
+     screen is scanned by shape and color instead of read line by line. */
+  .plugrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .plugtile {
+    position: relative; aspect-ratio: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px; padding: 6px;
+    border: 0; border-radius: 18px; cursor: pointer; font: inherit;
+    background: var(--gold); color: #000;
+    box-shadow: 0 2px 0 rgba(0, 0, 0, .45); transition: transform .08s, filter .08s;
+  }
+  .plugtile:active { transform: scale(.96); filter: brightness(1.12); }
+  .plugtile svg { width: 42%; height: auto; display: block; }
+  .plugtile .lbl {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    text-align: center; line-height: 1.1; max-width: 100%; overflow: hidden;
+  }
+  /* Offline is a state of the tile, not a separate row: drained of color and
+     unpressable, with the reason stamped where the eye already is. */
+  .plugtile[disabled] { background: #23232e !important; color: #6d6d7d !important; box-shadow: none; cursor: default; }
+  .plugtile .off { position: absolute; bottom: 6px; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
   .plugrow { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
   .plugrow .btn { margin-top: 0; }
+  /* the admin enable-sheet reuses the glyph at chip size */
+  .plugchip {
+    width: 34px; height: 34px; border-radius: 10px; flex: none;
+    display: flex; align-items: center; justify-content: center; background: var(--gold); color: #000;
+  }
+  .plugchip svg { width: 20px; height: 20px; display: block; }
   .plugrow .name { flex: 1; color: var(--peach); font-weight: 700; text-transform: uppercase; font-size: 14px; }
   .plugrow .st { font-size: 11px; color: #888; text-transform: uppercase; }
   .lt-offline {
@@ -2306,6 +2333,43 @@ $("btn-plugins").onclick = () => openPlugins();
 $("btn-plback").onclick = () => show("main");
 $("btn-ltback").onclick = () => { stopLightsPoll(); openPlugins(); };
 
+// A plugin's tile look (TNGC-58) comes from its own manifest. Both are drawn
+// from DATA — the glyph is built with createElementNS from validated path
+// strings, never innerHTML — so a manifest can style a button and nothing more.
+const TILE_FALLBACK = {
+  color: "#5a5a6e",
+  icon: { viewBox: "0 0 24 24", paths: ["M4 4h7v7H4z", "M13 4h7v7h-7z", "M4 13h7v7H4z", "M13 13h7v7h-7z"] },
+};
+
+/** Black or white lettering, whichever the tile color can actually carry. */
+function inkFor(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return lum > 0.55 ? "#000" : "#fff";
+}
+
+function tileGlyph(icon) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", icon.viewBox || "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of icon.paths || []) {
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", d);
+    if (icon.fill) {
+      path.setAttribute("fill", "currentColor");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "1.7");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
 async function openPlugins() {
   show("plugins");
   const wrap = $("plugins-list");
@@ -2326,28 +2390,36 @@ async function openPlugins() {
         (me.user.role === "admin" ? " Enable them from the Admin console." : " Ask your household admin to enable them.") + "</div>";
       return;
     }
+    const grid = document.createElement("div");
+    grid.className = "plugrid";
     for (const p of usable) {
-      const row = document.createElement("div");
-      row.className = "plugrow";
+      const tile = p.tile || TILE_FALLBACK;
       const b = document.createElement("button");
-      b.className = "btn";
-      b.style.marginTop = "0";
-      b.textContent = p.name;
+      b.className = "plugtile";
       b.disabled = !p.online;
+      if (p.online) {
+        b.style.background = tile.color;
+        b.style.color = inkFor(tile.color);
+      }
+      b.appendChild(tileGlyph(tile.icon));
+      const lbl = document.createElement("span");
+      lbl.className = "lbl";
+      lbl.textContent = p.name;
+      b.appendChild(lbl);
+      if (!p.online) {
+        const off = document.createElement("span");
+        off.className = "off";
+        off.textContent = "offline";
+        b.appendChild(off);
+      }
       b.onclick = () => {
         if (p.id === "lights") openLights();
         else if (p.id === "calendar") openCal();
         else if (p.id === "claudeops") openOps();
       };
-      row.appendChild(b);
-      if (!p.online) {
-        const st = document.createElement("span");
-        st.className = "st";
-        st.textContent = "offline";
-        row.appendChild(st);
-      }
-      wrap.appendChild(row);
+      grid.appendChild(b);
     }
+    wrap.appendChild(grid);
   } catch (e) { $("plugins-err").textContent = e.message; }
 }
 
@@ -2553,6 +2625,15 @@ $("btn-plugmgr").onclick = async () => {
       plugPending.set(p.id, p.enabled);
       const row = document.createElement("div");
       row.className = "plugrow";
+      // Same glyph and color as the grid tile, chip-sized — you enable the
+      // thing you'll later recognise by its look, not by its position.
+      const tile = p.tile || TILE_FALLBACK;
+      const chip = document.createElement("div");
+      chip.className = "plugchip";
+      chip.style.background = tile.color;
+      chip.style.color = inkFor(tile.color);
+      chip.appendChild(tileGlyph(tile.icon));
+      row.appendChild(chip);
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = p.name + (p.online ? "" : " (offline)");

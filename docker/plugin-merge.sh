@@ -94,7 +94,16 @@ for id in "${IDS[@]:-}"; do
     e=$(echo "$eps" | wc -l)
   fi
 
-  echo "[plugins] $id v$ver — mcp: $mcp, skills: $skills, fence: +$d domain(s), +$e internal endpoint(s)"
+  # Tricorder tile (TNGC-58): required of every manifest, but a bad one costs
+  # the plugin its look, never its function — so this warns, it does not skip.
+  # The bridge does the real validation (it is what ships the tile up the link).
+  tile="ui ✓"
+  if ! jq -e '.ui.color and (.ui.icon.paths | type == "array" and length > 0)' "$mf" >/dev/null 2>&1; then
+    tile="ui MISSING — the tricorder tile falls back to the default look"
+    echo "[plugins] $id: manifest has no valid \"ui\" block (color + icon.paths are required)"
+  fi
+
+  echo "[plugins] $id v$ver — mcp: $mcp, skills: $skills, fence: +$d domain(s), +$e internal endpoint(s), $tile"
   loaded=$((loaded + 1))
 done
 
