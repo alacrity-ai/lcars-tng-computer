@@ -249,6 +249,8 @@ export interface MediaState {
       player events (video_ended / video_error) — the bridge forwards `msg`
       to the house hub over that display's socket, which is what advances a
       playlist's per-wall queue on the phone. The DO whitelists the types.
+      TNGC-75 added speak_done: the phone speaks utterances in its own voice,
+      so it also owes the house the completion `speak` blocks on.
     - compact (TNGC-32): an admin pressed Compact in the PWA — the bridge
       holds the dispatcher and injects /compact into the tmux-wrapped
       session. `by` is the requesting admin's handle (audit trail).

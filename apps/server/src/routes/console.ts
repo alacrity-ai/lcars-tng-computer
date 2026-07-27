@@ -21,7 +21,7 @@ import type {
   SpeakRequest,
   WorkingRequest,
 } from "@tng/shared";
-import { paginateArticle } from "@tng/shared";
+import { isTricorderDisplay, paginateArticle, spokenMs } from "@tng/shared";
 import type { DisplayHub } from "../hub.js";
 import { cancelActiveReading, startReading } from "../reading.js";
 import { getArticle, parseArticleUrl } from "./article.js";
@@ -576,6 +576,20 @@ export function registerConsoleRoutes(app: FastifyInstance, hub: DisplayHub) {
           screenOffset = at;
         }
       }
+    }
+
+    // A tricorder viewscreen speaks in the phone's own voice (TNGC-75) and the
+    // bridge strips the audio before the frame leaves the house — so don't
+    // spend Piper on it, and above all don't make the phone wait out a
+    // synthesis it will never hear. Same caption-carrying frame the
+    // sidecar-down path sends; the phone reports when it stops talking.
+    if (isTricorderDisplay(wall)) {
+      const utteranceId = randomUUID();
+      hub.broadcast({ type: "speak", utteranceId, text, caption: effectiveCaption }, wall);
+      // Scaled to the words, like the audio path's durationMs + slack: the
+      // default 60s would cut a long answer off mid-sentence on the phone.
+      if (waitForPlayback) await hub.waitForSpeakDone(utteranceId, spokenMs(text) + 25_000);
+      return { ok: true, utteranceId, tts: "phone" };
     }
 
     // Long uncached text streams as sentence-first chunks: the head

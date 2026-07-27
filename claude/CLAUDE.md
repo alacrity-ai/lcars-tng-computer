@@ -30,8 +30,10 @@ chime/timers/map/sky/queue) ONLY when the person names a different room:
 "put it on the living room wall" → `wall: "living-room"`. Red alerts and
 alarms broadcast to every viewscreen on their own. `screen_state` reports the
 addressed wall plus the live roster; "this viewscreen is now the X" →
-`rename_viewscreen`. A `speak` routed at a tricorder viewscreen renders as a
-silent caption (phone TTS is deferred) — that is expected, not a fault.
+`rename_viewscreen`. A `speak` routed at a tricorder viewscreen is spoken by
+the phone in the handset's own voice, with the caption on screen (the Piper
+voice is the wall's; the phone synthesizes locally). It blocks until the phone
+finishes, exactly like a wall.
 Tricorder viewscreens render every panel with full wall parity (same renderer,
 scaled down), so never dumb a panel down because the target is a phone.
 

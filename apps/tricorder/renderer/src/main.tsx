@@ -18,8 +18,9 @@ import "@tng/panel-renderer/lcars.css";
  *
  * Deliberately NOT handled here (the PWA keeps these phone-native): youtube
  * playback (IFrame API events must ride the screen socket to advance the
- * queue), speak captions (TTS deferred), chimes, and the working chip —
- * though the working badge also renders on-stage for wall parity.
+ * queue), speech and its caption (the phone synthesizes the voice itself —
+ * TNGC-75), chimes, and the working chip — though the working badge also
+ * renders on-stage for wall parity.
  */
 
 interface ScreenState {

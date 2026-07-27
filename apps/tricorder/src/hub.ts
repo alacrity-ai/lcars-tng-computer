@@ -450,16 +450,22 @@ export class TenantHub extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, data: ArrayBuffer | string): Promise<void> {
     if (typeof data !== "string") return;
-    // Phone screen sockets may report PLAYER EVENTS only (video_ended /
-    // video_error — what advances a playlist's queue on the phone); the
-    // whitelist keeps them from speaking as a wall in any other way.
+    // Phone screen sockets may report PLAYER EVENTS (video_ended /
+    // video_error — what advances a playlist's queue on the phone) and
+    // utterance completion (TNGC-75 — what unblocks the Computer's `speak`);
+    // the whitelist keeps them from speaking as a wall in any other way.
     // Everything else on a screen socket is dropped.
     const tags = this.ctx.getTags(ws);
     if (tags.includes("screen")) {
       const user = tags.find((t) => t.startsWith("user:"))?.slice(5);
       if (!user) return;
       try {
-        const msg = JSON.parse(data) as { type?: unknown; videoId?: unknown; position?: unknown };
+        const msg = JSON.parse(data) as {
+          type?: unknown;
+          videoId?: unknown;
+          position?: unknown;
+          utteranceId?: unknown;
+        };
         const player =
           msg.type === "video_ended" ||
           msg.type === "video_error" ||
@@ -467,7 +473,14 @@ export class TenantHub extends DurableObject<Env> {
           // in Viewscreen mode too. Still a player event, still nothing that
           // lets a screen socket speak as a wall.
           (msg.type === "playback_progress" && typeof msg.position === "number");
-        if (player && typeof msg.videoId === "string" && msg.videoId.length <= 16) {
+        // TNGC-75: the phone finished saying what the house asked it to say.
+        // Carries no content of its own — just the id it was handed.
+        const spoke =
+          msg.type === "speak_done" &&
+          typeof msg.utteranceId === "string" &&
+          msg.utteranceId.length <= 64;
+        const ok = spoke || (player && typeof msg.videoId === "string" && msg.videoId.length <= 16);
+        if (ok) {
           this.sendDown({ v: 1, type: "display_client", name: `tricorder-${user}`, msg });
         }
       } catch {

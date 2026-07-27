@@ -681,6 +681,25 @@ export function normalizeDisplayName(raw: string): string {
     .slice(0, 48);
 }
 
+/** A personal phone viewscreen (`tricorder-<user>`, TNGC-36) rather than a
+    screen in a room. It renders every panel with full wall parity, but it has
+    no path to the house's audio: the phone synthesizes speech itself in the
+    handset's voice (TNGC-75), so nothing should spend Piper on its behalf. */
+export function isTricorderDisplay(name: string): boolean {
+  return name.startsWith("tricorder-");
+}
+
+/** Roughly how long a phone will take to say `text` (~18 characters a second,
+    close to Piper's own pace). The canonical estimate for the phone-speech
+    path: the house waits on it, the bridge backstops on it, and the PWA uses
+    it for its caption dwell and its own safety net — each with more grace than
+    the layer below, so a phone that is still talking always wins the race.
+    Copies live in `packages/bridge` and the PWA (neither can import this);
+    keep them in step. */
+export function spokenMs(text: string): number {
+  return Math.min(300_000, 1_500 + text.length * 55);
+}
+
 /** One live display in the roster (connected clients only). */
 export interface DisplayRosterEntry {
   name: string;

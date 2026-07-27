@@ -1658,8 +1658,9 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
 // A phone in Viewscreen mode is one more named display whose transport is the
 // cloud tunnel: the DO sends display_open/display_close, the bridge attaches
 // a plain display client to the house hub under that name and relays every
-// server→display message up as a `frame`. TTS is deferred — the bridge acks
-// speak instantly and strips the audio payload, so captions render silently.
+// server→display message up as a `frame`. The phone speaks for itself
+// (TNGC-75), so the audio payload is still stripped — the phone synthesizes
+// the text locally — but completion is now the phone's to report.
 
 const SERVER_WS_URL = SERVER_URL.replace(/^http/, "ws") + "/ws";
 
@@ -1669,8 +1670,45 @@ interface TricorderDisplay {
   /** Frames relay through this promise chain so the async composite-asset
       inlining (below) can never reorder them. */
   relayChain: Promise<void>;
+  /** TNGC-75: the utterance this phone is speaking, and the timer that answers
+      for it if the phone never does. */
+  speakPending: string | null;
+  speakBackstop: NodeJS.Timeout | null;
 }
 const tricorderDisplays = new Map<string, TricorderDisplay>();
+
+/**
+ * How long to wait for a phone's own `speak_done` before answering for it.
+ *
+ * `speak` blocks the Computer until the display reports back, which is what
+ * paces a page-by-page reading — so this must outlast the phone's own safety
+ * net (the same estimate + 10s), or the bridge would race pages past a phone
+ * that is still talking. It exists only so a killed app, a device on silent,
+ * or a pre-TNGC-75 PWA costs one bounded wait instead of the house's full
+ * timeout. The estimate is `spokenMs` from @tng/shared, copied because the
+ * bridge speaks only the cloud contract; keep the two in step.
+ */
+function speakBackstopMs(text: string): number {
+  return Math.min(300_000, 1_500 + text.length * 55) + 15_000;
+}
+
+/** Tell the house an utterance is finished, once. Everything that can end one
+    (the phone's report, the backstop, a superseding utterance, the viewscreen
+    closing) routes through here, so the house hears about it exactly once. */
+function settleSpeak(entry: TricorderDisplay): void {
+  if (entry.speakBackstop) {
+    clearTimeout(entry.speakBackstop);
+    entry.speakBackstop = null;
+  }
+  const utteranceId = entry.speakPending;
+  entry.speakPending = null;
+  if (!utteranceId || entry.ws?.readyState !== WebSocket.OPEN) return;
+  try {
+    entry.ws.send(JSON.stringify({ type: "speak_done", utteranceId }));
+  } catch {
+    // socket recycling — the hub's own per-utterance timeout still resolves
+  }
+}
 
 /** TNGC-37: composite `svg` blocks reference same-origin LAN assets the
     phone can't fetch — inline them as data URIs before the frame rides the
@@ -1736,7 +1774,13 @@ function openTricorderDisplay(name: string): void {
     return;
   }
   if (tricorderDisplays.has(name)) return;
-  const entry: TricorderDisplay = { ws: null, retryTimer: null, relayChain: Promise.resolve() };
+  const entry: TricorderDisplay = {
+    ws: null,
+    retryTimer: null,
+    relayChain: Promise.resolve(),
+    speakPending: null,
+    speakBackstop: null,
+  };
   tricorderDisplays.set(name, entry);
   connectTricorderDisplay(name, entry);
   console.error(`[bridge] viewscreen ${name} attached`);
@@ -1771,9 +1815,22 @@ function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
       ws.send(JSON.stringify({ type: "screen_state", view: msg.view, props: msg.props }));
     }
     if (msg.type === "speak") {
-      ws.send(JSON.stringify({ type: "speak_done", utteranceId: msg.utteranceId }));
+      // The phone synthesizes the text itself, so the LAN audio URL is useless
+      // to it and per-character timing is weight the tunnel shouldn't carry
+      // (the karaoke sweep stays a wall feature).
       delete msg.audioUrl;
       delete msg.timing;
+      // A new utterance supersedes the last: settle the old one now, exactly
+      // as the phone does, so the house is never waiting on a voice that
+      // stopped talking.
+      settleSpeak(entry);
+      if (typeof msg.utteranceId === "string") {
+        entry.speakPending = msg.utteranceId;
+        entry.speakBackstop = setTimeout(
+          () => settleSpeak(entry),
+          speakBackstopMs(typeof msg.text === "string" ? msg.text : ""),
+        );
+      }
     }
     // Forward through the per-display chain: composite frames pause to inline
     // their svg assets (TNGC-37), and everything queues behind them so frame
@@ -1799,21 +1856,29 @@ function connectTricorderDisplay(name: string, entry: TricorderDisplay): void {
   });
 }
 
-/** Phone-reported player events (video_ended / video_error) forwarded onto
-    the display's socket — the hub resolves the wall from the socket, so the
-    per-wall play queue advances exactly as it would for a room wall.
+/** Phone-reported player events (video_ended / video_error) and utterance
+    completion (TNGC-75) forwarded onto the display's socket — the hub resolves
+    the wall from the socket, so the per-wall play queue advances, and `speak`
+    unblocks, exactly as they would for a room wall.
     Whitelisted again here: a compromised cloud must not speak as a wall. */
 function forwardDisplayClient(name: string, msg: unknown): void {
   const entry = tricorderDisplays.get(name);
   if (!entry?.ws || entry.ws.readyState !== WebSocket.OPEN) return;
   const m = msg as {
     type?: unknown;
+    utteranceId?: unknown;
     videoId?: unknown;
     code?: unknown;
     audio?: unknown;
     position?: unknown;
     duration?: unknown;
   };
+  // The phone finished speaking — this also disarms the backstop, so the two
+  // paths can never both report.
+  if (m?.type === "speak_done") {
+    if (m.utteranceId === entry.speakPending) settleSpeak(entry);
+    return;
+  }
   if (typeof m?.videoId !== "string") return;
   // Rebuilt, never relayed — a phone speaks to the house only in the shapes
   // listed here. TNGC-73 added playback_progress: a Viewscreen phone IS the
@@ -1853,6 +1918,10 @@ function closeTricorderDisplay(name: string): void {
   if (!entry) return;
   tricorderDisplays.delete(name);
   if (entry.retryTimer) clearTimeout(entry.retryTimer);
+  // The phone left Viewscreen mode (or died) mid-utterance: settle it before
+  // the socket goes, or the Computer waits out the hub's full timeout for a
+  // screen that is no longer there.
+  settleSpeak(entry);
   entry.ws?.close();
   console.error(`[bridge] viewscreen ${name} detached`);
 }
