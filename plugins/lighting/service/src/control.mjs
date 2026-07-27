@@ -8,21 +8,26 @@
 
 /**
  * The ZL1's own power-on state, measured off the mesh at join on 2026-07-26
- * from two bulbs independently (kitchen/dome-1 and kitchen/fan-1), before
- * anything commanded them:
+ * from two bulbs independently, before anything commanded them:
  *
- *   {"brightness":254,"color":{"hue":30,"saturation":84},"color_mode":"hs",
- *    "color_temp":392,"state":"ON"}
+ *   colour temperature 392 mired (~2551K) at full brightness (254)
  *
- * It reads as a bright off-white, not the orange the equivalent hex (#ff9429)
- * suggests — the ZL1's hue/sat rendering is not sRGB-faithful, which is
- * exactly why this is stored as HUE/SATURATION and not as a hex.
+ * A bright, subtly-warm off-white — the house's "I just need to see
+ * everything" baseline.
  *
- * Commanding the hex instead round-trips through xy and lands at
- * #FF962C / 2203K in `xy` mode: close to the eye, wrong mode, ~350K off. If
- * you "simplify" this to a hex you will silently lose the thing it captures.
+ * DO NOT capture this from the hue/saturation in z2m's join payload. That
+ * payload reads `color_mode:"hs", color:{hue:30,saturation:84}`, but those
+ * are z2m's DERIVATION from the bulb's xy, not a setting the bulb obeys
+ * symmetrically: commanding hue 30 / sat 84 issues MoveToHueAndSaturation and
+ * the bulb renders a genuine orange, even though the xy it then reports
+ * (0.4701, 0.4094) sits right next to the 2551K white point it reports in CT
+ * mode (0.4726, 0.4130). Reported colour and commanded colour are not the
+ * same round trip. This was got wrong once — the light went orange.
+ *
+ * The two fields that actually matter are the two that appear at join:
+ * color_temp and brightness.
  */
-export const FACTORY_DEFAULT = { hue: 30, saturation: 84, brightnessPct: 100 };
+export const FACTORY_DEFAULT = { colorTempMireds: 392, brightnessPct: 100 };
 
 export const SCENES = {
   // The house baseline: "I just need to see everything." This is the bulbs'
@@ -32,8 +37,7 @@ export const SCENES = {
   default: {
     state: "on",
     brightness: FACTORY_DEFAULT.brightnessPct,
-    hue: FACTORY_DEFAULT.hue,
-    saturation: FACTORY_DEFAULT.saturation,
+    colorTemp: FACTORY_DEFAULT.colorTempMireds,
     transition: 1,
   },
   evening: { state: "on", brightness: 40, colorTemp: 2700, transition: 2 },
@@ -155,18 +159,7 @@ export function buildCommand(body = {}) {
     const mireds = k >= 1000 ? Math.round(1_000_000 / k) : Math.round(k);
     out.color_temp = Math.min(500, Math.max(153, mireds));
   }
-  // Hue/saturation, the ZL1's native colour mode. Kept separate from `color`
-  // because a hex is converted to xy downstream and cannot express this
-  // faithfully (see FACTORY_DEFAULT). Takes precedence over `color` when both
-  // are given — the more precise instruction wins.
-  if (body.hue !== undefined || body.saturation !== undefined) {
-    const h = Number(body.hue);
-    const sat = Number(body.saturation);
-    if (!Number.isFinite(h) || h < 0 || h > 360) return { error: "hue must be 0..360" };
-    if (!Number.isFinite(sat) || sat < 0 || sat > 100) return { error: "saturation must be 0..100" };
-    out.color = { hue: Math.round(h), saturation: Math.round(sat) };
-  }
-  if (body.color !== undefined && out.color === undefined) {
+  if (body.color !== undefined) {
     const c = normalize(body.color);
     const hex = COLOR_NAMES[c] ?? (/^#?[0-9a-f]{6}$/.test(c) ? (c.startsWith("#") ? c : `#${c}`) : null);
     if (!hex) {
