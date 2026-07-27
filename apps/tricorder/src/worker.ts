@@ -23,6 +23,7 @@ import {
 import type { Env } from "./hub";
 import { guestPassword, hashPassword, randomToken, sha256Hex, verifyPassword } from "./auth";
 import { calendarRoutes } from "./calendar";
+import { gamesRoutes } from "./games/routes";
 import { GUEST_SESSION_TTL_MS, guestRoutes } from "./guest";
 import { libraryRoutes } from "./library";
 import { mintPairCode, registerRoutes } from "./register";
@@ -396,6 +397,24 @@ const PLUGIN_ID_RE = /^[a-z0-9-]{1,32}$/;
 // Having no manifest, they carry their tile (TNGC-58) here instead.
 const CLOUD_PLUGINS = [
   {
+    id: "games",
+    name: "Games",
+    online: true,
+    tile: {
+      color: "#99ccff",
+      icon: {
+        viewBox: "0 0 24 24",
+        paths: [
+          "M6 9h12a3 3 0 0 1 3 3v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-3a3 3 0 0 1 3-3z",
+          "M8 12.5v3",
+          "M6.5 14h3",
+          "M16 13h.01",
+          "M18 15h.01",
+        ],
+      },
+    },
+  },
+  {
     id: "calendar",
     name: "Calendar",
     online: true,
@@ -460,6 +479,10 @@ app.get("/api/plugins", async (c) => {
     }),
   });
 });
+
+// The Games plugin (TNGC-61): one tile, a submenu of games behind it. Its own
+// route family because a game is not a control op — see games/routes.ts.
+app.route("/api/plugins/games", gamesRoutes(hub, pluginEnabled));
 
 app.get("/api/plugins/lights/state", async (c) => {
   const s = c.get("session");

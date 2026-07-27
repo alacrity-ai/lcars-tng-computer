@@ -48,9 +48,23 @@ export const PANEL_VIEWS = [
   "schedule-week",
   "schedule-day",
   "qr",
+  "pictionary",
 ] as const;
 
 export type PanelView = (typeof PANEL_VIEWS)[number];
+
+/** Views driven by machinery, not by the model (TNGC-61). They must be in
+    PANEL_VIEWS — the renderer's registry is a total Record and has to cover
+    them — but the `display` tool should not offer them, because a pictionary
+    board conjured mid-conversation is noise, not a panel. Every game panel
+    adds one line here. */
+export const MACHINE_VIEWS = ["pictionary"] as const;
+
+/** What the model may actually display. */
+export const DISPLAY_VIEWS = PANEL_VIEWS.filter(
+  (v): v is Exclude<PanelView, (typeof MACHINE_VIEWS)[number]> =>
+    !(MACHINE_VIEWS as readonly string[]).includes(v),
+) as [Exclude<PanelView, (typeof MACHINE_VIEWS)[number]>, ...Array<Exclude<PanelView, (typeof MACHINE_VIEWS)[number]>>];
 
 // ---------- Family calendar (TNGC-46) ----------
 
@@ -1333,6 +1347,89 @@ export interface YoutubeSearchResponse {
   ok: true;
   query: string;
   results: YoutubeSearchResult[];
+}
+
+// ---------- Pictionary (TNGC-62) ----------
+
+/** The drawing palette, shared by the phone canvas and the wall panel so both
+    surfaces mean the same thing by `c: 2`. Index into this array — the wire
+    carries the index, never a color string. */
+export const PICTIONARY_COLORS = [
+  "#f5f5f5",
+  "#ff9900",
+  "#cc6666",
+  "#99ccff",
+  "#99cc99",
+  "#ffcc66",
+] as const;
+
+/** Brush widths in grid units (the grid is 1000 wide). Index into this too. */
+export const PICTIONARY_WIDTHS = [6, 14, 30] as const;
+
+/** One pen stroke. Points are a flat [x,y,x,y,…] list on a 0–999 integer grid,
+    NOT pixels — every surface scales the same picture and the payload stays
+    small enough to poll. */
+export interface PictionaryStroke {
+  /** Index into PICTIONARY_COLORS. */
+  c: number;
+  /** Index into PICTIONARY_WIDTHS. */
+  w: number;
+  /** Flat [x,y,…] pairs, 0–999. */
+  p: number[];
+}
+
+export interface PictionaryGuess {
+  /** Display name of the guesser. */
+  name: string;
+  text: string;
+  /** True on the guess that solved it. */
+  ok?: boolean;
+}
+
+export interface PictionaryScoreRow {
+  name: string;
+  /** 0/1 in teams mode, null in co-op. */
+  team?: 0 | 1 | null;
+  score: number;
+  /** Whose turn it is right now. */
+  drawing?: boolean;
+}
+
+/** The wall's view of a pictionary match (TNGC-62). Deliberately whole-state:
+    the wall is stateless, so a display that wakes mid-turn draws the entire
+    picture on its first frame with no catch-up protocol.
+
+    `word` is present ONLY in the reveal and over phases. During a turn the
+    wall gets `mask` and nothing else — the secret reaches exactly one phone. */
+export interface PictionaryPanelProps {
+  phase: "lobby" | "turn" | "reveal" | "over";
+  mode: "coop" | "teams";
+  /** 1-based turn number and the total to be played. */
+  round: number;
+  rounds: number;
+  /** Epoch ms the current phase ends; the panel counts down to it itself. */
+  endsAt?: number;
+  /** Display name of whoever is drawing. */
+  drawer?: string;
+  /** Underscores for letters, spaces and hyphens kept: "____ ___". */
+  mask?: string;
+  strokes?: PictionaryStroke[];
+  /** Newest last. */
+  guesses?: PictionaryGuess[];
+  players: PictionaryScoreRow[];
+  /** Co-op: the one score that matters. */
+  shared?: number;
+  /** Teams: [team0, team1]. */
+  teamScores?: [number, number];
+  /** Reveal and over only. */
+  word?: string;
+  solvedBy?: string;
+  /** Points awarded on the turn just revealed. */
+  points?: number;
+  /** Over only — the words that came up, in order. */
+  history?: { word: string; drawer: string; solvedBy?: string }[];
+  /** Over only: co-op best to beat, if the house has one. */
+  best?: number;
 }
 
 export const DEFAULT_SERVER_PORT = 3789;

@@ -644,6 +644,73 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
+
+  /* ---- Games submenu (TNGC-61) ---- */
+  .gmcard {
+    display: block; width: 100%; text-align: left; margin: 0 0 10px;
+    padding: 14px 16px; border: 0; border-radius: 14px; background: #1b1b26;
+    color: #e8e8f0; font: inherit; cursor: pointer;
+  }
+  .gmcard:active { transform: scale(.99); }
+  .gmcard[disabled] { opacity: .45; cursor: default; }
+  .gmlive { box-shadow: inset 0 0 0 2px #99ccff; }
+  .gmname { font-size: 18px; letter-spacing: .04em; color: #99ccff; }
+  .gmblurb { font-size: 13px; color: #a8a8ba; margin-top: 4px; line-height: 1.35; }
+  .gmfoot { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #7a7a8c; margin-top: 8px; }
+
+  /* ---- Pictionary (TNGC-62) ---- */
+  .pt-head { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 8px; }
+  .pt-word {
+    flex: 1; font-family: ui-monospace, monospace; font-size: 20px;
+    letter-spacing: .2em; color: #f0f0f5; overflow-x: auto; white-space: nowrap;
+  }
+  /* The drawer's own word — the one phone in the house that has it. */
+  .pt-secret { color: #ff9900; letter-spacing: .06em; text-transform: uppercase; }
+  .pt-clock { font-variant-numeric: tabular-nums; font-size: 20px; color: #ffcc66; min-width: 3.5ch; text-align: right; }
+  .pt-lobby-head { font-size: 16px; color: #99ccff; letter-spacing: .08em; margin-bottom: 8px; }
+  .pt-players { margin-bottom: 10px; }
+  .pt-prow { padding: 5px 0; font-size: 14px; border-bottom: 1px solid #23232e; display: flex; justify-content: space-between; }
+  .pt-t0 { color: #99ccff; }
+  .pt-t1 { color: #ffcc66; }
+  .pt-hint { font-size: 12px; color: #8f8fa2; margin: 8px 0; line-height: 1.4; }
+  .pt-seg { display: flex; gap: 8px; margin: 10px 0; }
+  .pt-seg button {
+    flex: 1; padding: 10px; border: 0; border-radius: 10px; background: #23232e;
+    color: #c8c8d6; font: inherit; cursor: pointer;
+  }
+  .pt-seg button.on { background: #99ccff; color: #10101a; }
+  .pt-seg button[disabled] { opacity: .4; cursor: default; }
+  .pt-canvas-wrap { width: 100%; aspect-ratio: 1 / 1; margin: 6px 0; border-radius: 12px; overflow: hidden; background: #101018; }
+  .pt-canvas { width: 100%; height: 100%; display: block; }
+  .pt-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .pt-swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+  .pt-swatch.on { border-color: #f0f0f5; }
+  .pt-width {
+    width: 34px; height: 34px; border-radius: 10px; border: 0; background: #23232e;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .pt-width span { background: #e8e8f0; border-radius: 50%; display: block; }
+  .pt-width.on { background: #99ccff; }
+  .pt-acts { display: flex; gap: 8px; margin: 6px 0 10px; }
+  .pt-acts button { flex: 1; }
+  .pt-guessform { display: flex; gap: 8px; margin: 8px 0; }
+  .pt-guessform input { flex: 1; }
+  .pt-feed {
+    max-height: 30vh; overflow-y: auto; margin: 8px 0; font-size: 13px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .pt-guess { display: flex; gap: 8px; }
+  .pt-gname { color: #99ccff; flex: 0 0 auto; }
+  .pt-got span:last-child { color: #99cc99; }
+  .pt-scores { margin-top: 10px; border-top: 1px solid #23232e; padding-top: 8px; }
+  .pt-shared { font-size: 15px; color: #ff9900; margin-bottom: 6px; }
+  .pt-reveal {
+    background: #23232e; border-left: 3px solid #ff9900; padding: 10px 12px;
+    border-radius: 8px; margin-bottom: 8px; font-size: 14px;
+  }
+  .pt-final { font-size: 44px; color: #ffcc66; line-height: 1; margin: 8px 0 14px; }
+  .pt-hrow { font-size: 13px; padding: 4px 0; border-bottom: 1px solid #23232e; }
+  .pt-missed { color: #7a7a8c; }
 </style>
 </head>
 <body>
@@ -818,6 +885,27 @@
     <label>Plugins</label>
     <div id="plugins-list"></div>
     <div class="err" id="plugins-err"></div>
+  </div>
+
+  <!-- GAMES (TNGC-61): one plugin tile, a submenu of games behind it, so ten
+       games cost one tile and the plugin grid never bloats. -->
+  <div class="view" id="view-games">
+    <button class="link" id="btn-gmback" style="text-align:left">&#9664; Plugins</button>
+    <label>Games</label>
+    <div id="games-list"></div>
+    <div class="err" id="games-err"></div>
+  </div>
+
+  <!-- PICTIONARY (TNGC-62): lobby, canvas and guess feed. The wall is the
+       board; this is the controller. -->
+  <div class="view" id="view-pict">
+    <button class="link" id="btn-ptback" style="text-align:left">&#9664; Games</button>
+    <div class="pt-head">
+      <div class="pt-word" id="pt-word"></div>
+      <div class="pt-clock" id="pt-clock"></div>
+    </div>
+    <div id="pt-body"></div>
+    <div class="err" id="pt-err"></div>
   </div>
 
   <!-- LIGHTS (TNGC-40): deterministic control — never touches the AI brain -->
@@ -2332,6 +2420,8 @@ let ltTimer = null, ltState = null, ltOnline = false, ltScrub = null, ltPickTarg
 $("btn-plugins").onclick = () => openPlugins();
 $("btn-plback").onclick = () => show("main");
 $("btn-ltback").onclick = () => { stopLightsPoll(); openPlugins(); };
+$("btn-gmback").onclick = () => { stopGamesPoll(); openPlugins(); };
+$("btn-ptback").onclick = () => { stopPictPoll(); openGames(); };
 
 // A plugin's tile look (TNGC-58) comes from its own manifest. Both are drawn
 // from DATA — the glyph is built with createElementNS from validated path
@@ -2416,11 +2506,531 @@ async function openPlugins() {
         if (p.id === "lights") openLights();
         else if (p.id === "calendar") openCal();
         else if (p.id === "claudeops") openOps();
+        else if (p.id === "games") openGames();
       };
       grid.appendChild(b);
     }
     wrap.appendChild(grid);
   } catch (e) { $("plugins-err").textContent = e.message; }
+}
+
+// ---- GAMES (TNGC-61) -------------------------------------------------------
+// One plugin, a submenu of games. The submenu also knows whether a match is
+// already running, because the most common reason to open it is to rejoin one.
+
+let gmTimer = null;
+let gmCatalog = [];
+
+async function openGames() {
+  show("games");
+  $("games-err").textContent = "";
+  $("games-list").innerHTML = '<div class="pl-note">Loading…</div>';
+  stopGamesPoll();
+  await renderGames();
+  gmTimer = setInterval(renderGames, 4000);
+}
+function stopGamesPoll() { if (gmTimer) { clearInterval(gmTimer); gmTimer = null; } }
+
+async function renderGames() {
+  if (document.hidden || !me) return;
+  try {
+    if (!gmCatalog.length) gmCatalog = (await api("/api/plugins/games/catalog")).games || [];
+    const live = (await api("/api/plugins/games/state")).match || null;
+    const wrap = $("games-list");
+    wrap.innerHTML = "";
+    for (const g of gmCatalog) {
+      const running = live && live.game === g.id;
+      const card = document.createElement("button");
+      card.className = "gmcard" + (running ? " gmlive" : "");
+      // A match already in flight makes every OTHER game unreachable — one
+      // household, one game at a time (the reducer enforces it; this just
+      // stops people finding out by being refused).
+      card.disabled = !!live && !running;
+      const t = document.createElement("div");
+      t.className = "gmname";
+      t.textContent = g.name;
+      card.appendChild(t);
+      const b = document.createElement("div");
+      b.className = "gmblurb";
+      b.textContent = g.blurb;
+      card.appendChild(b);
+      const foot = document.createElement("div");
+      foot.className = "gmfoot";
+      foot.textContent = running
+        ? (live.joined ? "in progress — rejoin" : `in progress — ${live.players.length} playing`)
+        : `${g.minPlayers}–${g.maxPlayers} players`;
+      card.appendChild(foot);
+      card.onclick = () => { if (g.id === "pictionary") openPict(); };
+      wrap.appendChild(card);
+    }
+    if (!gmCatalog.length) wrap.innerHTML = '<div class="pl-note">No games installed.</div>';
+  } catch (e) { $("games-err").textContent = e.message; }
+}
+
+// ---- PICTIONARY (TNGC-62) --------------------------------------------------
+// The phone is the controller: a canvas for whoever is drawing, a guess box for
+// everyone else. The wall is the board. There is no server→phone push channel
+// outside Viewscreen mode, so this polls — 700 ms during a turn, 2 s otherwise,
+// and reads are incremental so a poll during drawing carries a few hundred
+// bytes rather than the whole picture.
+
+const PT_COLORS = ["#f5f5f5", "#ff9900", "#cc6666", "#99ccff", "#99cc99", "#ffcc66"];
+const PT_WIDTHS = [6, 14, 30];
+const PT_GRID = 1000;
+
+let ptTimer = null;      // poll
+let ptFlush = null;      // stroke upload
+let ptState = null;      // last projection
+let ptTurnId = null;     // resets the local canvas when the turn changes
+let ptStrokes = [];      // what we believe is on the canvas
+let ptSince = 0;         // how many strokes the server has told us about
+let ptPending = [];      // captured but not yet uploaded (drawer only)
+let ptLive = null;       // the stroke currently under the finger
+let ptColor = 0;
+let ptWidth = 1;
+let ptCanvas = null;
+let ptCtx = null;
+let ptLastPhase = null;
+
+function openPict() {
+  show("pict");
+  $("pt-err").textContent = "";
+  ptState = null; ptTurnId = null; ptStrokes = []; ptSince = 0; ptPending = []; ptLastPhase = null;
+  $("pt-body").innerHTML = '<div class="pl-note">Loading…</div>';
+  stopPictPoll();
+  pollPict();
+  ptTimer = setInterval(pollPict, 900);
+  ptFlush = setInterval(flushStrokes, 250);
+}
+function stopPictPoll() {
+  if (ptTimer) { clearInterval(ptTimer); ptTimer = null; }
+  if (ptFlush) { clearInterval(ptFlush); ptFlush = null; }
+  ptCanvas = null; ptCtx = null;
+}
+
+async function ptCall(path, body) {
+  return api("/api/plugins/games" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+async function pollPict() {
+  if (document.hidden || !me) return;
+  try {
+    const d = await api("/api/plugins/games/state?since=" + ptSince);
+    applyPict(d.match || null);
+  } catch (e) {
+    // A transient poll failure is not worth shouting about mid-game; the next
+    // tick fixes it. Only a persistent one reaches the error line.
+    $("pt-err").textContent = e.message;
+  }
+}
+
+function applyPict(m) {
+  const wasPhase = ptLastPhase;
+  ptState = m;
+  if (!m) { ptTurnId = null; ptStrokes = []; ptSince = 0; renderPict(); return; }
+  const t = m.turn;
+  if (t) {
+    if (t.id !== ptTurnId) {
+      // New turn: everything local is stale, including anything we were about
+      // to upload for the previous drawer.
+      ptTurnId = t.id; ptStrokes = []; ptSince = 0; ptPending = []; ptLive = null;
+    }
+    if (t.isDrawer) {
+      // The drawer's own canvas is authoritative WHILE they are drawing —
+      // echoing our strokes back at us would make the line stutter one poll
+      // behind the finger. But a phone that reloaded mid-turn has no local
+      // copy, and would otherwise stare at a blank canvas while the wall shows
+      // the drawing. So: adopt the server's picture exactly once, when we have
+      // nothing, then go local.
+      if (ptStrokes.length === 0 && (t.strokes || []).length) ptStrokes = t.strokes;
+      ptSince = t.strokeCount;
+    } else if (t.strokeBase === 0) {
+      ptStrokes = t.strokes || [];
+      ptSince = t.strokeCount;
+    } else {
+      ptStrokes = ptStrokes.concat(t.strokes || []);
+      ptSince = t.strokeCount;
+    }
+    // Undo/clear shrink the list; ask for the whole thing next tick.
+    if (typeof t.strokeCount === "number" && t.strokeCount < ptStrokes.length) {
+      ptStrokes = ptStrokes.slice(0, t.strokeCount);
+      ptSince = 0;
+    }
+  }
+  const phase = m.phase;
+  if (phase !== wasPhase) { ptLastPhase = phase; renderPict(); }
+  else renderPictLight();
+}
+
+/** The clock and the canvas tick every poll; the rest only on a phase change,
+    so typing a guess isn't interrupted by the input being rebuilt. */
+function renderPictLight() {
+  const m = ptState;
+  if (!m) return;
+  $("pt-clock").textContent = m.phase === "turn" || m.phase === "reveal"
+    ? Math.max(0, Math.ceil((m.endsAt - Date.now()) / 1000)) + "s" : "";
+  if (m.turn && !m.turn.isDrawer) ptPaint();
+  const feed = $("pt-feed");
+  if (feed && m.turn) ptRenderFeed(feed, m.turn.guesses || []);
+  const sc = $("pt-scores");
+  if (sc) ptRenderScores(sc, m);
+}
+
+function renderPict() {
+  const m = ptState;
+  const body = $("pt-body");
+  body.innerHTML = "";
+  $("pt-word").textContent = "";
+  $("pt-clock").textContent = "";
+  if (!m) { ptRenderStart(body); return; }
+  if (m.phase === "lobby") { ptRenderLobby(body, m); return; }
+  if (m.phase === "over") { ptRenderOver(body, m); return; }
+  ptRenderTurn(body, m);
+  // A phase change rebuilds the screen; fill the clock now rather than leaving
+  // it blank until the next poll a second later.
+  renderPictLight();
+}
+
+function ptBtn(label, cls, fn) {
+  const b = document.createElement("button");
+  b.className = cls || "";
+  b.textContent = label;
+  b.onclick = fn;
+  return b;
+}
+
+async function ptGuard(fn) {
+  try { $("pt-err").textContent = ""; await fn(); await pollPict(); }
+  catch (e) { $("pt-err").textContent = e.message; }
+}
+
+function ptRenderStart(body) {
+  const note = document.createElement("div");
+  note.className = "pl-note";
+  note.textContent = "No game running. Start one and the others can join from their tricorders.";
+  body.appendChild(note);
+  body.appendChild(ptBtn("Start a game", "primary", () =>
+    ptGuard(async () => {
+      // The match paints the wall this phone is already talking to.
+      await ptCall("/match", { game: "pictionary", wall: getWall() });
+      ptLastPhase = null;
+    })));
+}
+
+function ptRenderLobby(body, m) {
+  const head = document.createElement("div");
+  head.className = "pt-lobby-head";
+  head.textContent = m.joined ? "Waiting to start" : "A game is forming";
+  body.appendChild(head);
+
+  const list = document.createElement("div");
+  list.className = "pt-players";
+  for (const p of m.players) {
+    const row = document.createElement("div");
+    row.className = "pt-prow" + (p.team === 0 ? " pt-t0" : p.team === 1 ? " pt-t1" : "");
+    row.textContent = p.name + (p.handle === m.host ? " ★" : "") +
+      (p.team === 0 ? " · Team 1" : p.team === 1 ? " · Team 2" : "");
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+
+  const count = m.players.length;
+  const mode = m.modes.find((x) => x.id === m.mode) || m.modes[0];
+  const hint = document.createElement("div");
+  hint.className = "pt-hint";
+  hint.textContent = mode ? mode.hint : "";
+  body.appendChild(hint);
+
+  if (!m.joined) {
+    body.appendChild(ptBtn("Join", "primary", () => ptGuard(() => ptCall("/match/join"))));
+    return;
+  }
+
+  if (m.isHost) {
+    const seg = document.createElement("div");
+    seg.className = "pt-seg";
+    for (const spec of m.modes) {
+      const legal = count >= spec.minPlayers && count <= spec.maxPlayers;
+      const b = ptBtn(spec.name, m.mode === spec.id ? "on" : "", () =>
+        ptGuard(() => ptCall("/match/start", { mode: spec.id })));
+      b.disabled = !legal;
+      b.title = legal ? spec.hint : `needs ${spec.minPlayers}–${spec.maxPlayers} players`;
+      seg.appendChild(b);
+    }
+    body.appendChild(seg);
+    const go = ptBtn(count < m.minPlayers ? `Need ${m.minPlayers - count} more` : "Start", "primary", () =>
+      ptGuard(() => ptCall("/match/start")));
+    go.disabled = count < m.minPlayers;
+    body.appendChild(go);
+    if (m.mode === "teams") {
+      body.appendChild(ptBtn("Shuffle teams", "", () => ptGuard(() => ptCall("/match/shuffle"))));
+    }
+  }
+  body.appendChild(ptBtn(m.isHost ? "Cancel game" : "Leave", "danger", () =>
+    ptGuard(async () => { await ptCall("/match/leave"); ptLastPhase = null; })));
+}
+
+function ptRenderTurn(body, m) {
+  const t = m.turn;
+  if (!t) { body.appendChild(document.createTextNode("…")); return; }
+
+  // The word: only the drawer's phone ever receives it, and at the reveal
+  // everyone does. There is no third case.
+  $("pt-word").textContent = t.word || t.mask || "";
+  $("pt-word").className = "pt-word" + (t.isDrawer && m.phase === "turn" ? " pt-secret" : "");
+
+  if (m.phase === "reveal") {
+    const card = document.createElement("div");
+    card.className = "pt-reveal";
+    card.textContent = t.solvedBy ? `${t.solvedBy} got it — +${t.points}` : (t.skipped ? "passed" : "nobody got it");
+    body.appendChild(card);
+  }
+
+  const wrapCanvas = document.createElement("div");
+  wrapCanvas.className = "pt-canvas-wrap";
+  const cv = document.createElement("canvas");
+  cv.className = "pt-canvas";
+  wrapCanvas.appendChild(cv);
+  body.appendChild(wrapCanvas);
+  ptCanvas = cv;
+  ptSetupCanvas(cv, t.isDrawer && m.phase === "turn");
+
+  if (t.isDrawer && m.phase === "turn") {
+    const tools = document.createElement("div");
+    tools.className = "pt-tools";
+    for (let i = 0; i < PT_COLORS.length; i++) {
+      const b = document.createElement("button");
+      b.className = "pt-swatch" + (i === ptColor ? " on" : "");
+      b.style.background = PT_COLORS[i];
+      b.setAttribute("aria-label", "color " + (i + 1));
+      b.onclick = () => { ptColor = i; renderPict(); };
+      tools.appendChild(b);
+    }
+    for (let i = 0; i < PT_WIDTHS.length; i++) {
+      const b = document.createElement("button");
+      b.className = "pt-width" + (i === ptWidth ? " on" : "");
+      const dot = document.createElement("span");
+      dot.style.width = dot.style.height = Math.max(4, PT_WIDTHS[i] / 2.2) + "px";
+      b.appendChild(dot);
+      b.onclick = () => { ptWidth = i; renderPict(); };
+      tools.appendChild(b);
+    }
+    body.appendChild(tools);
+
+    const acts = document.createElement("div");
+    acts.className = "pt-acts";
+    acts.appendChild(ptBtn("Undo", "", () => ptGuard(async () => {
+      ptStrokes.pop(); ptPaint(); await ptCall("/act", { op: "undo" });
+    })));
+    acts.appendChild(ptBtn("Clear", "", () => ptGuard(async () => {
+      ptStrokes = []; ptPaint(); await ptCall("/act", { op: "clear" });
+    })));
+    acts.appendChild(ptBtn("Pass", "danger", () => ptGuard(() => ptCall("/act", { op: "skip" }))));
+    body.appendChild(acts);
+  } else if (m.phase === "turn") {
+    const who = document.createElement("div");
+    who.className = "pt-hint";
+    who.textContent = t.canGuess ? `${t.drawerName} is drawing` : `${t.drawerName} is drawing for the other team`;
+    body.appendChild(who);
+    if (t.canGuess) {
+      const form = document.createElement("form");
+      form.className = "pt-guessform";
+      const inp = document.createElement("input");
+      inp.id = "pt-guess";
+      inp.placeholder = "your guess";
+      inp.autocomplete = "off";
+      inp.maxLength = 60;
+      form.appendChild(inp);
+      form.appendChild(ptBtn("Guess", "primary"));
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const text = inp.value.trim();
+        if (!text) return;
+        inp.value = "";
+        try {
+          const r = await ptCall("/act", { op: "guess", text });
+          if (r.correct) { chirp(880); toast(`+${r.points}`); }
+          else if (r.close) toast("so close!");
+          await pollPict();
+        } catch (err) { $("pt-err").textContent = err.message; }
+      };
+      body.appendChild(form);
+      setTimeout(() => inp.focus(), 0);
+    }
+  }
+
+  const feed = document.createElement("div");
+  feed.className = "pt-feed";
+  feed.id = "pt-feed";
+  body.appendChild(feed);
+  ptRenderFeed(feed, t.guesses || []);
+
+  const sc = document.createElement("div");
+  sc.className = "pt-scores";
+  sc.id = "pt-scores";
+  body.appendChild(sc);
+  ptRenderScores(sc, m);
+
+  ptPaint();
+}
+
+function ptRenderOver(body, m) {
+  const head = document.createElement("div");
+  head.className = "pt-lobby-head";
+  head.textContent = "Game over";
+  body.appendChild(head);
+  const final = document.createElement("div");
+  final.className = "pt-final";
+  final.textContent = m.mode === "coop"
+    ? String(m.shared ?? 0)
+    : `${(m.teamScores || [0, 0])[0]} — ${(m.teamScores || [0, 0])[1]}`;
+  body.appendChild(final);
+  for (const h of m.history || []) {
+    const row = document.createElement("div");
+    row.className = "pt-hrow" + (h.solvedBy ? "" : " pt-missed");
+    row.textContent = `${h.word} — ${h.solvedBy || "nobody"}`;
+    body.appendChild(row);
+  }
+  body.appendChild(ptBtn("Done", "primary", () => { ptLastPhase = null; openGames(); }));
+}
+
+function ptRenderFeed(box, guesses) {
+  box.innerHTML = "";
+  for (const g of guesses.slice(-14)) {
+    const row = document.createElement("div");
+    row.className = "pt-guess" + (g.ok ? " pt-got" : "");
+    const n = document.createElement("span");
+    n.className = "pt-gname";
+    n.textContent = g.name;
+    const tx = document.createElement("span");
+    // textContent, never innerHTML — a guess is arbitrary text from a phone.
+    tx.textContent = g.text;
+    row.appendChild(n); row.appendChild(tx);
+    box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function ptRenderScores(box, m) {
+  box.innerHTML = "";
+  if (m.mode === "coop") {
+    const row = document.createElement("div");
+    row.className = "pt-shared";
+    row.textContent = `Together: ${m.shared ?? 0}`;
+    box.appendChild(row);
+  } else {
+    const row = document.createElement("div");
+    row.className = "pt-shared";
+    const ts = m.teamScores || [0, 0];
+    row.textContent = `Team 1 ${ts[0]} — ${ts[1]} Team 2`;
+    box.appendChild(row);
+  }
+  for (const p of m.players) {
+    const row = document.createElement("div");
+    row.className = "pt-prow" + (p.team === 0 ? " pt-t0" : p.team === 1 ? " pt-t1" : "");
+    row.textContent = `${p.name} ${p.score}`;
+    box.appendChild(row);
+  }
+}
+
+// ---- the canvas ------------------------------------------------------------
+// Points are captured on a 0–999 INTEGER grid, not in pixels, so the phone, the
+// wall and every other phone draw the same picture with nobody scaling
+// anything. Points within 4 grid units of the last one are dropped at capture —
+// a slow finger otherwise emits hundreds of duplicates for one line.
+
+function ptSetupCanvas(cv, drawable) {
+  const fit = () => {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    cv.width = Math.max(1, Math.round(r.width * dpr));
+    cv.height = Math.max(1, Math.round(r.height * dpr));
+    ptCtx = cv.getContext("2d");
+    ptPaint();
+  };
+  setTimeout(fit, 0);
+  if (!drawable) { cv.style.touchAction = "auto"; return; }
+  cv.style.touchAction = "none";
+
+  const toGrid = (e) => {
+    const r = cv.getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(999, Math.round(((e.clientX - r.left) / r.width) * 999))),
+      Math.max(0, Math.min(999, Math.round(((e.clientY - r.top) / r.height) * 999))),
+    ];
+  };
+  cv.onpointerdown = (e) => {
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    const [x, y] = toGrid(e);
+    ptLive = { c: ptColor, w: ptWidth, p: [x, y] };
+    ptStrokes.push(ptLive);
+    ptPaint();
+  };
+  cv.onpointermove = (e) => {
+    if (!ptLive) return;
+    e.preventDefault();
+    const [x, y] = toGrid(e);
+    const p = ptLive.p;
+    const dx = x - p[p.length - 2], dy = y - p[p.length - 1];
+    if (dx * dx + dy * dy < 16) return;      // 4 grid units
+    if (p.length / 2 >= 200) { ptEndStroke(); return; }  // server cap
+    p.push(x, y);
+    ptPaint();
+  };
+  const end = () => ptEndStroke();
+  cv.onpointerup = end;
+  cv.onpointercancel = end;
+  cv.onpointerleave = end;
+}
+
+function ptEndStroke() {
+  if (!ptLive) return;
+  ptPending.push(ptLive);
+  ptLive = null;
+}
+
+async function flushStrokes() {
+  if (!ptPending.length || !ptState || ptState.phase !== "turn") return;
+  const batch = ptPending.splice(0, 40);
+  try {
+    await ptCall("/act", { op: "stroke", strokes: batch });
+  } catch (e) {
+    // A refused batch means the canvas is full or the turn ended. Drop the
+    // local copy too, so what we show matches what the wall shows.
+    for (const s of batch) {
+      const i = ptStrokes.indexOf(s);
+      if (i >= 0) ptStrokes.splice(i, 1);
+    }
+    ptPaint();
+    $("pt-err").textContent = e.message;
+  }
+}
+
+function ptPaint() {
+  const cv = ptCanvas;
+  if (!cv || !ptCtx) return;
+  const ctx = ptCtx;
+  const sx = cv.width / PT_GRID, sy = cv.height / PT_GRID;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = "#101018";
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const s of ptStrokes) {
+    if (!s || !s.p || s.p.length < 2) continue;
+    ctx.strokeStyle = PT_COLORS[s.c] || PT_COLORS[0];
+    ctx.lineWidth = (PT_WIDTHS[s.w] || PT_WIDTHS[1]) * Math.min(sx, sy);
+    ctx.beginPath();
+    ctx.moveTo(s.p[0] * sx, s.p[1] * sy);
+    if (s.p.length === 2) ctx.lineTo(s.p[0] * sx + 0.01, s.p[1] * sy);
+    for (let i = 2; i < s.p.length; i += 2) ctx.lineTo(s.p[i] * sx, s.p[i + 1] * sy);
+    ctx.stroke();
+  }
 }
 
 function openLights() {

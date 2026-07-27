@@ -30,6 +30,8 @@ import type {
   RosterDisplay,
   TngMessage,
 } from "@tng/contract";
+import { type GameRequest, type Match, reduce } from "./games/engine";
+import { GAME_REGISTRY } from "./games/registry";
 
 /** What lives under a `msg:` storage key: a transcript, or (TNGC-23) a
     library display command tagged with kind so replay re-frames it right.
@@ -61,6 +63,11 @@ const json = (body: unknown, status = 200) =>
 export class TenantHub extends DurableObject<Env> {
   private enqueueTimes: number[] = [];
   private controlTimes: number[] = [];
+  /** TNGC-61: game traffic is polled, so it gets its own generous fuse rather
+      than sharing the voice or lights windows. */
+  private gameTimes: number[] = [];
+  /** Wall-paint throttle — a drawing hand must not strobe the television. */
+  private lastWallPaint = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -299,7 +306,112 @@ export class TenantHub extends DurableObject<Env> {
       return json({ ok: true }, 202);
     }
 
+    // ---- games (TNGC-61) ----------------------------------------------------
+    // The DO is the authoritative game server: single-threaded per tenant, so
+    // two guesses milliseconds apart are ordered by arrival with no clock to
+    // trust and no lock to take. The rules themselves are a pure reducer —
+    // this is only the transaction around it.
+    if (url.pathname === "/game" && req.method === "POST") {
+      const now = Date.now();
+      // Sized for play, not for voice: a household of eight polling at 700 ms
+      // is ~11 req/s. Deliberately NOT the /enqueue or /control fuses, which
+      // would cut a game off mid-turn.
+      this.gameTimes = this.gameTimes.filter((t) => now - t < 60_000);
+      if (this.gameTimes.length >= 900) {
+        return json({ error: "rate limit — slow down" }, 429);
+      }
+      this.gameTimes.push(now);
+      const payload = (await req.json()) as GameRequest & { tenantId?: string };
+      // The DO cannot derive its own tenant (idFromName is one-way), so the
+      // Worker tells it and we remember — the alarm path has no request to
+      // read it from.
+      if (typeof payload.tenantId === "string" && payload.tenantId) {
+        await this.ctx.storage.put("tenant_id", payload.tenantId);
+      }
+      return this.runGame(payload, now);
+    }
+
     return json({ error: "not found" }, 404);
+  }
+
+  /**
+   * The turn clock. Games own the hub's alarm — nothing else used one when
+   * this landed, and `endsAt` is set on EVERY match phase so re-arming is one
+   * line. If another feature ever needs an alarm here, it has to share this
+   * handler rather than call setAlarm behind its back.
+   */
+  async alarm(): Promise<void> {
+    await this.runGame({ kind: "expire" }, Date.now());
+  }
+
+  /** Load → reduce → persist → re-arm → paint. */
+  private async runGame(request: GameRequest, now: number): Promise<Response> {
+    const match = (await this.ctx.storage.get<Match>("game:match")) ?? null;
+    const out = reduce(match, request, now, GAME_REGISTRY);
+
+    if (out.match !== undefined) {
+      if (out.match === null) {
+        await this.ctx.storage.delete("game:match");
+        await this.ctx.storage.deleteAlarm();
+      } else {
+        await this.ctx.storage.put("game:match", out.match);
+        await this.ctx.storage.setAlarm(out.match.endsAt);
+      }
+    }
+
+    if (out.finished) {
+      // The epitaph, not the state. A failure here must not cost anyone their
+      // game, so it is logged and swallowed.
+      try {
+        const f = out.finished;
+        await this.env.DB.prepare(
+          `INSERT INTO game_results (id, tenant_id, game, mode, players, summary, detail, started_at, ended_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+          .bind(
+            crypto.randomUUID(),
+            await this.tenantId(),
+            f.game,
+            f.mode,
+            f.players,
+            f.summary.slice(0, 200),
+            JSON.stringify(f.detail).slice(0, 8000),
+            f.startedAt,
+            f.endedAt,
+          )
+          .run();
+      } catch (e) {
+        console.log(`[hub] game result not archived: ${(e as Error).message}`);
+      }
+    }
+
+    if (out.wall) this.paintWall(out.wall, out.match ?? match, now);
+    return json(out.body, out.status);
+  }
+
+  /** Which tenant this DO belongs to — stashed by the first game request,
+      which is the only caller that needs it. */
+  private async tenantId(): Promise<string> {
+    return (await this.ctx.storage.get<string>("tenant_id")) ?? "unknown";
+  }
+
+  /**
+   * Push a panel to the house wall, deterministically — no session turn, no
+   * library item. Fire-and-forget: the game is fully playable with the wall
+   * dark, so a missing link is not an error, and frames are throttled because
+   * a drawing hand would otherwise strobe the television.
+   */
+  private paintWall(frame: { view: string; props: unknown }, match: Match | null, now: number): void {
+    if (!this.online()) return;
+    if (now - this.lastWallPaint < 500) return;
+    this.lastWallPaint = now;
+    this.sendDown({
+      v: 1,
+      type: "display_props",
+      view: frame.view,
+      props: frame.props,
+      ...(match?.wall ? { wall: match.wall } : {}),
+    });
   }
 
   /** Send every stored (= unacked) fresh command; drop and log the stale. */

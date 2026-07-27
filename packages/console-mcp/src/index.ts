@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { DEFAULT_SERVER_PORT, PANEL_VIEWS } from "@tng/shared";
+import { DEFAULT_SERVER_PORT, DISPLAY_VIEWS } from "@tng/shared";
 import { cloudFetch, deleteItem, getItem, saveItem, searchItems, sendItem } from "@tng/library-client";
 
 const BASE = process.env.TNG_SERVER_URL ?? `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
@@ -130,9 +130,11 @@ server.registerTool(
       "a different room ('…on the living room wall' → wall: 'living-room'). Red alerts " +
       "always broadcast to every viewscreen.",
     // Derived from the webapp's installed panels — never offer a view the wall
-    // would render as a "not yet installed" stub.
+    // would render as a "not yet installed" stub. DISPLAY_VIEWS, not
+    // PANEL_VIEWS: machine-driven boards (games) are registered panels that
+    // the model has no business conjuring (TNGC-61).
     inputSchema: {
-      view: z.enum(PANEL_VIEWS),
+      view: z.enum(DISPLAY_VIEWS),
       props: z.record(z.unknown()).optional(),
       wall: z.string().optional(),
     },

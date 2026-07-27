@@ -25,6 +25,7 @@ import { CompositePanel } from "./CompositePanel";
 import { CalendarMonthPanel } from "./CalendarMonthPanel";
 import { ScheduleWeekPanel } from "./ScheduleWeekPanel";
 import { ScheduleDayPanel } from "./ScheduleDayPanel";
+import { PictionaryPanel } from "./PictionaryPanel";
 import { QrPanel } from "./QrPanel";
 
 function BlankPanel() {
@@ -74,6 +75,7 @@ const REGISTRY: Record<PanelView, ComponentType<any>> = {
   "schedule-week": ScheduleWeekPanel,
   "schedule-day": ScheduleDayPanel,
   qr: QrPanel,
+  pictionary: PictionaryPanel,
 };
 
 export function Panel({ view, props }: { view: PanelView; props: PanelProps }) {

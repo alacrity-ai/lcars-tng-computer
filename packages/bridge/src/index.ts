@@ -1358,6 +1358,34 @@ async function inlineCompositeSvgBlocks(blocks: unknown, depth = 0): Promise<voi
   }
 }
 
+/**
+ * Paint a wall with inline props from the cloud (TNGC-61).
+ *
+ * The DO throttles and only sends while the link is live, so this stays a
+ * fire-and-forget POST. The view name is checked against a conservative shape
+ * rather than a list: the house server rejects a view the wall can't draw, and
+ * duplicating the panel registry in the bridge would rot.
+ */
+const WALL_VIEW_RE = /^[a-z][a-z0-9-]{0,31}$/;
+
+async function paintWall(view: string, props: unknown, wall?: string): Promise<void> {
+  if (!WALL_VIEW_RE.test(view)) {
+    console.error(`[bridge] refused display_props for view "${view}"`);
+    return;
+  }
+  try {
+    await fetch(`${SERVER_URL}/api/console/display`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ view, props: props ?? {}, ...(wall ? { wall } : {}) }),
+      signal: AbortSignal.timeout(4_000),
+    });
+  } catch {
+    // The wall is a bonus surface for a cloud game, never a dependency —
+    // a dark television must not break play on the phones.
+  }
+}
+
 function openTricorderDisplay(name: string): void {
   if (!/^tricorder-[a-z0-9_-]{1,32}$/.test(name)) {
     console.error(`[bridge] refused display_open for non-tricorder name "${name}"`);
@@ -1566,6 +1594,11 @@ function startCloudLink() {
           // Deterministic plugin op (TNGC-40): straight to the sidecar, even
           // mid-turn — never queued, never near the session.
           void executeControl(frame.ctl);
+        } else if (frame.type === "display_props" && typeof frame.view === "string") {
+          // Cloud machinery painting a wall (TNGC-61): a game board, right
+          // now, no library item and no session turn. Straight to the same
+          // console route the bridge already posts to elsewhere.
+          void paintWall(frame.view, frame.props, typeof frame.wall === "string" ? frame.wall : undefined);
         }
       } catch {
         // unknown frame — ignore (forward compatibility)

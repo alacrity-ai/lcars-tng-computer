@@ -201,6 +201,11 @@ export interface LightsState {
     - control (TNGC-40): a deterministic plugin op — the bridge POSTs it to
       the plugin sidecar immediately (no queue, no session turn, even
       mid-turn). Ephemeral: never stored, never replayed.
+    - display_props (TNGC-61): paint a wall with INLINE props, right now, from
+      cloud machinery — no library item, no session turn. The bridge turns it
+      into the POST /api/console/display it already makes elsewhere, so the
+      house server needs no new route. Ephemeral like control: a game frame
+      from a minute ago must die, not replay. Senders self-throttle.
     All additive in v1 — both ends ignore unknown frame types. */
 export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "msg"; msg: CloudMessage }
@@ -211,7 +216,15 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
   | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string }
   | { v: typeof CONTRACT_VERSION; type: "set_pref"; kind: "model" | "effort"; value: string; by?: string }
-  | { v: typeof CONTRACT_VERSION; type: "control"; ctl: CloudControlCommand };
+  | { v: typeof CONTRACT_VERSION; type: "control"; ctl: CloudControlCommand }
+  | {
+      v: typeof CONTRACT_VERSION;
+      type: "display_props";
+      view: string;
+      props: unknown;
+      /** Named wall; omitted paints the house default. */
+      wall?: string;
+    };
 
 /** Frames sent up the /link socket (bridge → cloud).
     - ack: the message was dispatched to the session OR withdrawn; the hub
