@@ -651,6 +651,15 @@
   /* Viewscreen mode (TNGC-36): top half = mini wall, controls condense below */
   #vs-top { display: none; flex-direction: column; min-height: 0; }
   body.vs-on #vs-top { display: flex; height: 44vh; margin-bottom: 10px; }
+  /* TNGC-74: in portrait the mini wall is exactly as tall as a 16:9 wall
+     needs at this width — the old fixed 44vh letterboxed ~150px of dead
+     black above and below it. The reclaimed height is what keeps Exit and
+     Library on-screen once the transport bar appears. Landscape keeps the
+     full-height box (its own rules below). */
+  @media (orientation: portrait) {
+    body.vs-on #vs-top { height: auto; }
+    body.vs-on #vs-render { flex: none; aspect-ratio: 16 / 9; }
+  }
   /* Library stays reachable in Viewscreen mode — "show my saved playlist on
      my tricorder" is half the point. Music keeps playing while browsing:
      view-main is display:none'd, not unmounted. In vs mode the two actions
@@ -676,6 +685,16 @@
   body.vs-on .ring, body.vs-on .pulse { inset: -10px; }
   body.vs-on #ptt-cancel { top: -16px; right: -38px; width: 48px; height: 48px; font-size: 20px; }
   body.vs-on #live { min-height: 24px; margin-top: 8px; font-size: 14px; }
+  /* Short phones need one more notch to fit wall + talk circle + transport
+     bar + actions without scrolling; taller ones keep the roomier circle.
+     Must follow the vs-on sizing above — same specificity, later wins. */
+  @media (orientation: portrait) and (max-height: 780px) {
+    body.vs-on .ptt-wrap { min-height: 118px; }
+    body.vs-on .ptt-holder, body.vs-on #ptt { width: 96px; height: 96px; }
+    body.vs-on #ptt { font-size: 12px; }
+    body.vs-on #ptt-cancel { top: -12px; right: -32px; width: 42px; height: 42px; font-size: 18px; }
+    body.vs-on #live { min-height: 20px; margin-top: 6px; font-size: 13px; }
+  }
   .vs-frame {
     flex: 1; min-height: 0; display: flex; flex-direction: column;
     border: 2px solid var(--gold); border-radius: 14px; background: #050505; overflow: hidden;
@@ -763,6 +782,13 @@
   .ac-btns .btn.small { font-weight: 400; background: #1c1c1c; color: var(--peach); border: 1px solid #333; }
   .ac-btns .btn.small.on { background: var(--gold); color: var(--ink); font-weight: 700; border-color: var(--gold); }
   .ac-btns .btn.small[disabled] { opacity: .4; }
+  /* direct keystrokes (TNGC-74) — same row on the Computer card and Claude Ops */
+  .ac-inject { display: flex; gap: 8px; align-items: stretch; margin-top: 4px; }
+  .ac-inject input {
+    flex: 1; min-width: 0; margin: 0; padding: 9px 12px; background: #101018;
+    border: 1px solid #2a2a3a; border-radius: 14px; color: #fff; font: inherit; font-size: 14px;
+  }
+  .ac-inject .btn.small { flex: none; margin: 0; }
   #compact-banner {
     display: none; position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); z-index: 8; max-width: 92vw; padding: 8px 16px;
@@ -1152,6 +1178,13 @@
       <div class="ac-btns" id="ops-model-btns"></div>
       <div class="ac-pref"><span class="lbl">Effort</span><span class="val" id="ops-effort">&mdash;</span></div>
       <div class="ac-btns" id="ops-effort-btns"></div>
+      <!-- TNGC-74: typed into the composer, not sent as a prompt -->
+      <div class="ac-pref"><span class="lbl">Type into the session</span></div>
+      <div class="ac-inject">
+        <input id="ops-inject" placeholder="/clear" maxlength="400"
+               autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="send">
+        <button class="btn small" id="btn-ops-inject">Type</button>
+      </div>
       <button class="btn blue" id="btn-ops-compact">Consolidate memory</button>
       <div class="muted" id="ops-note"></div>
     </div>
@@ -1323,6 +1356,13 @@
       <div class="ac-btns" id="ac-model-btns"></div>
       <div class="ac-pref"><span class="lbl">Effort</span><span class="val" id="ac-effort">—</span></div>
       <div class="ac-btns" id="ac-effort-btns"></div>
+      <!-- TNGC-74: typed into the composer, not sent as a prompt -->
+      <div class="ac-pref"><span class="lbl">Type into the session</span></div>
+      <div class="ac-inject">
+        <input id="ac-inject" placeholder="/clear" maxlength="400"
+               autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="send">
+        <button class="btn small" id="btn-ac-inject">Type</button>
+      </div>
       <button class="btn blue" id="btn-compact">Consolidate memory</button>
       <div class="muted" id="ac-note" style="margin-top:8px"></div>
     </div>
@@ -4026,6 +4066,22 @@ $("btn-ops-send").onclick = async () => {
 $("btn-ops-compact").onclick = () => {
   opsControl({ op: "compact" }, "Consolidation requested — status shows COMPACTING when it starts.");
 };
+// TNGC-74: typed straight into the session's composer, so "/clear" clears it
+// rather than asking it to clear something. Queued while a turn is running.
+async function opsInject() {
+  const el = $("ops-inject");
+  const text = el.value.trim();
+  if (!text) return;
+  $("btn-ops-inject").disabled = true;
+  const ok = await opsControl({ op: "inject", text }, "Typed into the session — queued if a turn is running.");
+  $("btn-ops-inject").disabled = false;
+  if (ok) {
+    el.value = "";
+    toast("Typed: " + text);
+  }
+}
+$("btn-ops-inject").onclick = opsInject;
+$("ops-inject").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); void opsInject(); } };
 
 function renderOps(d) {
   const s = d.online && d.state ? d.state : null;
@@ -4043,6 +4099,8 @@ function renderOps(d) {
   // Compact can be requested idle OR working (the agent queues it to the
   // turn's end); only offline / already-compacting make it a no-op.
   $("btn-ops-compact").disabled = status === "offline" || status === "compacting" || status === "unknown";
+  // Typing is queued while busy/compacting (TNGC-74) — only offline blocks it.
+  $("btn-ops-inject").disabled = status === "offline" || status === "unknown";
 
   const last = $("ops-last");
   last.innerHTML = "";
@@ -4693,9 +4751,11 @@ async function renderComputerCard() {
     $("ac-body").textContent = "Computer offline.";
     fill.style.width = "0";
     btn.disabled = true;
+    $("btn-ac-inject").disabled = true;
     $("ac-note").textContent = "";
     return;
   }
+  $("btn-ac-inject").disabled = false; // typing queues while busy; only offline blocks it
   const info = d.computer;
   const ctx = info && info.context;
   if (ctx) {
@@ -4765,6 +4825,28 @@ function renderPrefRows(info, choices, compacting) {
     eWrap.appendChild(b);
   }
 }
+// TNGC-74: the same rail for the house session — the text is TYPED, not sent
+// as a prompt, so "/clear" is the CLI command and not a request to the model.
+async function acInject() {
+  const el = $("ac-inject");
+  const text = el.value.trim();
+  if (!text) return;
+  const btn = $("btn-ac-inject");
+  btn.disabled = true;
+  try {
+    await api("/api/admin/inject", { method: "POST", body: JSON.stringify({ text }) });
+    el.value = "";
+    $("ac-note").textContent = "Typed into the session — queued if a turn is running.";
+    toast("Typed: " + text);
+  } catch (e) {
+    $("admin-err").textContent = e.message;
+  }
+  btn.disabled = false;
+  setTimeout(renderComputerCard, 3000);
+}
+$("btn-ac-inject").onclick = acInject;
+$("ac-inject").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); void acInject(); } };
+
 $("btn-compact").onclick = async () => {
   if (!confirm("Start memory consolidation? Commands will queue until it completes (a minute or two).")) return;
   const b = $("btn-compact");

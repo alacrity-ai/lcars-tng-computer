@@ -63,7 +63,7 @@ import type {
   RosterDisplay,
   TngMessage,
 } from "@tng/contract";
-import { EFFORT_LEVELS, MODEL_VALUE_RE } from "@tng/contract";
+import { EFFORT_LEVELS, MODEL_VALUE_RE, isInjectableText } from "@tng/contract";
 import { cloudFetch, getItem } from "@tng/library-client";
 
 const PORT = Number(process.env.TNG_BRIDGE_PORT ?? 3791);
@@ -343,13 +343,15 @@ function onTurnEnd(): void {
     pushState();
     return;
   }
-  // Queued /model / /effort changes land on the idle composer first; the
-  // next command dispatches a beat later so the keystrokes can't interleave.
-  if (flushPendingPrefs()) {
+  // Queued /model / /effort changes and typed lines (TNGC-74) land on the
+  // idle composer first; the next command dispatches a beat later so the
+  // keystrokes can't interleave.
+  const settle = flushPendingInput();
+  if (settle) {
     setTimeout(() => {
       dispatch();
       pushState();
-    }, 600).unref();
+    }, settle + 600).unref();
     return;
   }
   dispatch();
@@ -402,8 +404,10 @@ function requestCompaction(by: string): { ok: boolean; state: string } {
   return { ok: true, state: "injected" };
 }
 
-/** The ONLY text the bridge may ever type into the session. Voice/cloud must
-    never become a general keystroke path into the terminal. */
+/** The only text the compaction path may type. Voice and the session's own
+    output must never become a keystroke path into the terminal; the one
+    deliberate exception is the admin-only inject rail (TNGC-74), which has
+    its own bounds — see requestInject. */
 const INJECT_WHITELIST = new Set(["/compact"]);
 
 function injectCompact(by: string): void {
@@ -474,11 +478,12 @@ function onCompactionEnd(): void {
   console.error("[bridge] memory consolidation complete — dispatcher resuming");
   postCompactionBadge(false);
   sendComputerInfo(true);
-  if (flushPendingPrefs()) {
+  const settle = flushPendingInput();
+  if (settle) {
     setTimeout(() => {
       dispatch();
       pushState();
-    }, 600).unref();
+    }, settle + 600).unref();
   } else {
     dispatch();
     pushState();
@@ -600,13 +605,74 @@ function injectPref(kind: "model" | "effort", value: string, by: string): void {
   });
 }
 
-/** Applied at turn end / compaction end — one settle beat before dispatch so
-    the typed slash commands land on an idle composer. */
-function flushPendingPrefs(): boolean {
-  if (pendingPrefs.size === 0 || busy || compacting || paused) return false;
-  for (const [kind, value] of pendingPrefs) injectPref(kind, value, "queued");
+// ---- direct keystrokes (TNGC-74) ----------------------------------------------
+// The rail where relayed text DOES reach the terminal: an admin types a line
+// in the Computer card and the bridge types it into the composer — /clear,
+// /context, an answer to an interactive prompt. Bounded by isInjectableText
+// (one printable line), typed literally so tmux reads characters and never
+// key names, and held until idle like the pref changes.
+
+const pendingInjects: string[] = [];
+const MAX_PENDING_INJECTS = 5;
+
+function requestInject(value: unknown, by: string): { ok: boolean; state: string } {
+  if (!isInjectableText(value)) return { ok: false, state: "invalid text" };
+  const text = value.trim();
+  if (busy || compacting || paused) {
+    if (pendingInjects.length >= MAX_PENDING_INJECTS) return { ok: false, state: "too many queued" };
+    pendingInjects.push(text);
+    console.error(`[bridge] keystrokes queued by ${by} — session busy, typing at next idle`);
+    pushState();
+    return { ok: true, state: "queued" };
+  }
+  injectText(text, by);
+  return { ok: true, state: "injected" };
+}
+
+function injectText(text: string, by: string): void {
+  console.error(`[bridge] typing "${text.slice(0, 80)}" via tmux (requested by ${by})`);
+  // `-l --`: literal characters, not key names — without it a line containing
+  // "C-c" or "Escape" would arrive as those keys. Enter follows separately.
+  execFile("tmux", ["send-keys", "-t", TMUX_SESSION, "-l", "--", text], (err) => {
+    if (err) {
+      console.error(`[bridge] keystroke injection failed: ${err.message} — is the session in tmux?`);
+      return;
+    }
+    execFile("tmux", ["send-keys", "-t", TMUX_SESSION, "Enter"], (err2) => {
+      if (err2) {
+        console.error(`[bridge] keystroke submit failed: ${err2.message}`);
+        return;
+      }
+      // Nothing acks a free-form line (/clear rolls the transcript, which
+      // SessionStart re-binds) — re-read what the bridge can see.
+      setTimeout(() => {
+        pollPrefs();
+        pollContext();
+        sendComputerInfo(true);
+      }, 2_500).unref();
+    });
+  });
+}
+
+/** Applied at turn end / compaction end: queued prefs first, then queued
+    keystrokes in typing order, a settle beat apart so the session's composer
+    sees separate submissions. Returns how long the flush takes (0 = nothing
+    to flush) — the caller holds dispatch that long so no command can start a
+    turn mid-typing. */
+function flushPendingInput(): number {
+  if (busy || compacting || paused) return 0;
+  if (pendingPrefs.size === 0 && pendingInjects.length === 0) return 0;
+  let delay = 0;
+  for (const [kind, value] of pendingPrefs) {
+    setTimeout(() => injectPref(kind, value, "queued"), delay).unref();
+    delay += 600;
+  }
   pendingPrefs.clear();
-  return true;
+  for (const text of pendingInjects.splice(0)) {
+    setTimeout(() => injectText(text, "queued"), delay).unref();
+    delay += 600;
+  }
+  return delay;
 }
 
 // A lost SessionStart hook must degrade, not wedge the house (TNGC-32).
@@ -821,6 +887,7 @@ const http = createServer((req, res) => {
       model: lastModel ?? null,
       effort: lastEffort ?? null,
       pendingPrefs: Object.fromEntries(pendingPrefs),
+      pendingInjects: pendingInjects.length, // TNGC-74
       transcript: sessionTranscript,
       // TNGC-40: plugin control plane visibility
       plugins: pluginRoster(),
@@ -889,6 +956,13 @@ const http = createServer((req, res) => {
         body.value,
         typeof body.by === "string" && body.by ? body.by : "local",
       );
+      respond(result.ok ? 202 : 400, result);
+    });
+  }
+  // Local keystroke injection (same handler the cloud `inject` frame uses).
+  if (req.method === "POST" && req.url === "/inject") {
+    return readBody((body) => {
+      const result = requestInject(body.text, typeof body.by === "string" && body.by ? body.by : "local");
       respond(result.ok ? 202 : 400, result);
     });
   }
@@ -1540,6 +1614,12 @@ async function executeControl(ctl: CloudControlCommand): Promise<void> {
     } else if (ctl.op === "compact") {
       path = "/compact";
       body = { by: ctl.user };
+    } else if (ctl.op === "inject") {
+      // TNGC-74: a line typed straight into the claude-ops composer.
+      if (isInjectableText(args.text)) {
+        path = "/inject";
+        body = { text: args.text.trim(), by: ctl.user };
+      }
     } else if (ctl.op === "set_pref") {
       const kind = args.kind;
       const value = args.value;
@@ -1854,6 +1934,12 @@ function startCloudLink() {
           // inside — the injected line is built from the value, never trusted).
           const result = requestSetPref(frame.kind, frame.value, typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
           console.error(`[bridge] cloud set_pref ${frame.kind}: ${result.state}`);
+        } else if (frame.type === "inject") {
+          // Admin typed a line in the Computer card (TNGC-74). The worker
+          // enforced the role and the shape; re-validated inside before a
+          // single character reaches the composer.
+          const result = requestInject(frame.text, typeof frame.by === "string" && frame.by ? frame.by : "tricorder");
+          console.error(`[bridge] cloud inject: ${result.state}`);
         } else if (frame.type === "control" && frame.ctl && typeof frame.ctl === "object") {
           // Deterministic plugin op (TNGC-40): straight to the sidecar, even
           // mid-turn — never queued, never near the session.

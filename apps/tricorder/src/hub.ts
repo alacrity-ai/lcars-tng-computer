@@ -246,6 +246,17 @@ export class TenantHub extends DurableObject<Env> {
       return json({ ok: true }, 202);
     }
 
+    // TNGC-74: admin typed a line for the session's composer — relay to the
+    // bridge (role AND shape validated in the Worker, re-validated bridge-
+    // side). Ephemeral: keystrokes from an hour ago must die, not fire.
+    if (url.pathname === "/inject" && req.method === "POST") {
+      if (!this.online()) return json({ error: "Computer offline" }, 409);
+      const { text, by } = (await req.json()) as { text?: string; by?: string };
+      if (typeof text !== "string" || !text.trim()) return json({ error: "text is required" }, 400);
+      this.sendDown({ v: 1, type: "inject", text: text.trim(), by });
+      return json({ ok: true }, 202);
+    }
+
     // TNGC-32: admin pressed Compact — relay to the bridge (role enforced in
     // the Worker). Ephemeral like withdraw: no storage, no replay.
     if (url.pathname === "/compact" && req.method === "POST") {

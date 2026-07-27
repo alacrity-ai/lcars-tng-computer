@@ -19,7 +19,10 @@
  *  - context % / model from transcript usage lines; effort from the config
  *    dir's settings.json.
  *  - /compact /model /effort are typed via `tmux send-keys` from validated
- *    values ONLY — the HTTP surface can never become a keystroke path.
+ *    values ONLY — those three lines are rebuilt here, never relayed.
+ *  - /inject (TNGC-74) is the deliberate exception: one printable line,
+ *    typed literally, so an admin can send /clear or any other slash
+ *    command from the phone. Admin-gated at the Worker, bounded here.
  *
  * TNG_OPS gate: without TNG_OPS=1 in the environment (i.e. any interactive
  * claude session opened in the claude_ops repo, rather than `make
@@ -45,10 +48,12 @@ const COMPACT_ACK_MS = 12_000;
 const COMPACT_FAILSAFE_MS = 10 * 60_000;
 const BUSY_FAILSAFE_MS = 15 * 60_000;
 
-// Mirrors @tng/contract (EFFORT_LEVELS / MODEL_VALUE_RE) — this file is
-// zero-dep on purpose, so the values are copied, not imported.
+// Mirrors @tng/contract (EFFORT_LEVELS / MODEL_VALUE_RE / isInjectableText) —
+// this file is zero-dep on purpose, so the values are copied, not imported.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max", "ultracode", "auto"]);
 const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
+const INJECT_MAX_CHARS = 400;
+const MAX_PENDING_INJECTS = 5;
 
 const log = (m) => console.error(`[opsbridge] ${m}`);
 
@@ -164,8 +169,9 @@ function onTurnEnd() {
     injectCompact();
     return;
   }
-  if (flushPendingPrefs()) {
-    setTimeout(dispatch, 600).unref();
+  const settle = flushPendingInput();
+  if (settle) {
+    setTimeout(dispatch, settle + 600).unref();
     return;
   }
   dispatch();
@@ -303,6 +309,17 @@ function tmuxSend(line, cb) {
   execFile("tmux", ["send-keys", "-t", TMUX_SESSION, line, "Enter"], cb);
 }
 
+/** TNGC-74: type free text. `-l --` makes tmux read the argument as
+    characters, never as key NAMES — without it a line containing "C-c" or
+    "Escape" would arrive as those keys. Enter follows as its own send so the
+    literal flag can't swallow it. */
+function tmuxType(text, cb) {
+  execFile("tmux", ["send-keys", "-t", TMUX_SESSION, "-l", "--", text], (err) => {
+    if (err) return cb(err);
+    execFile("tmux", ["send-keys", "-t", TMUX_SESSION, "Enter"], cb);
+  });
+}
+
 function requestCompaction() {
   if (compacting) return { ok: false, state: "already-compacting" };
   if (compactPending || compactAckTimer) return { ok: false, state: "already-requested" };
@@ -358,7 +375,8 @@ function onCompactionEnd() {
   compacting = false;
   paused = false;
   log("compaction complete — resuming");
-  if (flushPendingPrefs()) setTimeout(dispatch, 600).unref();
+  const settle = flushPendingInput();
+  if (settle) setTimeout(dispatch, settle + 600).unref();
   else dispatch();
   setTimeout(pollContext, 3_000).unref();
 }
@@ -443,11 +461,73 @@ function injectPref(kind, value) {
   });
 }
 
-function flushPendingPrefs() {
-  if (pendingPrefs.size === 0 || busy || compacting || paused) return false;
-  for (const [kind, value] of pendingPrefs) injectPref(kind, value);
-  pendingPrefs.clear();
+// ---- direct keystrokes (TNGC-74) ----------------------------------------------
+// The one rail that types text the agent did not build. Bounded by the same
+// rule as the contract's isInjectableText (one printable line), typed
+// literally, and held until the session is idle so it lands on an empty
+// composer instead of interleaving with a running turn.
+
+const pendingInjects = [];
+
+function injectableText(v) {
+  if (typeof v !== "string") return false;
+  const t = v.trim();
+  if (t.length < 1 || t.length > INJECT_MAX_CHARS) return false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return false;
+  }
   return true;
+}
+
+function requestInject(value) {
+  if (!injectableText(value)) return { ok: false, state: "invalid text" };
+  const text = value.trim();
+  if (busy || compacting || paused) {
+    if (pendingInjects.length >= MAX_PENDING_INJECTS) return { ok: false, state: "too many queued" };
+    pendingInjects.push(text);
+    log(`queued keystrokes "${text.slice(0, 60)}" — session busy`);
+    return { ok: true, state: "queued" };
+  }
+  injectText(text);
+  return { ok: true, state: "injected" };
+}
+
+function injectText(text) {
+  log(`typing "${text.slice(0, 80)}" via tmux`);
+  tmuxType(text, (err) => {
+    if (err) {
+      log(`keystroke injection failed: ${err.message} — is the session in tmux?`);
+      return;
+    }
+    // Nothing acks a free-form line: /clear rolls the transcript (SessionStart
+    // re-binds it), /model shows on the next reply. Re-read what we can.
+    setTimeout(() => {
+      pollPrefs();
+      pollContext();
+    }, 2_500).unref();
+  });
+}
+
+/** Applied at turn end / compaction end: queued prefs first, then queued
+    keystrokes in the order they were typed, one settle beat apart so the
+    session's composer sees them as separate submissions. Returns how long
+    the flush takes (0 = nothing to flush) — the caller holds dispatch that
+    long so a command can't start a turn mid-typing. */
+function flushPendingInput() {
+  if (busy || compacting || paused) return 0;
+  if (pendingPrefs.size === 0 && pendingInjects.length === 0) return 0;
+  let delay = 0;
+  for (const [kind, value] of pendingPrefs) {
+    setTimeout(() => injectPref(kind, value), delay).unref();
+    delay += 600;
+  }
+  pendingPrefs.clear();
+  for (const text of pendingInjects.splice(0)) {
+    setTimeout(() => injectText(text), delay).unref();
+    delay += 600;
+  }
+  return delay;
 }
 
 // ---- state + HTTP surface ------------------------------------------------------
@@ -457,6 +537,8 @@ function state() {
     ok: true,
     status: compacting ? "compacting" : busy ? "working" : "idle",
     queued: queue.length,
+    /** TNGC-74: keystroke lines waiting for the session to go idle. */
+    pendingInjects: pendingInjects.length,
     lastCommand,
     lastResult,
     model: lastModel,
@@ -515,6 +597,15 @@ if (ACTIVE) {
     if (req.method === "POST" && req.url === "/set-pref") {
       return readBody((body) => {
         const result = requestSetPref(typeof body.kind === "string" ? body.kind : "", body.value);
+        respond(result.ok ? 202 : 400, result);
+      });
+    }
+    // TNGC-74: type a line straight into the session ("/clear", "/context",
+    // an answer to an interactive prompt). Admin-gated at the Worker; the
+    // shape is re-checked here because this agent is the last gate.
+    if (req.method === "POST" && req.url === "/inject") {
+      return readBody((body) => {
+        const result = requestInject(body.text);
         respond(result.ok ? 202 : 400, result);
       });
     }

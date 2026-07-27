@@ -15,6 +15,8 @@ import { Hono, type Context } from "hono";
 import {
   CONTRACT_VERSION,
   EFFORT_LEVELS,
+  INJECT_MAX_CHARS,
+  isInjectableText,
   MODEL_CHOICES,
   MODEL_VALUE_RE,
   type PluginTile,
@@ -786,7 +788,8 @@ app.get("/api/plugins/claudeops/state", async (c) => {
   return c.json({ ...body, choices: { models: MODEL_CHOICES, efforts: EFFORT_LEVELS } });
 });
 
-// Three ops: send (a command for the session), compact, set_pref. Args are
+// Four ops: send (a command for the session), inject (keystrokes typed
+// straight into its composer — TNGC-74), compact, set_pref. Args are
 // validated and REBUILT here (and again bridge-side, and again agent-side).
 app.post("/api/plugins/claudeops/control", async (c) => {
   const denied = await claudeopsGate(c);
@@ -807,6 +810,13 @@ app.post("/api/plugins/claudeops/control", async (c) => {
     args.text = text;
   } else if (body.op === "compact") {
     op = "compact";
+  } else if (body.op === "inject") {
+    // TNGC-74: typed straight into the session's composer, not a prompt.
+    if (!isInjectableText(body.text)) {
+      return c.json({ error: `inject needs one printable line (1..${INJECT_MAX_CHARS} chars)` }, 400);
+    }
+    op = "inject";
+    args.text = body.text.trim();
   } else if (body.op === "set_pref") {
     const kind = body.kind;
     const value = body.value;
@@ -819,7 +829,7 @@ app.post("/api/plugins/claudeops/control", async (c) => {
     args.kind = kind;
     args.value = value;
   } else {
-    return c.json({ error: "op must be send, compact, or set_pref" }, 400);
+    return c.json({ error: "op must be send, inject, compact, or set_pref" }, 400);
   }
   const ctl = {
     id: crypto.randomUUID(),
@@ -839,7 +849,7 @@ app.post("/api/plugins/claudeops/control", async (c) => {
   );
   if (res.status === 202) {
     const detail = JSON.stringify(
-      op === "send" ? { op, text: (args.text as string).slice(0, 140) } : { op, ...args },
+      op === "send" || op === "inject" ? { op, text: (args.text as string).slice(0, 140) } : { op, ...args },
     ).slice(0, 200);
     c.executionCtx.waitUntil(
       c.env.DB.batch([
@@ -926,6 +936,42 @@ app.post("/api/admin/pref", async (c) => {
       body: JSON.stringify({ kind, value, by: s.userHandle }),
     }),
   );
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
+// Type a line straight into the session (TNGC-74). The other three controls
+// REBUILD their slash command from a validated value; this one relays the
+// admin's own text, so the bound is its shape — one printable line, checked
+// here, again at the DO's edge, and again bridge-side before tmux sees it.
+app.post("/api/admin/inject", async (c) => {
+  const s = c.get("session");
+  let body: { text?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  if (!isInjectableText(body.text)) {
+    return c.json({ error: `text must be one printable line (1..${INJECT_MAX_CHARS} chars)` }, 400);
+  }
+  const text = body.text.trim();
+  const res = await hub(c, s.tenantId).fetch(
+    new Request("https://hub/inject", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, by: s.userHandle }),
+    }),
+  );
+  if (res.status === 202) {
+    const ts = Date.now();
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(
+        "INSERT INTO control_log (id, tenant_id, user_handle, plugin_id, op, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(crypto.randomUUID(), s.tenantId, s.userHandle, "computer", "inject", text.slice(0, 200), ts)
+        .run(),
+    );
+  }
   return new Response(res.body, { status: res.status, headers: res.headers });
 });
 

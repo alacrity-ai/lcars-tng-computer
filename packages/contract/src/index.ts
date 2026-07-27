@@ -114,6 +114,34 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
     whitespace or metacharacters can ever reach the injected command line. */
 export const MODEL_VALUE_RE = /^[a-z0-9][a-z0-9.[\]-]{1,63}$/;
 
+// ---- direct keystrokes (TNGC-74) ----------------------------------------------
+// /model, /effort and /compact are REBUILT from validated values — the text
+// never travels. This is the one rail where it does: an admin types a line
+// (`/clear`, `/context`, an answer to an interactive prompt) and the bridge
+// types it verbatim into the session's composer. Bounded, not free:
+//   - admin-only at the Worker, on both the Computer card and Claude Ops;
+//   - ONE printable line, so no control characters — a "\n" would submit
+//     something unreviewed, and tmux key names like C-c / Escape can only
+//     act as keys if they arrive as keys, which literal mode forbids;
+//   - typed with `send-keys -l -- <text>` then a separate Enter, so tmux
+//     reads it as text, never as a key name;
+//   - queued while a turn runs, flushed at the next idle beat.
+
+export const INJECT_MAX_CHARS = 400;
+
+/** One printable line, 1..INJECT_MAX_CHARS after trimming. Enforced at the
+    Worker, again at the bridge, and again at the ops-agent. */
+export function isInjectableText(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  const t = v.trim();
+  if (t.length < 1 || t.length > INJECT_MAX_CHARS) return false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return false; // newline, tab, ESC, DEL…
+  }
+  return true;
+}
+
 // ---- tricorder plugins (TNGC-40) ----------------------------------------------
 // The deterministic control plane: basic operations (lights first) route
 // phone → Worker/DO → bridge → plugin sidecar, never the session. The bridge
@@ -227,6 +255,10 @@ export interface MediaState {
     - set_pref (TNGC-32 follow-up): an admin set the session model or
       effort — the bridge injects `/model <value>` / `/effort <value>`,
       value validated at the worker AND re-validated bridge-side.
+    - inject (TNGC-74): an admin typed a line into the Computer card —
+      the bridge types it VERBATIM into the composer (`/clear`, `/context`,
+      an answer to an interactive prompt). The one frame whose text
+      reaches the terminal; see isInjectableText for what bounds it.
     - control (TNGC-40): a deterministic plugin op — the bridge POSTs it to
       the plugin sidecar immediately (no queue, no session turn, even
       mid-turn). Ephemeral: never stored, never replayed.
@@ -245,6 +277,7 @@ export type LinkDownFrame =
   | { v: typeof CONTRACT_VERSION; type: "display_client"; name: string; msg: unknown }
   | { v: typeof CONTRACT_VERSION; type: "compact"; by?: string }
   | { v: typeof CONTRACT_VERSION; type: "set_pref"; kind: "model" | "effort"; value: string; by?: string }
+  | { v: typeof CONTRACT_VERSION; type: "inject"; text: string; by?: string }
   | { v: typeof CONTRACT_VERSION; type: "control"; ctl: CloudControlCommand }
   | {
       v: typeof CONTRACT_VERSION;
